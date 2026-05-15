@@ -24,10 +24,8 @@ import {
   LockKeyhole,
   LogIn,
   LogOut,
-  Mail,
   Mic,
   PauseCircle,
-  Phone,
   Plus,
   Save,
   Send,
@@ -40,7 +38,7 @@ import {
 } from "lucide-react";
 import { aiTaskPrompts, buildAgentPrompt, buildStudentArchiveSnapshot, postgresqlArchiveTables, shuziLearningCoachAgent } from "./aiAgent.js";
 import { apiRequest, mapAccountToMember, setAuthToken } from "./apiClient.js";
-import { learningTokenPackages, learningTokenRules, storagePlans } from "./membershipConfig.js";
+import { storagePlans } from "./membershipConfig.js";
 import "./styles.css";
 
 const subPages = [
@@ -57,11 +55,9 @@ const subPages = [
   { id: "freeAsk", label: "AI自由问", icon: Sparkles },
 ];
 
-const emailProviders = ["网易邮箱", "新浪邮箱", "谷歌邮箱", "其他邮箱"];
-
 const memberPlans = [
   { id: "monthly", name: "VIP月度会员", price: "¥19.9/月", description: `适合单个孩子持续使用AI分析、错题训练和下载资料，包含${storagePlans.vip.storageGb}GB基础存储。` },
-  { id: "season", name: "VIP季度会员", price: "¥59/季", description: `适合完整跟进一个学习阶段，仍按AI真实成本的${learningTokenRules.apiCostMarkup}倍关系消耗LT。` },
+  { id: "season", name: "VIP季度会员", price: "¥59/季", description: "适合完整跟进一个学习阶段，持续使用AI分析、错题训练、资料下载和个人档案能力。" },
 ];
 
 const defaultForumPosts = [
@@ -1441,7 +1437,7 @@ function App() {
     isLoggedIn: false,
     isPaid: false,
     identifier: "",
-    provider: "网易邮箱",
+    provider: "用户名",
     plan: "",
     ltBalance: 0,
     storageTotalMb: 50,
@@ -1454,10 +1450,10 @@ function App() {
   });
   const [authForm, setAuthForm] = useState({
     mode: "register",
-    channel: "email",
-    provider: "网易邮箱",
-    identifier: "",
-    code: "",
+    username: "",
+    displayName: "",
+    password: "",
+    confirmPassword: "",
   });
   const [currentStep, setCurrentStep] = useState(0);
   const [answers, setAnswers] = useState(defaultAnswers);
@@ -1587,14 +1583,27 @@ function App() {
   }
 
   async function completeAuth() {
-    const identifier = authForm.identifier.trim() || (authForm.channel === "email" ? "student@example.com" : "13800000000");
+    const username = authForm.username.trim();
+    const password = authForm.password;
+    if (!username || username.length < 3) {
+      setAuthModal((prev) => ({ ...prev, message: "请设置至少3个字符的用户名。" }));
+      return;
+    }
+    if (!password || password.length < 6) {
+      setAuthModal((prev) => ({ ...prev, message: "密码至少需要6位。" }));
+      return;
+    }
+    if (authForm.mode === "register" && password !== authForm.confirmPassword) {
+      setAuthModal((prev) => ({ ...prev, message: "两次输入的密码不一致。" }));
+      return;
+    }
     try {
       const data = await apiRequest(authForm.mode === "register" ? "/auth/register" : "/auth/login", {
         method: "POST",
         body: JSON.stringify({
-          channel: authForm.channel,
-          identifier,
-          provider: authForm.channel === "email" ? authForm.provider : "手机号",
+          username,
+          password,
+          displayName: authForm.displayName.trim(),
         }),
       });
       setAuthToken(data.token);
@@ -1636,35 +1645,12 @@ function App() {
     }
   }
 
-  async function requestLtOrder(packageId) {
-    if (!member.isLoggedIn) {
-      setAuthModal((prev) => ({ ...prev, message: "请先注册或登录，再提交LT充值申请。" }));
-      return;
-    }
-    try {
-      const data = await apiRequest("/lt/orders", {
-        method: "POST",
-        body: JSON.stringify({ packageId }),
-      });
-      setAccountNotice(data.message || "已提交LT充值申请。");
-      setAuthModal((prev) => ({
-        ...prev,
-        message: "已提交LT充值申请。当前版本需要管理员确认后入账。",
-      }));
-    } catch (error) {
-      setAuthModal((prev) => ({
-        ...prev,
-        message: error.message || "LT充值申请提交失败。",
-      }));
-    }
-  }
-
   function logoutMember() {
     pendingMemberActionRef.current = null;
     memberActionBypassRef.current = false;
     setAuthToken("");
     setAccountNotice("");
-    setMember({ isLoggedIn: false, isPaid: false, identifier: "", provider: "网易邮箱", plan: "", ltBalance: 0, storageTotalMb: 50 });
+    setMember({ isLoggedIn: false, isPaid: false, identifier: "", provider: "用户名", plan: "", ltBalance: 0, storageTotalMb: 50 });
   }
 
   function closeAuthModal() {
@@ -2391,12 +2377,12 @@ function App() {
 
         <div className="member-sidebar-card">
           <span className="eyebrow">会员状态</span>
-          <strong>{member.isPaid ? `${member.plan || "正式会员"}` : member.isLoggedIn ? "已登录 · 待开通" : "游客浏览"}</strong>
-          <p>
-            {member.isLoggedIn
-              ? `${member.provider} · ${member.identifier} · ${member.ltBalance || 0} LT · ${member.storageTotalMb || 50}MB`
+            <strong>{member.isPaid ? `${member.plan || "正式会员"}` : member.isLoggedIn ? "已登录 · 待开通" : "游客浏览"}</strong>
+            <p>
+              {member.isLoggedIn
+              ? `${member.provider} · ${member.identifier} · 存储空间 ${member.storageTotalMb || 50}MB`
               : "可浏览全部功能，AI分析和下载需登录并开通会员。"}
-          </p>
+            </p>
           {accountNotice && <p className="account-notice">{accountNotice}</p>}
         </div>
       </aside>
@@ -2404,7 +2390,7 @@ function App() {
       <main className="workspace">
         <header className="topbar">
           <div className="topbar-actions">
-            <button className={member.isPaid ? "member-pill is-active" : "member-pill"} onClick={() => setAuthModal({ open: true, actionName: "会员中心", message: "管理登录、邮箱/手机号绑定和会员开通状态。" })}>
+            <button className={member.isPaid ? "member-pill is-active" : "member-pill"} onClick={() => setAuthModal({ open: true, actionName: "会员中心", message: "管理登录账号和会员开通状态。" })}>
               {member.isPaid ? <Crown size={17} /> : <LockKeyhole size={17} />}
               {member.isPaid ? "正式会员" : member.isLoggedIn ? "开通会员" : "登录 / 注册"}
             </button>
@@ -2584,7 +2570,6 @@ function App() {
           setAuthForm={setAuthForm}
           completeAuth={completeAuth}
           activateMember={activateMember}
-          requestLtOrder={requestLtOrder}
           closeAuthModal={closeAuthModal}
         />
       )}
@@ -2853,7 +2838,7 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, update
   );
 }
 
-function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, activateMember, requestLtOrder, closeAuthModal }) {
+function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, activateMember, closeAuthModal }) {
   const loggedIn = member.isLoggedIn;
   const paid = member.isPaid;
   return (
@@ -2889,47 +2874,45 @@ function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, a
               </button>
             </div>
 
-            <div className="auth-channel-grid">
-              <button type="button" className={authForm.channel === "email" ? "is-active" : ""} onClick={() => setAuthForm((prev) => ({ ...prev, channel: "email" }))}>
-                <Mail size={18} />
-                邮箱
-              </button>
-              <button type="button" className={authForm.channel === "phone" ? "is-active" : ""} onClick={() => setAuthForm((prev) => ({ ...prev, channel: "phone" }))}>
-                <Phone size={18} />
-                手机号
-              </button>
-            </div>
-
-            {authForm.channel === "email" && (
+            {authForm.mode === "register" && (
               <label>
-                <span>绑定邮箱类型</span>
-                <select value={authForm.provider} onChange={(event) => setAuthForm((prev) => ({ ...prev, provider: event.target.value }))}>
-                  {emailProviders.map((provider) => (
-                    <option key={provider} value={provider}>
-                      {provider}
-                    </option>
-                  ))}
-                </select>
+                <span>学生姓名或昵称</span>
+                <input
+                  value={authForm.displayName}
+                  onChange={(event) => setAuthForm((prev) => ({ ...prev, displayName: event.target.value }))}
+                  placeholder="例如：张同学"
+                />
               </label>
             )}
 
             <label>
-              <span>{authForm.channel === "email" ? "邮箱地址" : "手机号"}</span>
+              <span>用户名</span>
               <input
-                value={authForm.identifier}
-                onChange={(event) => setAuthForm((prev) => ({ ...prev, identifier: event.target.value }))}
-                placeholder={authForm.channel === "email" ? "例如：student@163.com" : "例如：13800000000"}
+                value={authForm.username}
+                onChange={(event) => setAuthForm((prev) => ({ ...prev, username: event.target.value }))}
+                placeholder="请设置一个容易记住的用户名"
               />
             </label>
             <label>
-              <span>验证码</span>
-              <div className="code-row">
-                <input value={authForm.code} onChange={(event) => setAuthForm((prev) => ({ ...prev, code: event.target.value }))} placeholder="请输入验证码" />
-                <button type="button" className="ghost-action">
-                  获取验证码
-                </button>
-              </div>
+              <span>密码</span>
+              <input
+                type="password"
+                value={authForm.password}
+                onChange={(event) => setAuthForm((prev) => ({ ...prev, password: event.target.value }))}
+                placeholder="至少6位"
+              />
             </label>
+            {authForm.mode === "register" && (
+              <label>
+                <span>确认密码</span>
+                <input
+                  type="password"
+                  value={authForm.confirmPassword}
+                  onChange={(event) => setAuthForm((prev) => ({ ...prev, confirmPassword: event.target.value }))}
+                  placeholder="再次输入密码"
+                />
+              </label>
+            )}
             <button type="button" className="primary-action full-width" onClick={completeAuth}>
               <LogIn size={17} />
               {authForm.mode === "register" ? "注册并登录" : "登录账号"}
@@ -2943,7 +2926,7 @@ function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, a
               {paid ? <ShieldCheck size={22} /> : <Crown size={22} />}
               <div>
                 <strong>{paid ? `${member.plan || "正式会员"}已开通` : "账号已登录，尚未开通会员"}</strong>
-                <p>{member.provider} · {member.identifier} · {member.ltBalance || 0} LT</p>
+                <p>{member.provider} · {member.identifier}</p>
               </div>
             </div>
 
@@ -2970,23 +2953,10 @@ function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, a
                 <p>扩容包支持 {storagePlans.expansion.map((item) => item.storageGb).join("GB / ")}GB，用于长期保存试卷、错题、语音、知识图和PDF报告。</p>
               </article>
               <article>
-                <span>LT计费规则</span>
-                <strong>1 LT = ¥{learningTokenRules.cnyPerLearningToken.toFixed(2)}</strong>
-                <p>后台按真实API成本 × {learningTokenRules.apiCostMarkup} 倍扣除LT；运营汇率暂按 {learningTokenRules.operatingUsdCnyRate} 计算，可在后台调整。</p>
+                <span>会员权益</span>
+                <strong>学习档案 · AI分析 · 资料下载</strong>
+                <p>会员可以保存个人学习档案，使用AI分析、错题训练、知识图生成和学习资料下载等能力。</p>
               </article>
-            </div>
-
-            <div className="lt-package-grid">
-              {learningTokenPackages.map((pack) => (
-                <article key={pack.id} className="lt-package-card">
-                  <span>¥{pack.priceCny}</span>
-                  <strong>{pack.learningTokens.toLocaleString("zh-CN")} LT</strong>
-                  <p>约覆盖真实API成本 ¥{pack.maxApiCostCny} / ${pack.maxApiCostUsd}</p>
-                  <button type="button" className="ghost-action" onClick={() => requestLtOrder(pack.id)}>
-                    申请充值
-                  </button>
-                </article>
-              ))}
             </div>
           </div>
         )}

@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import fs from "node:fs";
+import bcrypt from "bcryptjs";
 import { ensureSchema } from "./schema.js";
 import { query, withTransaction } from "./db.js";
 import { requireAdminToken, requireAuth, signToken } from "./auth.js";
@@ -174,19 +175,30 @@ app.get("/api/health", async (req, res) => {
 });
 
 app.post("/api/auth/register", async (req, res) => {
-  const { channel = "email", identifier, provider = "unknown", displayName = "" } = req.body || {};
-  const normalized = normalizeIdentifier(identifier);
-  if (!["email", "phone"].includes(channel)) return res.status(400).json({ error: "INVALID_CHANNEL" });
-  if (!normalized) return res.status(400).json({ error: "IDENTIFIER_REQUIRED", message: "请输入邮箱或手机号。" });
+  const { username, password, displayName = "" } = req.body || {};
+  const normalized = normalizeIdentifier(username);
+  if (!normalized || normalized.length < 3) {
+    return res.status(400).json({ error: "USERNAME_REQUIRED", message: "用户名至少需要3个字符。" });
+  }
+  if (!password || String(password).length < 6) {
+    return res.status(400).json({ error: "PASSWORD_REQUIRED", message: "密码至少需要6位。" });
+  }
 
   const result = await withTransaction(async (client) => {
+    const existing = await client.query("SELECT id FROM users WHERE identifier = $1", [normalized]);
+    if (existing.rows[0]) {
+      const error = new Error("这个用户名已经被使用，请换一个用户名。");
+      error.status = 409;
+      error.code = "USERNAME_EXISTS";
+      throw error;
+    }
+    const passwordHash = await bcrypt.hash(String(password), 12);
     const user = (
       await client.query(
-        `INSERT INTO users (channel, identifier, provider, display_name)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (identifier) DO UPDATE SET provider = EXCLUDED.provider, updated_at = now()
+        `INSERT INTO users (channel, identifier, provider, display_name, password_hash)
+         VALUES ($1, $2, $3, $4, $5)
          RETURNING *`,
-        [channel, normalized, provider, displayName || normalized]
+        ["username", normalized, "用户名密码", displayName || normalized, passwordHash]
       )
     ).rows[0];
     const student = await getOrCreateStudent(client, user, displayName);
@@ -198,11 +210,13 @@ app.post("/api/auth/register", async (req, res) => {
 });
 
 app.post("/api/auth/login", async (req, res) => {
-  const { identifier } = req.body || {};
-  const normalized = normalizeIdentifier(identifier);
+  const { username, password } = req.body || {};
+  const normalized = normalizeIdentifier(username);
   const result = await query("SELECT * FROM users WHERE identifier = $1", [normalized]);
   const user = result.rows[0];
   if (!user) return res.status(404).json({ error: "USER_NOT_FOUND", message: "账号不存在，请先注册。" });
+  const isValid = user.password_hash ? await bcrypt.compare(String(password || ""), user.password_hash) : false;
+  if (!isValid) return res.status(401).json({ error: "INVALID_PASSWORD", message: "用户名或密码不正确。" });
   res.json({ token: signToken(user), account: await buildAccountSnapshot(user.id) });
 });
 

@@ -4,8 +4,8 @@
 
 - PostgreSQL 学生档案数据库
 - 注册 / 登录 / 当前账号状态
-- 会员状态、容量额度、LT余额
-- 手动会员开通与 LT 充值接口
+- 会员状态、容量额度
+- 手动会员开通接口
 - 学情问卷、学情陈述写入学生档案
 - 试卷/错题图片分析、语音转写、相似题生成和知识图生成
 
@@ -40,7 +40,7 @@ curl -X POST http://127.0.0.1:3001/api/admin/memberships/activate \
   -d '{"identifier":"student@example.com","planId":"monthly"}'
 ```
 
-## 管理员手动充值 LT
+## 管理员手动调整余额
 
 ```bash
 curl -X POST http://127.0.0.1:3001/api/admin/lt/recharge \

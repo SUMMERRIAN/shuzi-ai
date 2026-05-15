@@ -6,7 +6,7 @@ export async function ensureSchema() {
 
     CREATE TABLE IF NOT EXISTS users (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      channel TEXT NOT NULL CHECK (channel IN ('email', 'phone')),
+      channel TEXT NOT NULL CHECK (channel IN ('username', 'email', 'phone')),
       identifier TEXT NOT NULL UNIQUE,
       provider TEXT NOT NULL DEFAULT 'unknown',
       display_name TEXT,
@@ -212,5 +212,9 @@ export async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_memberships_user_id ON student_memberships(user_id);
     CREATE INDEX IF NOT EXISTS idx_archive_student_type ON student_archive_events(student_id, event_type);
     CREATE INDEX IF NOT EXISTS idx_uploaded_files_user_id ON uploaded_files(user_id);
+  `);
+  await query(`
+    ALTER TABLE users DROP CONSTRAINT IF EXISTS users_channel_check;
+    ALTER TABLE users ADD CONSTRAINT users_channel_check CHECK (channel IN ('username', 'email', 'phone'));
   `);
 }
