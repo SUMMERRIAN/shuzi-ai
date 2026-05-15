@@ -651,8 +651,70 @@ p {
   gap: 14px;
 }
 
+.checkout-section,
+.checkout-confirm-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #dfe5da;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.checkout-heading,
+.checkout-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.checkout-heading h3,
+.checkout-confirm-panel h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.checkout-heading strong,
+.checkout-summary strong,
+.checkout-confirm-panel strong {
+  color: #008653;
+  font-size: 22px;
+}
+
+.selectable-grid {
+  margin-top: 0;
+}
+
+.selectable-card {
+  text-align: left;
+  cursor: pointer;
+}
+
+.selectable-card.is-selected,
+.token-package-button.is-selected {
+  border-color: #008653;
+  background: #eef8f2;
+  box-shadow: inset 0 0 0 1px #008653;
+}
+
+.checkout-summary {
+  padding: 12px;
+  border: 1px solid #dfe5da;
+  border-radius: 8px;
+  background: #f7fbff;
+}
+
+.payment-reminder {
+  margin: 0;
+  color: #344039;
+  font-weight: 800;
+}
+
 .payment-qr-panel,
-.token-order-panel {
+.token-order-panel,
+.checkout-confirm-panel {
   display: grid;
   gap: 14px;
   padding: 16px;
@@ -662,7 +724,8 @@ p {
 }
 
 .payment-qr-panel h3,
-.token-order-panel h3 {
+.token-order-panel h3,
+.checkout-confirm-panel h3 {
   margin: 0;
   font-size: 18px;
 }
@@ -789,7 +852,7 @@ p {
 }
 
 .admin-control-panel {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .admin-actions {

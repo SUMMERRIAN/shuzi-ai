@@ -75,6 +75,7 @@ async function getPrimaryStudent(user) {
 }
 
 async function assertPaidMember(userId) {
+  await expireOutdatedMemberships(userId);
   const membership = (
     await query("SELECT * FROM student_memberships WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1", [userId])
   ).rows[0];
@@ -87,6 +88,33 @@ async function assertPaidMember(userId) {
     error.code = "MEMBERSHIP_REQUIRED";
     throw error;
   }
+}
+
+async function expireOutdatedMemberships(userId = null) {
+  const params = [];
+  let scope = "";
+  if (userId) {
+    params.push(userId);
+    scope = "AND user_id = $1";
+  }
+  await query(
+    `UPDATE student_memberships
+     SET status = 'expired', updated_at = now()
+     WHERE status = 'active'
+       AND expires_at IS NOT NULL
+       AND expires_at <= now()
+       ${scope}`,
+    params
+  );
+}
+
+function getMembershipWindow(startDate, durationDays) {
+  const rawStart = String(startDate || "").trim();
+  const start = rawStart ? new Date(`${rawStart}T00:00:00+08:00`) : new Date();
+  const startedAt = Number.isNaN(start.getTime()) ? new Date() : start;
+  const days = Math.max(1, Number(durationDays || 31));
+  const expiresAt = new Date(startedAt.getTime() + days * 24 * 60 * 60 * 1000);
+  return { startedAt: startedAt.toISOString(), expiresAt: expiresAt.toISOString(), days };
 }
 
 async function recordTokenUsage(userId, amount, note, meta = {}) {
@@ -141,6 +169,7 @@ function jsonInstruction(schemaDescription) {
 }
 
 async function buildAccountSnapshot(userId) {
+  await expireOutdatedMemberships(userId);
   const userResult = await query("SELECT * FROM users WHERE id = $1", [userId]);
   const user = userResult.rows[0];
   const student = (await query("SELECT * FROM students WHERE user_id = $1 ORDER BY created_at ASC LIMIT 1", [userId])).rows[0];
@@ -152,6 +181,8 @@ async function buildAccountSnapshot(userId) {
   const isPaid =
     membership?.status === "active" &&
     (!membership.expires_at || new Date(membership.expires_at).getTime() > Date.now());
+  const expiresAtMs = membership?.expires_at ? new Date(membership.expires_at).getTime() : null;
+  const daysRemaining = expiresAtMs ? Math.ceil((expiresAtMs - Date.now()) / (24 * 60 * 60 * 1000)) : null;
   return {
     user: toPublicUser(user),
     student: student
@@ -170,6 +201,8 @@ async function buildAccountSnapshot(userId) {
       isPaid,
       startedAt: membership?.started_at || null,
       expiresAt: membership?.expires_at || null,
+      daysRemaining,
+      isExpiringSoon: isPaid && daysRemaining !== null && daysRemaining <= 7,
     },
     wallet: {
       balance: wallet?.balance || 0,
@@ -324,6 +357,7 @@ app.get("/api/account/center", requireAuth, async (req, res) => {
       `SELECT id, order_type, package_id, title, amount_cny, status, created_at, paid_at
        FROM payment_orders
        WHERE user_id = $1
+         AND status = 'paid'
        ORDER BY created_at DESC
        LIMIT 30`,
       [req.user.id]
@@ -658,18 +692,18 @@ app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
 });
 
 app.post("/api/admin/memberships/activate", requireAdminToken, async (req, res) => {
-  const { identifier, planId = "monthly", durationDays, paidAmountCny = 0 } = req.body || {};
+  const { identifier, planId = "monthly", durationDays, paidAmountCny = 0, startDate } = req.body || {};
   const plan = membershipPlans[planId];
   if (!plan || plan.id === "free") return res.status(400).json({ error: "INVALID_PLAN" });
   const user = (await query("SELECT * FROM users WHERE identifier = $1", [normalizeIdentifier(identifier)])).rows[0];
   if (!user) return res.status(404).json({ error: "USER_NOT_FOUND" });
-  const days = Number(durationDays || plan.durationDays || 31);
+  const { startedAt, expiresAt, days } = getMembershipWindow(startDate, durationDays || plan.durationDays || 31);
   const membership = (
     await query(
       `INSERT INTO student_memberships (user_id, plan_id, plan_name, status, started_at, expires_at)
-       VALUES ($1, $2, $3, 'active', now(), now() + ($4 || ' days')::interval)
+       VALUES ($1, $2, $3, 'active', $4, $5)
        RETURNING *`,
-      [user.id, plan.id, plan.name, days]
+      [user.id, plan.id, plan.name, startedAt, expiresAt]
     )
   ).rows[0];
   await query("UPDATE storage_quotas SET base_mb = $2, updated_at = now() WHERE user_id = $1", [user.id, plan.storageMb]);
@@ -677,7 +711,7 @@ app.post("/api/admin/memberships/activate", requireAdminToken, async (req, res) 
     await query(
       `INSERT INTO payment_orders (user_id, order_type, package_id, title, amount_cny, status, provider, meta, paid_at)
        VALUES ($1, 'membership', $2, $3, $4, 'paid', 'manual_admin', $5, now())`,
-      [user.id, plan.id, plan.name, Number(paidAmountCny), JSON.stringify({ adminConfirmed: true })]
+      [user.id, plan.id, plan.name, Number(paidAmountCny), JSON.stringify({ adminConfirmed: true, startedAt, expiresAt, durationDays: days })]
     );
   }
   res.json({ membership, account: await buildAccountSnapshot(user.id) });
@@ -712,6 +746,7 @@ app.post("/api/admin/lt/recharge", requireAdminToken, async (req, res) => {
 });
 
 app.get("/api/admin/users", requireAdminToken, async (req, res) => {
+  await expireOutdatedMemberships();
   const users = (
     await query(
       `SELECT

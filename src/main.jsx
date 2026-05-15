@@ -56,16 +56,16 @@ const subPages = [
 ];
 
 const memberPlans = [
-  { id: "monthly", name: "月付会员", price: "¥19.9/月", description: `适合先体验完整学习系统，包含AI分析、错题训练、资料下载和${storagePlans.vip.storageGb}GB基础存储。` },
-  { id: "season", name: "季付会员", price: "¥59/季", description: "适合跟进一个阶段的学习调整，持续保存个人档案和学习记录。" },
-  { id: "halfYear", name: "半年会员", price: "¥109/半年", description: "适合稳定训练学习方法、错题复测和阶段性学习策略优化。" },
-  { id: "yearly", name: "年度会员", price: "¥199/年", description: "适合长期建立学生学习数据库，持续跟踪学情变化和训练结果。" },
+  { id: "monthly", name: "月付会员", price: "¥19.9/月", priceCny: 19.9, durationDays: 31, description: `适合先体验完整学习系统，包含AI分析、错题训练、资料下载和${storagePlans.vip.storageGb}GB基础存储。` },
+  { id: "season", name: "季付会员", price: "¥59/季", priceCny: 59, durationDays: 93, description: "适合跟进一个阶段的学习调整，持续保存个人档案和学习记录。" },
+  { id: "halfYear", name: "半年会员", price: "¥109/半年", priceCny: 109, durationDays: 186, description: "适合稳定训练学习方法、错题复测和阶段性学习策略优化。" },
+  { id: "yearly", name: "年度会员", price: "¥199/年", priceCny: 199, durationDays: 366, description: "适合长期建立学生学习数据库，持续跟踪学情变化和训练结果。" },
 ];
 
 const tokenPackages = [
-  { id: "token-100", label: "¥100", tokens: 10000 },
-  { id: "token-300", label: "¥300", tokens: 30000 },
-  { id: "token-500", label: "¥500", tokens: 50000 },
+  { id: "token-100", label: "¥100", priceCny: 100, tokens: 10000 },
+  { id: "token-300", label: "¥300", priceCny: 300, tokens: 30000 },
+  { id: "token-500", label: "¥500", priceCny: 500, tokens: 50000 },
 ];
 
 const defaultForumPosts = [
@@ -1480,10 +1480,17 @@ function App() {
     users: [],
     identifier: "",
     planId: "monthly",
+    membershipStartDate: new Date().toISOString().slice(0, 10),
     paidAmount: "",
     tokenAmount: "10000",
   });
-  const [customTokenAmount, setCustomTokenAmount] = useState("");
+  const [checkout, setCheckout] = useState({
+    planId: "monthly",
+    tokenPackageId: "",
+    customTokenAmount: "",
+    showQr: false,
+    message: "",
+  });
   const [currentStep, setCurrentStep] = useState(0);
   const [answers, setAnswers] = useState(defaultAnswers);
   const [submitted, setSubmitted] = useState(false);
@@ -1691,6 +1698,58 @@ function App() {
     }
   }
 
+  function openPaymentModal() {
+    setCheckout({
+      planId: member.isPaid ? "" : "monthly",
+      tokenPackageId: "",
+      customTokenAmount: "",
+      showQr: false,
+      message: "",
+    });
+    setAuthModal({
+      open: true,
+      actionName: "会员开通与Token充值",
+      message: "先选择需要的会员方案或Token额度，确认金额后再扫码付款。",
+    });
+  }
+
+  async function submitCheckoutPaid() {
+    if (!member.isLoggedIn) {
+      setCheckout((prev) => ({ ...prev, message: "请先注册或登录，再提交付款确认。" }));
+      return;
+    }
+    const selectedPlan = memberPlans.find((item) => item.id === checkout.planId);
+    const selectedToken = tokenPackages.find((item) => item.id === checkout.tokenPackageId);
+    const customAmount = Number(checkout.customTokenAmount || 0);
+    if (!selectedPlan && !selectedToken && customAmount <= 0) {
+      setCheckout((prev) => ({ ...prev, message: "请先选择会员方案或Token充值额度。" }));
+      return;
+    }
+    try {
+      if (selectedPlan) {
+        await apiRequest("/membership/orders", {
+          method: "POST",
+          body: JSON.stringify({ planId: selectedPlan.id }),
+        });
+      }
+      if (selectedToken || customAmount > 0) {
+        await apiRequest("/lt/orders", {
+          method: "POST",
+          body: JSON.stringify({
+            packageId: selectedToken?.id || "custom",
+            customAmount: selectedToken ? "" : customAmount,
+          }),
+        });
+      }
+      const message = "已记录付款提醒。请在夏雨老师群里告知夏雨老师充值完成；管理员确认后，会员和Token才会生效。";
+      setCheckout((prev) => ({ ...prev, message }));
+      setAuthModal((prev) => ({ ...prev, message }));
+      setAccountNotice(message);
+    } catch (error) {
+      setCheckout((prev) => ({ ...prev, message: error.message || "付款确认提交失败。" }));
+    }
+  }
+
   function logoutMember() {
     pendingMemberActionRef.current = null;
     memberActionBypassRef.current = false;
@@ -1795,7 +1854,12 @@ function App() {
       await apiRequest("/admin/memberships/activate", {
         method: "POST",
         headers: { "x-admin-token": adminPanel.token.trim() },
-        body: JSON.stringify({ identifier: adminPanel.identifier, planId: adminPanel.planId, paidAmountCny: Number(adminPanel.paidAmount || 0) }),
+        body: JSON.stringify({
+          identifier: adminPanel.identifier,
+          planId: adminPanel.planId,
+          startDate: adminPanel.membershipStartDate,
+          paidAmountCny: Number(adminPanel.paidAmount || 0),
+        }),
       });
       setAdminPanel((prev) => ({ ...prev, message: "会员已开通。" }));
       loadAdminUsers();
@@ -2547,7 +2611,7 @@ function App() {
             <strong>{member.isPaid ? "已开通会员" : member.isLoggedIn ? "未开通会员" : "未登录"}</strong>
             <p>
               {member.isLoggedIn
-              ? `${member.identifier} · ${member.isPaid ? member.plan || "正式会员" : "可浏览，AI功能需开通"} · 存储 ${member.storageTotalMb || 50}MB`
+              ? `${member.identifier} · ${member.isPaid ? `${member.plan || "正式会员"}${member.daysRemaining !== null ? ` · 剩余${Math.max(member.daysRemaining, 0)}天` : ""}` : "可浏览，AI功能需开通"} · 存储 ${member.storageTotalMb || 50}MB`
               : "可浏览全部功能，AI分析和下载需登录并开通会员。"}
             </p>
           {accountNotice && <p className="account-notice">{accountNotice}</p>}
@@ -2740,7 +2804,7 @@ function App() {
             refresh={loadMemberCenter}
             updateProfile={updateMemberProfile}
             updatePassword={updateMemberPassword}
-            openPayment={() => setAuthModal({ open: true, actionName: "会员开通与Token充值", message: "选择会员方案或Token充值额度，扫码付款后等待管理员确认。" })}
+            openPayment={openPaymentModal}
           />
         )}
 
@@ -2764,10 +2828,9 @@ function App() {
           authForm={authForm}
           setAuthForm={setAuthForm}
           completeAuth={completeAuth}
-          activateMember={activateMember}
-          requestTokenOrder={requestTokenOrder}
-          customTokenAmount={customTokenAmount}
-          setCustomTokenAmount={setCustomTokenAmount}
+          checkout={checkout}
+          setCheckout={setCheckout}
+          submitCheckoutPaid={submitCheckoutPaid}
           closeAuthModal={closeAuthModal}
         />
       )}
@@ -3036,9 +3099,19 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, update
   );
 }
 
-function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, activateMember, requestTokenOrder, customTokenAmount, setCustomTokenAmount, closeAuthModal }) {
+function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, checkout, setCheckout, submitCheckoutPaid, closeAuthModal }) {
   const loggedIn = member.isLoggedIn;
   const paid = member.isPaid;
+  const selectedPlan = memberPlans.find((item) => item.id === checkout.planId);
+  const selectedToken = tokenPackages.find((item) => item.id === checkout.tokenPackageId);
+  const customAmount = Math.max(0, Number(checkout.customTokenAmount || 0));
+  const tokenPrice = selectedToken?.priceCny || customAmount || 0;
+  const totalAmount = Number((Number(selectedPlan?.priceCny || 0) + tokenPrice).toFixed(2));
+  const selectedTokenText = selectedToken
+    ? `${selectedToken.tokens.toLocaleString("zh-CN")} Token`
+    : customAmount > 0
+      ? `自定义 ¥${customAmount}`
+      : "未选择";
   return (
     <div className="member-modal-backdrop" role="dialog" aria-modal="true" aria-label="会员登录与开通">
       <section className="member-modal member-payment-modal">
@@ -3056,8 +3129,8 @@ function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, a
         <div className="member-gate-summary">
           <LockKeyhole size={22} />
           <div>
-            <strong>{authModal.actionName || "会员功能"}</strong>
-            <p>未登录用户可以浏览页面；AI分析、个人档案保存、错题题库、资料下载需要登录并开通会员。</p>
+                <strong>{authModal.actionName || "会员功能"}</strong>
+                <p>未登录用户可以浏览页面；AI分析、个人档案保存、错题题库、资料下载需要登录并开通会员。</p>
           </div>
         </div>
 
@@ -3124,25 +3197,93 @@ function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, a
               {paid ? <ShieldCheck size={22} /> : <Crown size={22} />}
               <div>
                 <strong>{paid ? `${member.plan || "正式会员"}已开通` : "账号已登录，尚未开通会员"}</strong>
-                <p>{member.provider} · {member.identifier}</p>
+                <p>{member.provider} · {member.identifier}{paid && member.daysRemaining !== null ? ` · 剩余${Math.max(member.daysRemaining, 0)}天` : ""}</p>
               </div>
             </div>
 
-            {!paid && (
-              <div className="plan-grid">
-                {memberPlans.map((plan) => (
-                  <article key={plan.id} className="plan-card">
-                    <strong>{plan.name}</strong>
-                    <b>{plan.price}</b>
-                    <p>{plan.description}</p>
-                    <button type="button" className="primary-action" onClick={() => activateMember(plan.id)}>
-                      <CreditCard size={17} />
-                      申请开通
-                    </button>
-                  </article>
-                ))}
+            <div className="checkout-section">
+              <div className="checkout-heading">
+                <div>
+                  <span className="eyebrow">第一步</span>
+                  <h3>选择会员方案和Token额度</h3>
+                </div>
+                <strong>合计：¥{totalAmount || 0}</strong>
               </div>
-            )}
+
+              {!paid && (
+                <div className="plan-grid selectable-grid">
+                  {memberPlans.map((plan) => (
+                    <button
+                      key={plan.id}
+                      type="button"
+                      className={checkout.planId === plan.id ? "plan-card selectable-card is-selected" : "plan-card selectable-card"}
+                      onClick={() => setCheckout((prev) => ({ ...prev, planId: prev.planId === plan.id ? "" : plan.id, showQr: false, message: "" }))}
+                    >
+                      <strong>{plan.name}</strong>
+                      <b>{plan.price}</b>
+                      <p>{plan.description}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <section className="token-order-panel">
+                <div>
+                  <span className="eyebrow">Token充值</span>
+                  <h3>用于AI分析、错题训练和知识图生成</h3>
+                </div>
+                <div className="token-package-grid">
+                  {tokenPackages.map((pack) => (
+                    <button
+                      key={pack.id}
+                      type="button"
+                      className={checkout.tokenPackageId === pack.id ? "token-package-button is-selected" : "token-package-button"}
+                      onClick={() =>
+                        setCheckout((prev) => ({
+                          ...prev,
+                          tokenPackageId: prev.tokenPackageId === pack.id ? "" : pack.id,
+                          customTokenAmount: "",
+                          showQr: false,
+                          message: "",
+                        }))
+                      }
+                    >
+                      <strong>{pack.label}</strong>
+                      <span>{pack.tokens.toLocaleString("zh-CN")} Token</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="custom-token-row">
+                  <input
+                    type="number"
+                    min="1"
+                    value={checkout.customTokenAmount}
+                    onChange={(event) =>
+                      setCheckout((prev) => ({ ...prev, customTokenAmount: event.target.value, tokenPackageId: "", showQr: false, message: "" }))
+                    }
+                    placeholder="自定义充值金额"
+                  />
+                  <button type="button" className="ghost-action" onClick={() => setCheckout((prev) => ({ ...prev, tokenPackageId: "", showQr: false }))}>
+                    自定义金额
+                  </button>
+                </div>
+              </section>
+
+              <div className="checkout-summary">
+                <span>会员：{selectedPlan?.name || (paid ? "已开通会员" : "未选择")}</span>
+                <span>Token：{selectedTokenText}</span>
+                <strong>应付金额：¥{totalAmount || 0}</strong>
+                <button
+                  type="button"
+                  className="primary-action"
+                  disabled={totalAmount <= 0}
+                  onClick={() => setCheckout((prev) => ({ ...prev, showQr: true, message: "" }))}
+                >
+                  <CreditCard size={17} />
+                  确认金额并显示收款码
+                </button>
+              </div>
+            </div>
 
             <div className="membership-rule-panel">
               <article>
@@ -3157,12 +3298,13 @@ function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, a
               </article>
             </div>
 
+            {checkout.showQr && (
             <div className="payment-layout">
               <section className="payment-qr-panel">
                 <div>
-                  <span className="eyebrow">扫码付款</span>
-                  <h3>付款后等待管理员确认开通或入账</h3>
-                  <p>付款时请备注用户名：{member.identifier}。管理员确认后，会在后台为你开通会员或增加Token。</p>
+                  <span className="eyebrow">第二步</span>
+                  <h3>扫码付款，付款后等待管理员确认</h3>
+                  <p>付款时请备注用户名：{member.identifier}。付款后点击下方按钮，并在夏雨老师群里告知夏雨老师充值完成。</p>
                 </div>
                 <div className="payment-qr-grid">
                   <article>
@@ -3174,35 +3316,23 @@ function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, a
                     <strong>微信支付</strong>
                   </article>
                 </div>
+                <button type="button" className="primary-action full-width" onClick={submitCheckoutPaid}>
+                  我已经充值
+                </button>
+                <p className="payment-reminder">请在夏雨老师群里告知夏雨老师充值完成。管理员确认后，会员时间和Token额度才会更新。</p>
               </section>
 
-              <section className="token-order-panel">
-                <div>
-                  <span className="eyebrow">Token充值</span>
-                  <h3>用于AI分析、错题训练和知识图生成</h3>
-                </div>
-                <div className="token-package-grid">
-                  {tokenPackages.map((pack) => (
-                    <button key={pack.id} type="button" className="token-package-button" onClick={() => requestTokenOrder(pack.id)}>
-                      <strong>{pack.label}</strong>
-                      <span>{pack.tokens.toLocaleString("zh-CN")} Token</span>
-                    </button>
-                  ))}
-                </div>
-                <div className="custom-token-row">
-                  <input
-                    type="number"
-                    min="1"
-                    value={customTokenAmount}
-                    onChange={(event) => setCustomTokenAmount(event.target.value)}
-                    placeholder="自定义充值金额"
-                  />
-                  <button type="button" className="ghost-action" onClick={() => requestTokenOrder("custom", customTokenAmount)}>
-                    提交自定义充值
-                  </button>
-                </div>
+              <section className="checkout-confirm-panel">
+                <span className="eyebrow">付款信息</span>
+                <h3>本次选择</h3>
+                <p>会员：{selectedPlan?.name || (paid ? "已开通会员" : "未选择")}</p>
+                <p>Token：{selectedTokenText}</p>
+                <strong>合计：¥{totalAmount || 0}</strong>
+                {checkout.message && <p className="account-notice">{checkout.message}</p>}
               </section>
             </div>
+            )}
+            {!checkout.showQr && checkout.message && <p className="account-notice">{checkout.message}</p>}
           </div>
         )}
       </section>
@@ -3267,6 +3397,9 @@ function MemberCenterPage({ member, state, setState, refresh, updateProfile, upd
           <span className="eyebrow">会员状态</span>
           <div className="member-status-grid">
             <strong>{member.isPaid ? member.plan || "正式会员" : "尚未开通会员"}</strong>
+            {member.membershipExpiresAt && (
+              <span>{member.isPaid ? `到期时间：${new Date(member.membershipExpiresAt).toLocaleDateString("zh-CN")}（剩余${Math.max(member.daysRemaining || 0, 0)}天）` : `会员已到期：${new Date(member.membershipExpiresAt).toLocaleDateString("zh-CN")}`}</span>
+            )}
             <span>Token余额：{member.ltBalance || 0}</span>
             <span>存储空间：{member.storageTotalMb || 50}MB</span>
           </div>
@@ -3319,8 +3452,8 @@ function AdminPanelPage({ state, setState, loginAdmin, loadUsers, activateMember
       <div className="hero-band compact admin-hero">
         <div>
           <span className="eyebrow">管理员平台</span>
-          <h2>手动确认会员与Token</h2>
-          <p>输入管理员账号和密码后，可以按用户名查询用户、开通会员、手动增加Token。</p>
+          <h2>管理员专用入口</h2>
+          <p>这里只允许管理员登录。普通会员不能使用此页面。</p>
         </div>
       </div>
       {!state.isLoggedIn && (
@@ -3352,6 +3485,10 @@ function AdminPanelPage({ state, setState, loginAdmin, loadUsers, activateMember
               </option>
             ))}
           </select>
+        </label>
+        <label>
+          <span>会员开始日期</span>
+          <input type="date" value={state.membershipStartDate} onChange={(event) => setState((prev) => ({ ...prev, membershipStartDate: event.target.value }))} />
         </label>
         <label>
           <span>实际收款金额</span>
