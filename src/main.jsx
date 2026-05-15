@@ -39,6 +39,7 @@ import {
   WandSparkles,
 } from "lucide-react";
 import { aiTaskPrompts, buildAgentPrompt, buildStudentArchiveSnapshot, postgresqlArchiveTables, shuziLearningCoachAgent } from "./aiAgent.js";
+import { apiRequest, mapAccountToMember, setAuthToken } from "./apiClient.js";
 import { learningTokenPackages, learningTokenRules, storagePlans } from "./membershipConfig.js";
 import "./styles.css";
 
@@ -1442,7 +1443,10 @@ function App() {
     identifier: "",
     provider: "网易邮箱",
     plan: "",
+    ltBalance: 0,
+    storageTotalMb: 50,
   });
+  const [accountNotice, setAccountNotice] = useState("");
   const [authModal, setAuthModal] = useState({
     open: false,
     actionName: "",
@@ -1553,6 +1557,17 @@ function App() {
     }
   }, [currentStep, questionnaireSteps.length]);
 
+  useEffect(() => {
+    apiRequest("/me")
+      .then((data) => {
+        setMember(mapAccountToMember(data.account));
+        setAccountNotice("");
+      })
+      .catch(() => {
+        setAuthToken("");
+      });
+  }, []);
+
   function requireMemberAction(actionName, callback, message = "") {
     if (memberActionBypassRef.current || (member.isLoggedIn && member.isPaid)) {
       callback?.();
@@ -1571,49 +1586,85 @@ function App() {
     return false;
   }
 
-  function completeAuth() {
+  async function completeAuth() {
     const identifier = authForm.identifier.trim() || (authForm.channel === "email" ? "student@example.com" : "13800000000");
-    setMember((prev) => ({
-      ...prev,
-      isLoggedIn: true,
-      identifier,
-      provider: authForm.channel === "email" ? authForm.provider : "手机号",
-    }));
-    setAuthModal((prev) => ({
-      ...prev,
-      message: "账号已登录。继续开通会员后，就可以使用AI分析、下载和个人档案能力。",
-    }));
+    try {
+      const data = await apiRequest(authForm.mode === "register" ? "/auth/register" : "/auth/login", {
+        method: "POST",
+        body: JSON.stringify({
+          channel: authForm.channel,
+          identifier,
+          provider: authForm.channel === "email" ? authForm.provider : "手机号",
+        }),
+      });
+      setAuthToken(data.token);
+      setMember(mapAccountToMember(data.account));
+      setAccountNotice("");
+      setAuthModal((prev) => ({
+        ...prev,
+        message: "账号已登录。继续开通会员后，就可以使用AI分析、下载和个人档案能力。",
+      }));
+    } catch (error) {
+      setAuthModal((prev) => ({
+        ...prev,
+        message: error.message || "登录失败，请确认后端服务已经启动。",
+      }));
+    }
   }
 
-  function activateMember(planId = "monthly") {
+  async function activateMember(planId = "monthly") {
     const plan = memberPlans.find((item) => item.id === planId) || memberPlans[0];
-    setMember((prev) => ({
-      ...prev,
-      isLoggedIn: true,
-      isPaid: true,
-      plan: plan.name,
-      identifier: prev.identifier || authForm.identifier.trim() || "student@example.com",
-      provider: prev.provider || authForm.provider,
-    }));
-    setAuthModal({ open: false, actionName: "", message: "" });
-    const pending = pendingMemberActionRef.current;
-    pendingMemberActionRef.current = null;
-    if (pending) {
-      window.setTimeout(() => {
-        memberActionBypassRef.current = true;
-        try {
-          pending();
-        } finally {
-          memberActionBypassRef.current = false;
-        }
-      }, 0);
+    if (!member.isLoggedIn) {
+      setAuthModal((prev) => ({ ...prev, message: "请先注册或登录，再提交会员开通申请。" }));
+      return;
+    }
+    try {
+      const data = await apiRequest("/membership/orders", {
+        method: "POST",
+        body: JSON.stringify({ planId }),
+      });
+      setAccountNotice(data.message || "已提交会员开通申请。");
+      setAuthModal((prev) => ({
+        ...prev,
+        message: `已提交「${plan.name}」开通申请。当前版本需要管理员确认后开通。`,
+      }));
+    } catch (error) {
+      setAuthModal((prev) => ({
+        ...prev,
+        message: error.message || "会员开通申请提交失败。",
+      }));
+    }
+  }
+
+  async function requestLtOrder(packageId) {
+    if (!member.isLoggedIn) {
+      setAuthModal((prev) => ({ ...prev, message: "请先注册或登录，再提交LT充值申请。" }));
+      return;
+    }
+    try {
+      const data = await apiRequest("/lt/orders", {
+        method: "POST",
+        body: JSON.stringify({ packageId }),
+      });
+      setAccountNotice(data.message || "已提交LT充值申请。");
+      setAuthModal((prev) => ({
+        ...prev,
+        message: "已提交LT充值申请。当前版本需要管理员确认后入账。",
+      }));
+    } catch (error) {
+      setAuthModal((prev) => ({
+        ...prev,
+        message: error.message || "LT充值申请提交失败。",
+      }));
     }
   }
 
   function logoutMember() {
     pendingMemberActionRef.current = null;
     memberActionBypassRef.current = false;
-    setMember({ isLoggedIn: false, isPaid: false, identifier: "", provider: "网易邮箱", plan: "" });
+    setAuthToken("");
+    setAccountNotice("");
+    setMember({ isLoggedIn: false, isPaid: false, identifier: "", provider: "网易邮箱", plan: "", ltBalance: 0, storageTotalMb: 50 });
   }
 
   function closeAuthModal() {
@@ -1635,23 +1686,53 @@ function App() {
     updateAnswer(question, next);
   }
 
-  function saveDraft() {
+  async function saveDraft() {
     if (!requireMemberAction("保存学情问卷到个人档案", saveDraft, "保存进度会写入学生个人档案，需要登录并开通会员。")) return;
+    try {
+      await apiRequest("/archive/questionnaire", {
+        method: "POST",
+        body: JSON.stringify({ answers, completion, status: "draft" }),
+      });
+    } catch (error) {
+      setAccountNotice(error.message || "学情问卷暂时没有写入服务器。");
+    }
     setLastSaved(`已保存草稿 ${new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`);
   }
 
-  function submitQuestionnaire() {
+  async function submitQuestionnaire() {
     if (!requireMemberAction("提交学情问卷并生成档案", submitQuestionnaire, "提交问卷后会进入学生个人档案，并用于后续AI画像分析，需要会员权限。")) return;
+    try {
+      await apiRequest("/archive/questionnaire", {
+        method: "POST",
+        body: JSON.stringify({ answers, completion, status: "submitted" }),
+      });
+    } catch (error) {
+      setAccountNotice(error.message || "问卷提交暂时没有写入服务器。");
+    }
     setSubmitted(true);
     setLastSaved("问卷已提交，已进入学生个人档案");
     setActivePage("statement");
   }
 
-  function saveStatement() {
+  async function saveStatement() {
     if (!requireMemberAction("保存学情陈述", saveStatement, "学情陈述会被保存到个人档案，后续会在学情画像页面统一分析。")) return;
     const content = statementText.trim();
     if (!content) return;
     const tags = [statementSubject, statementScene, statementIntensity >= 8 ? "高影响" : "需跟进"];
+    try {
+      await apiRequest("/archive/statements", {
+        method: "POST",
+        body: JSON.stringify({
+          subject: statementSubject,
+          scene: statementScene,
+          intensity: statementIntensity,
+          content,
+          guidedAnswers,
+        }),
+      });
+    } catch (error) {
+      setAccountNotice(error.message || "学情陈述暂时没有写入服务器。");
+    }
     setRecords((prev) => [
       {
         id: Date.now(),
@@ -1714,7 +1795,7 @@ function App() {
     }
   }
 
-  function uploadAudio(event) {
+  async function uploadAudio(event) {
     if (!requireMemberAction("上传语音并保存", null, "上传语音会保存到个人档案，后续会在学情画像页面统一分析。")) {
       event.target.value = "";
       return;
@@ -1722,12 +1803,24 @@ function App() {
     const file = event.target.files?.[0];
     if (!file) return;
     const url = URL.createObjectURL(file);
+    let transcriptText = "";
+    try {
+      const formData = new FormData();
+      formData.append("audio", file);
+      const data = await apiRequest("/ai/transcribe", {
+        method: "POST",
+        body: formData,
+      });
+      transcriptText = data.transcript || "";
+    } catch (error) {
+      setAccountNotice(error.message || "语音已添加到页面，但暂时没有完成服务器转写。");
+    }
     setRecords((prev) => [
       {
         id: Date.now(),
         type: "上传语音",
         title: file.name,
-        content: "已上传学生录制的语音，后续会转写成文字并进入个人学情档案。",
+        content: transcriptText || "已上传学生录制的语音，后续会转写成文字并进入个人学情档案。",
         time: "刚刚",
         subject: statementSubject,
         scene: statementScene,
@@ -1755,6 +1848,7 @@ function App() {
       name: file.name,
       type: file.type || "unknown",
       size: file.size,
+      rawFile: file,
       previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : "",
     }));
     setPaperDraft((prev) => ({ ...prev, files: [...prev.files, ...nextFiles] }));
@@ -1769,12 +1863,43 @@ function App() {
     });
   }
 
-  function runPaperAnalysis() {
+  async function runPaperAnalysis() {
     if (!requireMemberAction("AI分析试卷与作业", runPaperAnalysis, "AI试卷分析会识别图片或PDF中的题目、答案和批改痕迹，需要会员权限。")) return;
     if (!paperDraft.files.length) return;
     const prompt = buildAgentPrompt("paperAnalysis", buildStudentArchiveSnapshot({ answers, records, paperAnalysis }));
     console.info("树子AI任务提示词", prompt);
     setPaperAnalysisStatus("loading");
+    try {
+      const formData = new FormData();
+      formData.append("subject", paperDraft.subject);
+      formData.append("examName", paperDraft.examName);
+      formData.append("note", paperDraft.note);
+      paperDraft.files.forEach((file) => {
+        if (file.rawFile) formData.append("files", file.rawFile);
+      });
+      const data = await apiRequest("/ai/paper-analysis", {
+        method: "POST",
+        body: formData,
+      });
+      const report = data.report || {};
+      setPaperAnalysis({
+        summary: report.summary || "AI已完成试卷分析。",
+        scoreView: report.scoreView || report.core_conclusion || "AI已识别试卷中的错题、知识漏洞和方法缺口。",
+        wrongItems: (report.extracted_questions || []).map((item, index) => ({
+          title: item.title || `错题${index + 1}`,
+          type: item.error_type || "待分类",
+          knowledge: Array.isArray(item.knowledge_points) ? item.knowledge_points.join("、") : item.knowledge || "待识别知识点",
+          issue: item.content || item.student_answer || "AI已识别该题，需要继续复盘。",
+        })),
+        knowledgeGaps: report.knowledge_gaps || [],
+        methodGaps: report.method_gaps || [],
+        trainingPlan: (report.training_suggestions || []).map((item) => (typeof item === "string" ? item : `${item.task || "训练任务"}：${item.detail || ""}${item.standard ? ` 完成标准：${item.standard}` : ""}`)),
+      });
+      setPaperAnalysisStatus("done");
+      return;
+    } catch (error) {
+      setAccountNotice(error.message || "服务器AI分析暂时不可用，已保留前端演示分析。");
+    }
     window.setTimeout(() => {
       const subject = paperDraft.subject;
       const fileCount = paperDraft.files.length;
@@ -1962,22 +2087,40 @@ function App() {
       ...prev,
       fileName: file.name,
       type: isPdf ? "PDF" : "图片",
+      rawFile: file,
       title: prev.title === "新上传错题" ? file.name.replace(/\.[^.]+$/, "") : prev.title,
       previewUrl,
     }));
   }
 
-  function saveMistake() {
+  async function saveMistake() {
     if (!requireMemberAction("保存错题到个人题库", saveMistake, "保存错题会写入学生个人题库，需要登录并开通会员。")) return;
+    let aiAnalysis = null;
+    if (mistakeDraft.rawFile) {
+      try {
+        const formData = new FormData();
+        formData.append("subject", mistakeDraft.subject);
+        formData.append("title", mistakeDraft.title);
+        formData.append("note", mistakeDraft.reason || mistakeDraft.method || "");
+        formData.append("files", mistakeDraft.rawFile);
+        const data = await apiRequest("/ai/mistakes/analyze", {
+          method: "POST",
+          body: formData,
+        });
+        aiAnalysis = data.analysis;
+      } catch (error) {
+        setAccountNotice(error.message || "错题已保存到页面，但服务器AI识别暂时不可用。");
+      }
+    }
     const next = {
       id: `mistake-${Date.now()}`,
-      title: mistakeDraft.title || "未命名错题",
-      subject: mistakeDraft.subject,
+      title: aiAnalysis?.mistake_title || mistakeDraft.title || "未命名错题",
+      subject: aiAnalysis?.subject || mistakeDraft.subject,
       source: mistakeDraft.source || "未填写来源",
       fileName: mistakeDraft.fileName || "未上传文件",
       type: mistakeDraft.type || "手动记录",
-      reason: mistakeDraft.reason || "等待AI识别错因，学生也可以先手动补充。",
-      method: mistakeDraft.method || "等待AI整理解题方法或思路。",
+      reason: aiAnalysis?.error_reason || mistakeDraft.reason || "等待AI识别错因，学生也可以先手动补充。",
+      method: aiAnalysis?.method_gap || aiAnalysis?.correction_steps || mistakeDraft.method || "等待AI整理解题方法或思路。",
       date: "刚刚",
       previewUrl: mistakeDraft.previewUrl,
     };
@@ -1991,14 +2134,34 @@ function App() {
       method: "",
       fileName: "",
       type: "",
+      rawFile: null,
       previewUrl: "",
     });
   }
 
-  function generateSimilarQuestions() {
+  async function generateSimilarQuestions() {
     if (!requireMemberAction("AI生成相似题", generateSimilarQuestions, "相似题生成会调用AI出题能力，需要会员权限。")) return;
     console.info("树子AI任务提示词", buildAgentPrompt("mistakePractice", buildStudentArchiveSnapshot({ answers, records, paperAnalysis })));
     const selected = mistakes.find((item) => item.id === selectedMistakeId) || mistakes[0];
+    try {
+      const data = await apiRequest("/ai/mistakes/practice", {
+        method: "POST",
+        body: JSON.stringify({
+          subject: selected?.subject || "数学",
+          mistake: selected,
+          count: similarCount,
+        }),
+      });
+      const questions = data.practice?.questions || [];
+      if (questions.length) {
+        setSimilarQuestions(
+          questions.map((item, index) => `【相似题${index + 1}】${item.question}\n答案：${item.answer}\n思路：${Array.isArray(item.solution_steps) ? item.solution_steps.join("；") : item.solution_steps || ""}`)
+        );
+        return;
+      }
+    } catch (error) {
+      setAccountNotice(error.message || "服务器相似题生成暂时不可用，已使用前端演示题。");
+    }
     const base = selected?.subject || "数学";
     const method = selected?.method || "先识别题型、关键条件和解题步骤。";
     const pool = Array.from({ length: Number(similarCount) || 1 }, (_, index) =>
@@ -2007,9 +2170,31 @@ function App() {
     setSimilarQuestions(pool);
   }
 
-  function generateKnowledgeNote() {
+  async function generateKnowledgeNote() {
     if (!requireMemberAction("AI生成知识图", generateKnowledgeNote, "知识图生成会调用AI图片与讲解能力，需要会员权限。")) return;
     console.info("树子AI任务提示词", buildAgentPrompt("knowledgeNote", buildStudentArchiveSnapshot({ answers, records, paperAnalysis })));
+    try {
+      const data = await apiRequest("/ai/knowledge-note", {
+        method: "POST",
+        body: JSON.stringify({
+          topic: knowledgeQuestion,
+          grade: answers.grade,
+          subject: "",
+        }),
+      });
+      if (data.imageBase64) {
+        setKnowledgeNote({
+          title: knowledgeQuestion,
+          subtitle: "AI生成知识图",
+          points: [],
+          svg: `<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254"><image href="data:image/png;base64,${data.imageBase64}" width="1254" height="1254"/></svg>`,
+          prompt: data.note?.prompt || "",
+        });
+        return;
+      }
+    } catch (error) {
+      setAccountNotice(error.message || "服务器知识图生成暂时不可用，已使用前端知识图。");
+    }
     setKnowledgeNote(buildKnowledgeNote(knowledgeQuestion));
   }
 
@@ -2207,7 +2392,12 @@ function App() {
         <div className="member-sidebar-card">
           <span className="eyebrow">会员状态</span>
           <strong>{member.isPaid ? `${member.plan || "正式会员"}` : member.isLoggedIn ? "已登录 · 待开通" : "游客浏览"}</strong>
-          <p>{member.isLoggedIn ? `${member.provider} · ${member.identifier}` : "可浏览全部功能，AI分析和下载需登录并开通会员。"}</p>
+          <p>
+            {member.isLoggedIn
+              ? `${member.provider} · ${member.identifier} · ${member.ltBalance || 0} LT · ${member.storageTotalMb || 50}MB`
+              : "可浏览全部功能，AI分析和下载需登录并开通会员。"}
+          </p>
+          {accountNotice && <p className="account-notice">{accountNotice}</p>}
         </div>
       </aside>
 
@@ -2394,6 +2584,7 @@ function App() {
           setAuthForm={setAuthForm}
           completeAuth={completeAuth}
           activateMember={activateMember}
+          requestLtOrder={requestLtOrder}
           closeAuthModal={closeAuthModal}
         />
       )}
@@ -2662,7 +2853,7 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, update
   );
 }
 
-function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, activateMember, closeAuthModal }) {
+function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, activateMember, requestLtOrder, closeAuthModal }) {
   const loggedIn = member.isLoggedIn;
   const paid = member.isPaid;
   return (
@@ -2752,7 +2943,7 @@ function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, a
               {paid ? <ShieldCheck size={22} /> : <Crown size={22} />}
               <div>
                 <strong>{paid ? `${member.plan || "正式会员"}已开通` : "账号已登录，尚未开通会员"}</strong>
-                <p>{member.provider} · {member.identifier}</p>
+                <p>{member.provider} · {member.identifier} · {member.ltBalance || 0} LT</p>
               </div>
             </div>
 
@@ -2765,7 +2956,7 @@ function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, a
                     <p>{plan.description}</p>
                     <button type="button" className="primary-action" onClick={() => activateMember(plan.id)}>
                       <CreditCard size={17} />
-                      开通会员
+                      申请开通
                     </button>
                   </article>
                 ))}
@@ -2791,6 +2982,9 @@ function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, a
                   <span>¥{pack.priceCny}</span>
                   <strong>{pack.learningTokens.toLocaleString("zh-CN")} LT</strong>
                   <p>约覆盖真实API成本 ¥{pack.maxApiCostCny} / ${pack.maxApiCostUsd}</p>
+                  <button type="button" className="ghost-action" onClick={() => requestLtOrder(pack.id)}>
+                    申请充值
+                  </button>
                 </article>
               ))}
             </div>

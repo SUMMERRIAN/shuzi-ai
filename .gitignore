@@ -34,6 +34,7 @@ vite.config.ts.timestamp-*
 .env
 .env.*
 !.env.example
+uploads/
 
 # Cache and coverage
 coverage/
