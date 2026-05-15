@@ -247,6 +247,20 @@ app.get("/api/membership/plans", (req, res) => {
   });
 });
 
+app.post("/api/admin/login", async (req, res) => {
+  const { username = "", password = "" } = req.body || {};
+  const expectedUsername = process.env.ADMIN_USERNAME;
+  const expectedPassword = process.env.ADMIN_PASSWORD;
+  const adminToken = process.env.ADMIN_SETUP_TOKEN;
+  if (!expectedUsername || !expectedPassword || !adminToken) {
+    return res.status(503).json({ error: "ADMIN_NOT_CONFIGURED", message: "管理员账号还没有在服务器环境变量中配置。" });
+  }
+  if (String(username).trim() !== expectedUsername || String(password) !== expectedPassword) {
+    return res.status(401).json({ error: "ADMIN_LOGIN_FAILED", message: "管理员账号或密码不正确。" });
+  }
+  res.json({ adminToken });
+});
+
 app.post("/api/membership/orders", requireAuth, async (req, res) => {
   const { planId = "monthly" } = req.body || {};
   const plan = membershipPlans[planId];
@@ -644,7 +658,7 @@ app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
 });
 
 app.post("/api/admin/memberships/activate", requireAdminToken, async (req, res) => {
-  const { identifier, planId = "monthly", durationDays } = req.body || {};
+  const { identifier, planId = "monthly", durationDays, paidAmountCny = 0 } = req.body || {};
   const plan = membershipPlans[planId];
   if (!plan || plan.id === "free") return res.status(400).json({ error: "INVALID_PLAN" });
   const user = (await query("SELECT * FROM users WHERE identifier = $1", [normalizeIdentifier(identifier)])).rows[0];
@@ -659,11 +673,18 @@ app.post("/api/admin/memberships/activate", requireAdminToken, async (req, res) 
     )
   ).rows[0];
   await query("UPDATE storage_quotas SET base_mb = $2, updated_at = now() WHERE user_id = $1", [user.id, plan.storageMb]);
+  if (Number(paidAmountCny) > 0) {
+    await query(
+      `INSERT INTO payment_orders (user_id, order_type, package_id, title, amount_cny, status, provider, meta, paid_at)
+       VALUES ($1, 'membership', $2, $3, $4, 'paid', 'manual_admin', $5, now())`,
+      [user.id, plan.id, plan.name, Number(paidAmountCny), JSON.stringify({ adminConfirmed: true })]
+    );
+  }
   res.json({ membership, account: await buildAccountSnapshot(user.id) });
 });
 
 app.post("/api/admin/lt/recharge", requireAdminToken, async (req, res) => {
-  const { identifier, packageId, amount, note = "" } = req.body || {};
+  const { identifier, packageId, amount, paidAmountCny = 0, note = "" } = req.body || {};
   const user = (await query("SELECT * FROM users WHERE identifier = $1", [normalizeIdentifier(identifier)])).rows[0];
   if (!user) return res.status(404).json({ error: "USER_NOT_FOUND" });
   const pack = packageId ? ltPackages[packageId] : null;
@@ -677,8 +698,15 @@ app.post("/api/admin/lt/recharge", requireAdminToken, async (req, res) => {
     await client.query(
       `INSERT INTO learning_token_transactions (user_id, amount, type, source, note, meta)
        VALUES ($1, $2, 'recharge', 'manual_admin', $3, $4)`,
-      [user.id, tokens, note, JSON.stringify({ packageId: pack?.id || null })]
+      [user.id, tokens, note, JSON.stringify({ packageId: pack?.id || null, paidAmountCny: Number(paidAmountCny) || null })]
     );
+    if (Number(paidAmountCny) > 0) {
+      await client.query(
+        `INSERT INTO payment_orders (user_id, order_type, package_id, title, amount_cny, status, provider, meta, paid_at)
+         VALUES ($1, 'lt_recharge', $2, $3, $4, 'paid', 'manual_admin', $5, now())`,
+        [user.id, pack?.id || "custom-token", `Token充值 ${tokens}`, Number(paidAmountCny), JSON.stringify({ tokens, note })]
+      );
+    }
   });
   res.json({ account: await buildAccountSnapshot(user.id) });
 });

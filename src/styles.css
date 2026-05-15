@@ -91,6 +91,7 @@ button:disabled {
 .nav-list {
   display: grid;
   gap: 8px;
+  margin-bottom: auto;
 }
 
 .nav-item {
@@ -135,6 +136,24 @@ button:disabled {
 
 .workspace {
   padding: 18px clamp(18px, 3vw, 42px) 44px;
+}
+
+.admin-sidebar-button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #cbd5e1;
+  font-weight: 900;
+}
+
+.admin-sidebar-button:hover {
+  background: #f0f4f8;
+  color: #111820;
 }
 
 .topbar {

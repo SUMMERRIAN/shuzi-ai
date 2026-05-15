@@ -1473,10 +1473,14 @@ function App() {
   });
   const [adminPanel, setAdminPanel] = useState({
     token: "",
+    username: "树子AI",
+    password: "",
+    isLoggedIn: false,
     message: "",
     users: [],
     identifier: "",
     planId: "monthly",
+    paidAmount: "",
     tokenAmount: "10000",
   });
   const [customTokenAmount, setCustomTokenAmount] = useState("");
@@ -1755,7 +1759,7 @@ function App() {
 
   async function loadAdminUsers() {
     if (!adminPanel.token.trim()) {
-      setAdminPanel((prev) => ({ ...prev, message: "请输入管理员口令。" }));
+      setAdminPanel((prev) => ({ ...prev, message: "请先登录管理员账号。" }));
       return;
     }
     try {
@@ -1766,12 +1770,32 @@ function App() {
     }
   }
 
+  async function loginAdmin() {
+    try {
+      const data = await apiRequest("/admin/login", {
+        method: "POST",
+        body: JSON.stringify({ username: adminPanel.username, password: adminPanel.password }),
+      });
+      const userData = await apiRequest("/admin/users", { headers: { "x-admin-token": data.adminToken } });
+      setAdminPanel((prev) => ({
+        ...prev,
+        token: data.adminToken,
+        password: "",
+        isLoggedIn: true,
+        users: userData.users || [],
+        message: "管理员已登录，用户数据已刷新。",
+      }));
+    } catch (error) {
+      setAdminPanel((prev) => ({ ...prev, message: error.message || "管理员登录失败。" }));
+    }
+  }
+
   async function adminActivateMembership() {
     try {
       await apiRequest("/admin/memberships/activate", {
         method: "POST",
         headers: { "x-admin-token": adminPanel.token.trim() },
-        body: JSON.stringify({ identifier: adminPanel.identifier, planId: adminPanel.planId }),
+        body: JSON.stringify({ identifier: adminPanel.identifier, planId: adminPanel.planId, paidAmountCny: Number(adminPanel.paidAmount || 0) }),
       });
       setAdminPanel((prev) => ({ ...prev, message: "会员已开通。" }));
       loadAdminUsers();
@@ -1785,7 +1809,12 @@ function App() {
       await apiRequest("/admin/lt/recharge", {
         method: "POST",
         headers: { "x-admin-token": adminPanel.token.trim() },
-        body: JSON.stringify({ identifier: adminPanel.identifier, amount: Number(adminPanel.tokenAmount), note: "管理员手动充值" }),
+        body: JSON.stringify({
+          identifier: adminPanel.identifier,
+          amount: Number(adminPanel.tokenAmount),
+          paidAmountCny: Number(adminPanel.paidAmount || 0),
+          note: "管理员手动充值",
+        }),
       });
       setAdminPanel((prev) => ({ ...prev, message: "Token已入账。" }));
       loadAdminUsers();
@@ -2487,7 +2516,7 @@ function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand" onDoubleClick={() => setActivePage("admin")}>
+        <div className="brand">
           <div className="brand-mark">
             <img src="/assets/shuzi-logo.png" alt="树子AI" />
           </div>
@@ -2513,22 +2542,20 @@ function App() {
           ))}
         </nav>
 
-        <div className="sidebar-card">
-          <span className="eyebrow">当前建设目标</span>
-          <strong>从学情画像进入科目策略和学习任务。</strong>
-          <p>学生可以先使用AI建议，再把策略、资料使用细节和任务改成自己真正能执行的版本。</p>
-        </div>
-
         <div className="member-sidebar-card">
           <span className="eyebrow">会员状态</span>
-            <strong>{member.isPaid ? `${member.plan || "正式会员"}` : member.isLoggedIn ? "已登录 · 待开通" : "游客浏览"}</strong>
+            <strong>{member.isPaid ? "已开通会员" : member.isLoggedIn ? "未开通会员" : "未登录"}</strong>
             <p>
               {member.isLoggedIn
-              ? `${member.provider} · ${member.identifier} · 存储空间 ${member.storageTotalMb || 50}MB`
+              ? `${member.identifier} · ${member.isPaid ? member.plan || "正式会员" : "可浏览，AI功能需开通"} · 存储 ${member.storageTotalMb || 50}MB`
               : "可浏览全部功能，AI分析和下载需登录并开通会员。"}
             </p>
           {accountNotice && <p className="account-notice">{accountNotice}</p>}
         </div>
+        <button type="button" className="admin-sidebar-button" onClick={() => setActivePage("admin")}>
+          <LockKeyhole size={16} />
+          管理员中心
+        </button>
       </aside>
 
       <main className="workspace">
@@ -2721,6 +2748,7 @@ function App() {
           <AdminPanelPage
             state={adminPanel}
             setState={setAdminPanel}
+            loginAdmin={loginAdmin}
             loadUsers={loadAdminUsers}
             activateMembership={adminActivateMembership}
             rechargeToken={adminRechargeToken}
@@ -3285,21 +3313,32 @@ function RecordList({ title, items, empty }) {
   );
 }
 
-function AdminPanelPage({ state, setState, loadUsers, activateMembership, rechargeToken, plans }) {
+function AdminPanelPage({ state, setState, loginAdmin, loadUsers, activateMembership, rechargeToken, plans }) {
   return (
     <section className="stack">
       <div className="hero-band compact admin-hero">
         <div>
           <span className="eyebrow">管理员平台</span>
           <h2>手动确认会员与Token</h2>
-          <p>这个页面不在普通导航中展示。输入管理员口令后，可以按用户名查询用户、开通会员、手动增加Token。</p>
+          <p>输入管理员账号和密码后，可以按用户名查询用户、开通会员、手动增加Token。</p>
         </div>
       </div>
+      {!state.isLoggedIn && (
+        <article className="panel admin-login-panel">
+          <label>
+            <span>管理员账号</span>
+            <input value={state.username} onChange={(event) => setState((prev) => ({ ...prev, username: event.target.value }))} />
+          </label>
+          <label>
+            <span>管理员密码</span>
+            <input type="password" value={state.password} onChange={(event) => setState((prev) => ({ ...prev, password: event.target.value }))} />
+          </label>
+          <button type="button" className="primary-action" onClick={loginAdmin}>登录管理员中心</button>
+          {state.message && <p className="account-notice">{state.message}</p>}
+        </article>
+      )}
+      {state.isLoggedIn && (
       <article className="panel admin-control-panel">
-        <label>
-          <span>管理员口令</span>
-          <input type="password" value={state.token} onChange={(event) => setState((prev) => ({ ...prev, token: event.target.value }))} />
-        </label>
         <label>
           <span>学生用户名</span>
           <input value={state.identifier} onChange={(event) => setState((prev) => ({ ...prev, identifier: event.target.value }))} placeholder="输入学生用户名" />
@@ -3315,6 +3354,10 @@ function AdminPanelPage({ state, setState, loadUsers, activateMembership, rechar
           </select>
         </label>
         <label>
+          <span>实际收款金额</span>
+          <input type="number" value={state.paidAmount} onChange={(event) => setState((prev) => ({ ...prev, paidAmount: event.target.value }))} placeholder="例如：100" />
+        </label>
+        <label>
           <span>增加Token</span>
           <input type="number" value={state.tokenAmount} onChange={(event) => setState((prev) => ({ ...prev, tokenAmount: event.target.value }))} />
         </label>
@@ -3325,7 +3368,9 @@ function AdminPanelPage({ state, setState, loadUsers, activateMembership, rechar
         </div>
         {state.message && <p className="account-notice">{state.message}</p>}
       </article>
+      )}
 
+      {state.isLoggedIn && (
       <article className="panel admin-user-table">
         <h2>用户列表</h2>
         <div className="admin-table-head">
@@ -3345,6 +3390,7 @@ function AdminPanelPage({ state, setState, loadUsers, activateMembership, rechar
           </button>
         ))}
       </article>
+      )}
     </section>
   );
 }
