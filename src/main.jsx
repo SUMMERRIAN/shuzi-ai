@@ -56,53 +56,6 @@ const subPages = [
   { id: "freeAsk", label: "AI自由问", icon: Sparkles },
 ];
 
-const pageMeta = {
-  home: {
-    eyebrow: "首页 · 树子AI学习教练",
-    title: "让AI陪伴和指导你的学习！",
-  },
-  questionnaire: {
-    eyebrow: "第一页 · 学习问题分析",
-    title: "先通过问卷了解学生，再形成后续判断",
-  },
-  statement: {
-    eyebrow: "第一页 · 学情陈述",
-    title: "把学生真实遇到的问题说清楚、记下来",
-  },
-  paperAnalysis: {
-    eyebrow: "第一页 · 试卷分析",
-    title: "上传试卷、错题或作业，让AI分析知识漏洞和方法缺口",
-  },
-  profile: {
-    eyebrow: "第一页 · 学情画像",
-    title: "整合问卷和陈述，形成学生与家长都能看懂的画像",
-  },
-  strategy: {
-    eyebrow: "第四页 · 策略与任务",
-    title: "把学情画像变成每个科目的学习策略和学习任务",
-  },
-  plan: {
-    eyebrow: "第五页 · 学习计划",
-    title: "制定每周学习计划，明确时间、任务和备注",
-  },
-  mistakes: {
-    eyebrow: "第六页 · 错题专项",
-    title: "把错题变成可调取、可训练、可下载的个人题库",
-  },
-  notes: {
-    eyebrow: "第七页 · 知识笔记",
-    title: "把任意知识问题生成一张美观、可下载的知识图",
-  },
-  forum: {
-    eyebrow: "第八页 · 学习社区",
-    title: "像贴吧一样交流学习问题、学习心得和版主答疑",
-  },
-  freeAsk: {
-    eyebrow: "第九页 · AI自由问",
-    title: "像ChatGPT一样，随时向AI提出学习问题",
-  },
-};
-
 const emailProviders = ["网易邮箱", "新浪邮箱", "谷歌邮箱", "其他邮箱"];
 
 const memberPlans = [
@@ -163,7 +116,7 @@ const statementIssueOptions = [
 const paperSubjects = ["语文", "数学", "英语", "物理", "化学", "生物", "历史", "地理", "政治"];
 
 const defaultPaperAnalysis = {
-  summary: "上传试卷、错题或作业图片后，这里会形成一份结构化分析。正式版会接入OpenAI视觉模型识别题目、学生答案、批改痕迹和错因。",
+  summary: "上传试卷、错题或作业图片后，AI会整理出题目内容、出错类型、知识漏洞、方法问题和后续训练建议。",
   scoreView: "当前还没有可分析的试卷样本。建议至少上传1张清晰图片，最好包含题干、学生作答过程和老师批改痕迹。",
   wrongItems: [
     {
@@ -501,27 +454,6 @@ const subjectModules = {
 
 function buildCoreSteps() {
   return [
-    {
-      id: "intro",
-      title: "填写说明",
-      description: "请认真、诚实填写。问卷不是为了批评你，而是为了更准确地帮助你。",
-      analysisTarget: "建立学生填写意愿，降低防御心理，让学生知道每一条信息都会影响后续判断。",
-      questions: [
-        {
-          id: "consent",
-          label: "我会尽量认真、真实地填写这份学情问卷。",
-          type: "single",
-          required: true,
-          options: ["我会认真填写", "我还需要再了解一下"],
-        },
-        {
-          id: "finalGoal",
-          label: "你希望这次测评最后帮你解决什么问题？",
-          type: "textarea",
-          placeholder: "可以写成绩、方法、动力、计划、某个科目、亲子沟通等",
-        },
-      ],
-    },
     {
       id: "basic",
       title: "基本信息",
@@ -1151,7 +1083,6 @@ function createSubjectWorkspace(subject) {
 }
 
 const defaultAnswers = {
-  consent: "我会认真填写",
   name: "张同学",
   grade: "初三",
   stage: "中考备考",
@@ -1598,11 +1529,12 @@ function App() {
     reply: "",
   });
   const [freeAskInput, setFreeAskInput] = useState("");
+  const [freeAskFiles, setFreeAskFiles] = useState([]);
   const [freeAskMessages, setFreeAskMessages] = useState([
     {
       id: "welcome",
       role: "assistant",
-      content: "你好，我是树子AI自由问。你可以问作业思路、知识点、学习方法，也可以要求我把一个知识点整理成图片。",
+      content: "你好，我是树子AI自由问。你可以问学习问题、知识问题，也可以问学习之外自己想到的任何问题；还可以上传图片或文件，让我帮你阅读、解释、整理成知识图。",
     },
   ]);
   const mediaRecorderRef = useRef(null);
@@ -1757,7 +1689,7 @@ function App() {
             id: Date.now(),
             type: "麦克风录音",
             title: "学生语音申述",
-            content: "已保存一段实时录音。正式版会上传音频，完成语音转文字后进入个人档案。",
+            content: "已保存一段实时录音，后续会转写成文字并进入个人学情档案。",
             time: "刚刚",
             subject: statementSubject,
             scene: statementScene,
@@ -1795,7 +1727,7 @@ function App() {
         id: Date.now(),
         type: "上传语音",
         title: file.name,
-        content: "已上传学生录制的语音。正式版会保存原始音频，并转写成文字进入个人档案。",
+        content: "已上传学生录制的语音，后续会转写成文字并进入个人学情档案。",
         time: "刚刚",
         subject: statementSubject,
         scene: statementScene,
@@ -1848,7 +1780,7 @@ function App() {
       const fileCount = paperDraft.files.length;
       setPaperAnalysis({
         summary: `本次上传了 ${fileCount} 份${subject}试卷、错题或作业材料。AI会优先识别错题题干、学生作答过程、批改痕迹和错因线索，再判断问题来自知识、方法、步骤、计算、表达还是考试状态。`,
-        scoreView: "从当前样本看，学生不是单纯不会，而是存在“知识点识别不稳定 + 解题流程不完整 + 错题复盘不足”的组合问题。正式版会把每道题对应到具体知识点和能力维度。",
+        scoreView: "从当前样本看，学生不是单纯不会，而是存在“知识点识别不稳定 + 解题流程不完整 + 错题复盘不足”的组合问题。后续可以把每道题对应到具体知识点和能力维度。",
         wrongItems: [
           {
             title: `${subject}典型错题一：条件提取不完整`,
@@ -2133,8 +2065,8 @@ function App() {
 
   }
 
-  function printPage() {
-    if (!requireMemberAction("下载或打印PDF", printPage, "PDF下载和打印属于会员资料导出能力，需要登录并开通会员。")) return;
+  function printPage(actionName = "下载或打印PDF", message = "PDF下载和打印属于会员资料导出能力，需要登录并开通会员。") {
+    if (!requireMemberAction(actionName, () => printPage(actionName, message), message)) return;
     window.print();
   }
 
@@ -2188,34 +2120,61 @@ function App() {
     setForumDraft((prev) => ({ ...prev, reply: "" }));
   }
 
+  function handleFreeAskFiles(event) {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    const nextFiles = files.map((file) => ({
+      id: `${file.name}-${file.lastModified}-${Math.random().toString(36).slice(2)}`,
+      name: file.name,
+      type: file.type || "unknown",
+      size: file.size,
+      previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : "",
+    }));
+    setFreeAskFiles((prev) => [...prev, ...nextFiles]);
+    event.target.value = "";
+  }
+
+  function removeFreeAskFile(fileId) {
+    setFreeAskFiles((prev) => {
+      const target = prev.find((file) => file.id === fileId);
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((file) => file.id !== fileId);
+    });
+  }
+
   function sendFreeAsk() {
-    if (!requireMemberAction("使用AI自由问", sendFreeAsk, "AI自由问会调用OpenAI API回答问题、生成学习解释或知识图片，需要登录并开通会员后使用。")) return;
+    if (!requireMemberAction("使用AI自由问", sendFreeAsk, "AI自由问可以回答问题、识别上传材料、生成学习解释或知识图片，需要登录并开通会员后使用。")) return;
     const content = freeAskInput.trim();
-    if (!content) return;
+    if (!content && !freeAskFiles.length) return;
     console.info("树子AI任务提示词", buildAgentPrompt("freeAsk", buildStudentArchiveSnapshot({ answers, records, paperAnalysis })));
     const wantsImage = /图|图片|结构图|画|生成图片|知识卡片/.test(content);
     const note = wantsImage ? buildKnowledgeNote(content.replace(/生成|图片|结构图|画|知识卡片/g, "").trim() || content) : null;
-    const userMessage = { id: `ask-user-${Date.now()}`, role: "user", content };
+    const attachmentText = freeAskFiles.length ? `我上传了 ${freeAskFiles.length} 个附件，请结合附件一起看。` : "";
+    const userMessage = {
+      id: `ask-user-${Date.now()}`,
+      role: "user",
+      content: content || attachmentText,
+      attachments: freeAskFiles,
+    };
     const assistantMessage = {
       id: `ask-ai-${Date.now()}`,
       role: "assistant",
       content: wantsImage
-        ? "我会把这个问题整理成“知识图 + 标注解释 + 学习总结”的形式。正式版会调用OpenAI API生成更严谨的图片，这里先展示页面交互与下载方式。"
-        : "我会先判断你问的是知识理解、解题思路还是学习方法，再按“核心结论、原因拆解、可执行步骤、需要追问的问题”来回答。正式版会实时调用OpenAI API生成答案。",
+        ? "我会把这个问题整理成“知识图 + 标注解释 + 学习总结”的形式，尽量让你一眼看懂结构和重点。"
+        : "我会先判断你的问题属于学习、知识理解、解题思路、生活常识还是开放想法，再用清楚的结论、原因和下一步建议来回答。",
       note,
     };
     setFreeAskMessages((prev) => [...prev, userMessage, assistantMessage]);
     setFreeAskInput("");
+    setFreeAskFiles([]);
   }
-
-  const activeMeta = pageMeta[activePage] || pageMeta.questionnaire;
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
-            <Brain size={26} />
+            <img src="/assets/shuzi-logo.png" alt="树子AI" />
           </div>
           <div>
             <strong>树子AI</strong>
@@ -2223,7 +2182,7 @@ function App() {
           </div>
         </div>
 
-        <nav className="nav-list" aria-label="第一页子页面">
+        <nav className="nav-list" aria-label="树子AI功能导航">
           {subPages.map(({ id, label, icon: Icon }) => (
             <button key={id} className={activePage === id ? "nav-item is-active" : "nav-item"} onClick={() => setActivePage(id)}>
               <Icon size={18} />
@@ -2254,10 +2213,6 @@ function App() {
 
       <main className="workspace">
         <header className="topbar">
-          <div>
-            <span className="eyebrow">{activeMeta.eyebrow}</span>
-            <h1>{activeMeta.title}</h1>
-          </div>
           <div className="topbar-actions">
             <button className={member.isPaid ? "member-pill is-active" : "member-pill"} onClick={() => setAuthModal({ open: true, actionName: "会员中心", message: "管理登录、邮箱/手机号绑定和会员开通状态。" })}>
               {member.isPaid ? <Crown size={17} /> : <LockKeyhole size={17} />}
@@ -2269,10 +2224,6 @@ function App() {
                 退出
               </button>
             )}
-            <button className="ghost-action" onClick={printPage}>
-              <FileDown size={18} />
-              打印 / 另存为PDF
-            </button>
           </div>
         </header>
 
@@ -2427,6 +2378,9 @@ function App() {
             messages={freeAskMessages}
             input={freeAskInput}
             setInput={setFreeAskInput}
+            files={freeAskFiles}
+            handleFiles={handleFreeAskFiles}
+            removeFile={removeFreeAskFile}
             sendFreeAsk={sendFreeAsk}
           />
         )}
@@ -2464,8 +2418,7 @@ function HomePage({ setActivePage }) {
       <div className="hero-band compact home-hero">
         <div>
           <span className="eyebrow">树子AI · 个人AI学习教练</span>
-          <h2>先看清孩子的学习问题，再设计真正能执行的学习通路</h2>
-          <p>网站围绕夏雨学习法的思路，把学情分析、学习画像、科目策略、学习计划、错题训练和知识笔记连接起来，帮助学生从“知道问题”走到“能行动”。</p>
+          <div className="home-belief">让AI更懂你，它就可以更好的帮助你！</div>
         </div>
         <div className="strategy-status">
           <strong>AI</strong>
@@ -2480,6 +2433,10 @@ function HomePage({ setActivePage }) {
             <h2>从学情分析到个性化训练</h2>
           </div>
           <Brain size={24} />
+        </div>
+        <div className="home-flow-intro">
+          <h3>先看清孩子的学习问题，再设计真正能执行的学习通路</h3>
+          <p>先通过问卷、陈述和学习材料了解孩子，再生成学情画像，继续制定科目策略、学习计划、错题训练和知识笔记，帮助学生把问题一步步转化成可以执行的行动。</p>
         </div>
         <div className="home-workflow">
           {workflow.map(([index, title, desc]) => (
@@ -2553,7 +2510,7 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, update
     <section className="stack forum-page">
       <div className="hero-band compact forum-hero">
         <div>
-          <span className="eyebrow">第八页 · 学习社区</span>
+          <span className="eyebrow">学习社区</span>
           <h2>像贴吧一样交流学习问题、学习心得和版主答疑</h2>
           <p>所有人都可以浏览帖子和回复。只有会员可以发帖、留言、分享自己的学习问题和心得，也可以向版主提出疑问。</p>
         </div>
@@ -2693,7 +2650,7 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, update
           <article className="panel forum-rail-card">
             <span className="eyebrow">会员发言</span>
             <h3>{canInteract ? "你可以发帖和留言" : "游客只能浏览"}</h3>
-            <p>学习社区会保存学生的学习问题、心得和提问记录。正式版会进入个人会员档案，并支持版主后台回复。</p>
+            <p>学习社区用于记录学习问题、学习心得和向版主提出的疑问。会员可以发帖和留言，其他同学可以浏览和参与讨论。</p>
             <button type="button" className="ghost-action" onClick={() => openCompose("向版主提问")}>
               <LockKeyhole size={17} />
               向版主提问
@@ -2776,7 +2733,7 @@ function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, a
             <label>
               <span>验证码</span>
               <div className="code-row">
-                <input value={authForm.code} onChange={(event) => setAuthForm((prev) => ({ ...prev, code: event.target.value }))} placeholder="演示版可不填" />
+                <input value={authForm.code} onChange={(event) => setAuthForm((prev) => ({ ...prev, code: event.target.value }))} placeholder="请输入验证码" />
                 <button type="button" className="ghost-action">
                   获取验证码
                 </button>
@@ -2808,7 +2765,7 @@ function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, a
                     <p>{plan.description}</p>
                     <button type="button" className="primary-action" onClick={() => activateMember(plan.id)}>
                       <CreditCard size={17} />
-                      演示充值开通
+                      开通会员
                     </button>
                   </article>
                 ))}
@@ -2866,10 +2823,10 @@ function QuestionnairePage({
     <section className="stack">
       <div className="hero-band compact">
         <div>
-          <span className="eyebrow">子页面一 · 学情问卷</span>
-          <h2>学情问卷的说明与使用说明</h2>
-          <p><strong>学情问卷说明：</strong>这份问卷用于帮助老师和AI了解学生的学习基础、学习流程、作业错题、复习状态、学习环境和科目专项问题，不是为了评价学生好坏，而是为了找到真正影响学习的关键环节。</p>
-          <p><strong>使用说明：</strong>学生先完成核心必填内容，再根据自己的弱项科目展开专项问题。问卷可以分步骤填写和保存，后续会进入个人档案，用于生成学情画像、学习策略和学习计划。</p>
+          <span className="eyebrow">学情问卷</span>
+          <h2>先把学习情况说清楚</h2>
+          <p>这份问卷用来了解学生的基础、课堂、作业、错题、复习、学习环境和科目问题。它不是评价学生好坏，而是帮助我们找到真正影响学习的环节。</p>
+          <p>建议按步骤填写：先完成核心问题，再展开薄弱科目。保存后的内容会进入个人档案，后面用于生成学情画像、学习策略和学习计划。</p>
         </div>
         <div className="progress-card">
           <strong>{completion}%</strong>
@@ -3095,9 +3052,9 @@ function PaperAnalysisPage({ draft, analysis, status, updateDraft, handleFiles, 
     <section className="stack paper-analysis-page">
       <div className="hero-band compact paper-analysis-hero">
         <div>
-          <span className="eyebrow">子页面三 · 试卷分析</span>
+          <span className="eyebrow">试卷分析</span>
           <h2>上传试卷、错题或作业图片，分析孩子到底卡在哪里</h2>
-          <p>系统会围绕错题内容、题型类型、知识漏洞、解题方法、审题步骤和训练任务进行整理。正式版会接入OpenAI视觉API，直接读取图片或PDF内容。</p>
+          <p>上传材料后，AI会围绕题目内容、出错类型、知识漏洞、解题方法、审题步骤和训练任务进行整理，帮助学生知道下一步该补什么、练什么。</p>
         </div>
         <div className="strategy-status">
           <strong>{draft.files.length}</strong>
@@ -3265,14 +3222,14 @@ function ModernStatementPage({
     <section className="stack">
       <div className="hero-band compact statement-hero">
         <div>
-          <span className="eyebrow">子页面二 · 学情陈述</span>
+          <span className="eyebrow">学情陈述</span>
           <h2>先让学生把问题说完整，再进入个人学习档案</h2>
           <p>学生可以选择科目和发生场景，形成“组合序号 + 文字陈述”的记录；也可以使用麦克风或上传语音，后续交给AI结合问卷做整体分析。</p>
         </div>
         <MessageStat records={records.length} />
       </div>
 
-      <div className="statement-subtabs" role="tablist" aria-label="学情陈述子页面">
+      <div className="statement-subtabs" role="tablist" aria-label="学情陈述分区">
         {[
           ["entry", "主动陈述"],
           ["archive", "陈述档案"],
@@ -3383,7 +3340,7 @@ function ModernStatementPage({
                   </div>
                   <div>
                     <strong>上传已有语音</strong>
-                    <p>支持学生上传提前录好的音频，正式版会转写成文字。</p>
+                    <p>支持学生上传提前录好的音频，后续会整理进个人学情档案。</p>
                   </div>
                   <span>选择音频文件</span>
                   <input type="file" accept="audio/*" onChange={uploadAudio} />
@@ -3494,7 +3451,7 @@ function ModernProfilePage({ answers, records, aiInsight, aiStatus, submitted, c
     <section className="stack">
       <div className="hero-band compact">
         <div>
-          <span className="eyebrow">子页面三 · 学情画像</span>
+          <span className="eyebrow">学情画像</span>
           <h2>先给出整体学习分析，再展开每个画像项目</h2>
           <p>报告同时面向学生和家长：先看整体判断，再查看成绩、方法、习惯、动机、情绪精力等细分维度。</p>
         </div>
@@ -3505,68 +3462,42 @@ function ModernProfilePage({ answers, records, aiInsight, aiStatus, submitted, c
       </div>
 
       <section className="panel report-panel">
-        <div className="report-title">
+        <div className="report-title profile-simple-title">
           <div>
             <span className="eyebrow">学生与家长共读版</span>
             <h2>{studentName}的学情画像报告</h2>
           </div>
-          <button className="ghost-action" onClick={printPage}>
+          <button className="ghost-action" onClick={() => printPage("下载学情画像报告PDF", "学情画像报告可以打印或另存为PDF，需要登录并开通会员后使用。")}>
             <Download size={18} />
             下载报告PDF
           </button>
-          <button className="primary-action" onClick={generateProfileAnalysis}>
-            {aiStatus === "loading" ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
-            {aiStatus === "loading" ? "AI正在整合" : "AI统一分析画像"}
-          </button>
         </div>
 
-        <div className="profile-overall-grid">
-          <article className="profile-overall-card is-primary">
-            <span>AI整体学习分析</span>
-            <h3>{aiInsight?.core || "当前需要先判断：学习问题主要来自基础、方法、执行、习惯、动机，还是多个因素共同作用。"}</h3>
-            <p>{aiInsight?.archiveConclusion || "完成学情问卷和学情陈述后，AI会把成绩表现、学习方法、学习习惯、学习动机和情绪精力放在一起分析，避免只看单一成绩。"}</p>
-          </article>
-          {[
-            ["成绩表现", "关注分数变化背后的题型、知识漏洞和考试稳定性。"],
-            ["学习方法", "判断孩子是否知道每个科目应该怎么学，而不是只靠努力。"],
-            ["学习习惯", "观察作业、复习、错题、计划执行是否能形成稳定闭环。"],
-            ["学习动机", "区分不想学、不会学、压力过大和目标感不足。"],
-          ].map(([title, text]) => (
-            <article className="profile-overall-card" key={title}>
-              <span>{title}</span>
-              <p>{text}</p>
-            </article>
-          ))}
-        </div>
-
-        <div className="report-summary">
-          <div>
-            <strong>核心判断</strong>
-            <p>{aiInsight?.core || "完成问卷和陈述后，这里会自动更新为AI对学生学习问题的核心判断。"}</p>
+        <section className="profile-unified-analysis">
+          <div className="profile-unified-head">
+            <div>
+              <span className="eyebrow">AI统一分析画像</span>
+              <h2>整合问卷、陈述和试卷分析，形成完整学习判断</h2>
+            </div>
+            <button className="primary-action" onClick={generateProfileAnalysis}>
+              {aiStatus === "loading" ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
+              {aiStatus === "loading" ? "AI正在分析" : "AI统一分析画像"}
+            </button>
           </div>
-          <div>
-            <strong>档案来源</strong>
-            <p>已记录 {records.length} 条学情陈述；问卷完成度 {completion}%。</p>
+          <div className="profile-unified-body">
+            <h3>{aiInsight?.core || "点击“AI统一分析画像”后，这里会显示学生学习问题的整体判断。"}</h3>
+            <p>{aiInsight?.archiveConclusion || "AI会统一阅读前面的学情问卷、学情陈述和试卷分析，综合判断学生的基础、方法、执行、习惯、动机和情绪精力等情况。"}</p>
+            {aiInsight?.summary && <p>{aiInsight.summary}</p>}
+            {aiInsight?.reasons?.length > 0 && (
+              <ul className="profile-unified-list">
+                {aiInsight.reasons.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            )}
+            <p className="profile-source-note">当前档案来源：学情陈述 {records.length} 条，问卷完成度 {completion}%，试卷分析会在上传材料后持续补充。</p>
           </div>
-        </div>
-
-        <div className="agent-archive-strip">
-          <article>
-            <span>智能体</span>
-            <strong>{shuziLearningCoachAgent.name}</strong>
-            <p>{shuziLearningCoachAgent.mission}</p>
-          </article>
-          <article>
-            <span>PostgreSQL动态档案</span>
-            <strong>{postgresqlArchiveTables.length} 类核心数据表</strong>
-            <p>每个学生拥有独立档案，问卷、陈述、试卷、错题、计划、反思和AI报告会持续写入并更新画像。</p>
-          </article>
-          <article>
-            <span>本页任务边界</span>
-            <strong>{aiTaskPrompts.profile.name}</strong>
-            <p>{aiTaskPrompts.profile.scope}</p>
-          </article>
-        </div>
+        </section>
 
         <div className="profile-accordion">
           {profileSections.map((section) => (
@@ -3659,7 +3590,7 @@ function StrategyDesignPage({
     <section className="stack strategy-page">
       <div className="hero-band compact strategy-hero">
         <div>
-          <span className="eyebrow">第四页 · 策略与任务</span>
+          <span className="eyebrow">策略与任务</span>
           <h2>先确定这个科目应该怎么学，再拆成资料使用和具体任务</h2>
           <p>
             这一页以学情画像为基础，由AI给出科目策略和学习任务建议。学生可以自己写资料使用细节，也可以让AI提出建议或帮忙修改，最后形成可执行的科目学习方案。
@@ -3849,7 +3780,7 @@ function StudyPlanPage({
     <section className="stack study-plan-page">
       <div className="hero-band compact plan-hero">
         <div>
-          <span className="eyebrow">第五页 · 学习计划</span>
+          <span className="eyebrow">学习计划</span>
           <h2>把每一天的时间、任务和备注直接写进周计划表</h2>
           <p>
             计划表参考学习计划本的结构：横排是星期，每个格子里竖着填写时间、任务和备注。时间用选择器，减少手写混乱，也方便后面让AI读取并优化计划。
@@ -3879,7 +3810,7 @@ function StudyPlanPage({
                 <h2>每个星期下面都有时间、任务、备注</h2>
               </div>
               <div className="ai-action-row no-print">
-                <button type="button" className="ghost-action" onClick={printPage}>
+                <button type="button" className="ghost-action" onClick={() => printPage("下载学习计划PDF", "学习计划表和方法习惯训练表可以打印或另存为PDF，需要登录并开通会员后使用。")}>
                   <FileDown size={17} />
                   下载学习计划PDF
                 </button>
@@ -4178,7 +4109,7 @@ function MistakeSpecialPage({
     <section className="stack mistake-page">
       <div className="hero-band compact mistake-hero">
         <div>
-          <span className="eyebrow">第六页 · 错题专项</span>
+          <span className="eyebrow">错题专项</span>
           <h2>上传错题、沉淀错题库，再让AI生成相似题训练</h2>
           <p>学生可以上传图片或PDF，系统先建立错题档案。后续接入OpenAI API后，可自动识别题目、分析错因、生成1-3道相似题，并整理成错题PDF。</p>
         </div>
@@ -4200,7 +4131,7 @@ function MistakeSpecialPage({
           <label className="mistake-upload-box">
             <UploadCloud size={28} />
             <strong>{mistakeDraft.fileName || "点击上传错题图片或PDF"}</strong>
-            <span>支持 JPG、PNG、PDF。正式版会保存原文件并进入AI识别。</span>
+            <span>支持 JPG、PNG、PDF。上传后会进入个人错题库，方便后续识别、整理和训练。</span>
             <input type="file" accept="image/*,.pdf,application/pdf" onChange={handleMistakeFile} />
           </label>
 
@@ -4351,7 +4282,7 @@ function MistakeSpecialPage({
           ))}
         </div>
         <div className="ai-action-row">
-          <button type="button" className="ghost-action" onClick={printPage}>
+          <button type="button" className="ghost-action" onClick={() => printPage("下载错题整理PDF", "错题整理会把当前错题库内容打印或另存为PDF，需要登录并开通会员后使用。")}>
             <FileDown size={17} />
             下载错题整理PDF
           </button>
@@ -4383,9 +4314,9 @@ function ModernKnowledgeNotePage({ knowledgeQuestion, setKnowledgeQuestion, know
     <section className="stack knowledge-page">
       <div className="hero-band compact knowledge-hero">
         <div>
-          <span className="eyebrow">第七页 · 知识笔记</span>
+          <span className="eyebrow">知识笔记</span>
           <h2>学生提出任意问题，AI生成严谨、丰富、可下载的知识图</h2>
-          <p>后台提示词会要求结构标注、功能解释、学习总结和视觉层次，尽量接近“专业知识海报”而不是简单示意图。</p>
+          <p>适合整理概念、结构、流程和易混知识。生成内容会尽量包含清晰结构、关键标注、功能解释和学习总结，方便学生复习和保存。</p>
         </div>
         <div className="strategy-status">
           <strong>SVG</strong>
@@ -4462,17 +4393,29 @@ function ModernKnowledgeNotePage({ knowledgeQuestion, setKnowledgeQuestion, know
   );
 }
 
-function FreeAskPage({ messages, input, setInput, sendFreeAsk }) {
-  const quickPrompts = ["帮我分析一道数学题", "把细胞结构做成知识图", "我总是拖延怎么办", "英语阅读错很多怎么办"];
+function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile, sendFreeAsk }) {
+  const quickPrompts = ["帮我分析一道数学题", "把细胞结构做成知识图", "黑洞为什么会形成", "我总是拖延怎么办"];
+  const formatSize = (size) => (size > 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(size / 1024))} KB`);
   return (
     <section className="free-ask-page">
       <div className="free-ask-center">
         <h2>你今天在想些什么？</h2>
+        <p className="free-ask-intro">可以问作业、知识点、学习方法，也可以问科学、生活、兴趣和任何突然想到的问题。上传图片或文件后，AI可以结合材料一起回答。</p>
         <div className="free-ask-thread">
           {messages.map((message) => (
             <article key={message.id} className={message.role === "user" ? "free-message is-user" : "free-message"}>
               <strong>{message.role === "user" ? "我" : "树子AI"}</strong>
               <p>{message.content}</p>
+              {message.attachments?.length > 0 && (
+                <div className="free-message-attachments">
+                  {message.attachments.map((file) => (
+                    <span key={file.id}>
+                      {file.previewUrl ? <ImageIcon size={15} /> : <FileText size={15} />}
+                      {file.name}
+                    </span>
+                  ))}
+                </div>
+              )}
               {message.note && (
                 <div className="free-note-preview">
                   <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(message.note.svg)}`} alt={message.note.title} />
@@ -4485,10 +4428,25 @@ function FreeAskPage({ messages, input, setInput, sendFreeAsk }) {
             </article>
           ))}
         </div>
+        {files.length > 0 && (
+          <div className="free-attachment-tray">
+            {files.map((file) => (
+              <div className="free-attachment-chip" key={file.id}>
+                {file.previewUrl ? <img src={file.previewUrl} alt="" /> : <FileText size={16} />}
+                <span>{file.name}</span>
+                <em>{formatSize(file.size)}</em>
+                <button type="button" onClick={() => removeFile(file.id)} aria-label={`移除${file.name}`}>
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="free-ask-input">
-          <button type="button" aria-label="添加附件">
+          <label className="free-attach-button" aria-label="上传文件或图片" title="上传文件或图片">
             <Plus size={20} />
-          </button>
+            <input type="file" accept="image/*,.pdf,.doc,.docx,.txt" multiple onChange={handleFiles} />
+          </label>
           <textarea
             value={input}
             onChange={(event) => setInput(event.target.value)}
@@ -4498,7 +4456,7 @@ function FreeAskPage({ messages, input, setInput, sendFreeAsk }) {
                 sendFreeAsk();
               }
             }}
-            placeholder="有问题，尽管问"
+            placeholder="输入问题，也可以先点左侧 + 上传图片或文件"
           />
           <button type="button" className="free-send" onClick={sendFreeAsk} aria-label="发送问题">
             <Send size={20} />
