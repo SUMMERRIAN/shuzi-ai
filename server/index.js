@@ -6,7 +6,7 @@ import bcrypt from "bcryptjs";
 import { ensureSchema } from "./schema.js";
 import { query, withTransaction } from "./db.js";
 import { requireAdminToken, requireAuth, signToken } from "./auth.js";
-import { ltPackages, membershipPlans, storageExpansionPackages } from "./plans.js";
+import { ltPackages, membershipPlans, storageExpansionPackages, tokenBillingRules } from "./plans.js";
 import { upload, toStoredFile } from "./uploads.js";
 import { ensureOpenAIKey, getGeneratedImageBase64, getResponseText, openai, parseJsonText, readFileAsDataUrl } from "./openaiClient.js";
 
@@ -87,6 +87,21 @@ async function assertPaidMember(userId) {
     error.code = "MEMBERSHIP_REQUIRED";
     throw error;
   }
+}
+
+async function recordTokenUsage(userId, amount, note, meta = {}) {
+  const tokens = Math.max(1, Math.ceil(Number(amount || 1)));
+  await withTransaction(async (client) => {
+    await client.query("UPDATE learning_token_wallets SET balance = GREATEST(balance - $2, 0), updated_at = now() WHERE user_id = $1", [
+      userId,
+      tokens,
+    ]);
+    await client.query(
+      `INSERT INTO learning_token_transactions (user_id, amount, type, source, note, meta)
+       VALUES ($1, $2, 'consume', 'ai_action', $3, $4)`,
+      [userId, -tokens, note, JSON.stringify(meta)]
+    );
+  });
 }
 
 async function saveUploadedFiles(client, user, student, purpose, files) {
@@ -251,9 +266,12 @@ app.post("/api/membership/orders", requireAuth, async (req, res) => {
 });
 
 app.post("/api/lt/orders", requireAuth, async (req, res) => {
-  const { packageId } = req.body || {};
-  const pack = ltPackages[packageId];
-  if (!pack) return res.status(400).json({ error: "INVALID_LT_PACKAGE" });
+  const { packageId, customAmount } = req.body || {};
+  const amountCny = Number(customAmount || 0);
+  const pack = packageId === "custom"
+    ? { id: "custom", title: `Token自定义充值 ¥${amountCny}`, priceCny: amountCny, learningTokens: Math.round(amountCny * tokenBillingRules.tokensPerCny) }
+    : ltPackages[packageId];
+  if (!pack || Number(pack.priceCny) <= 0) return res.status(400).json({ error: "INVALID_LT_PACKAGE" });
   const order = (
     await query(
       `INSERT INTO payment_orders (user_id, order_type, package_id, title, amount_cny, provider, meta)
@@ -263,6 +281,78 @@ app.post("/api/lt/orders", requireAuth, async (req, res) => {
     )
   ).rows[0];
   res.json({ order, message: "已生成LT充值申请。当前版本需要管理员后台手动确认。" });
+});
+
+app.get("/api/account/center", requireAuth, async (req, res) => {
+  const account = await buildAccountSnapshot(req.user.id);
+  const downloads = (
+    await query(
+      `SELECT id, title, payload, created_at
+       FROM student_archive_events
+       WHERE user_id = $1 AND event_type = 'download'
+       ORDER BY created_at DESC
+       LIMIT 30`,
+      [req.user.id]
+    )
+  ).rows;
+  const tokenRecords = (
+    await query(
+      `SELECT id, amount, type, source, note, meta, created_at
+       FROM learning_token_transactions
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [req.user.id]
+    )
+  ).rows;
+  const orders = (
+    await query(
+      `SELECT id, order_type, package_id, title, amount_cny, status, created_at, paid_at
+       FROM payment_orders
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 30`,
+      [req.user.id]
+    )
+  ).rows;
+  res.json({ account, downloads, tokenRecords, orders });
+});
+
+app.post("/api/account/profile", requireAuth, async (req, res) => {
+  const { displayName = "" } = req.body || {};
+  const name = String(displayName).trim();
+  if (!name) return res.status(400).json({ error: "NAME_REQUIRED", message: "请输入学生姓名或昵称。" });
+  await withTransaction(async (client) => {
+    await client.query("UPDATE users SET display_name = $2, updated_at = now() WHERE id = $1", [req.user.id, name]);
+    const student = await getOrCreateStudent(client, req.user, name);
+    await client.query("UPDATE students SET name = $2, updated_at = now() WHERE id = $1", [student.id, name]);
+  });
+  res.json({ account: await buildAccountSnapshot(req.user.id) });
+});
+
+app.post("/api/account/password", requireAuth, async (req, res) => {
+  const { oldPassword = "", newPassword = "" } = req.body || {};
+  const user = (await query("SELECT * FROM users WHERE id = $1", [req.user.id])).rows[0];
+  const ok = user.password_hash ? await bcrypt.compare(String(oldPassword), user.password_hash) : false;
+  if (!ok) return res.status(401).json({ error: "INVALID_PASSWORD", message: "原密码不正确。" });
+  if (String(newPassword).length < 6) return res.status(400).json({ error: "PASSWORD_TOO_SHORT", message: "新密码至少需要6位。" });
+  const passwordHash = await bcrypt.hash(String(newPassword), 12);
+  await query("UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1", [req.user.id, passwordHash]);
+  res.json({ ok: true });
+});
+
+app.post("/api/account/downloads", requireAuth, async (req, res) => {
+  const { title = "资料下载", filename = "", href = "" } = req.body || {};
+  const student = await getPrimaryStudent(req.user);
+  const event = (
+    await query(
+      `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
+       VALUES ($1, $2, 'download', $3, $4)
+       RETURNING *`,
+      [student.id, req.user.id, title, JSON.stringify({ filename, href })]
+    )
+  ).rows[0];
+  res.json({ event });
 });
 
 app.post("/api/archive/questionnaire", requireAuth, async (req, res) => {
@@ -381,6 +471,7 @@ app.post("/api/ai/paper-analysis", requireAuth, upload.array("files", 8), async 
       );
       return { upload: uploadRow, report: reportRow, files: fileRows };
     });
+    await recordTokenUsage(req.user.id, 18, "AI试卷分析", { feature: "paper-analysis", reportId: saved.report?.id });
     res.json({ report, saved });
   } catch (error) {
     next(error);
@@ -415,6 +506,7 @@ app.post("/api/ai/transcribe", requireAuth, upload.single("audio"), async (req, 
       );
       return row;
     });
+    await recordTokenUsage(req.user.id, 6, "语音转文字", { feature: "transcribe", audioId: saved.id });
     res.json({ transcript: text, saved });
   } catch (error) {
     next(error);
@@ -469,6 +561,7 @@ app.post("/api/ai/mistakes/analyze", requireAuth, upload.array("files", 6), asyn
       );
       return row;
     });
+    await recordTokenUsage(req.user.id, 12, "AI错题识别", { feature: "mistake-analyze", mistakeId: saved.id });
     res.json({ analysis, saved });
   } catch (error) {
     next(error);
@@ -506,6 +599,7 @@ app.post("/api/ai/mistakes/practice", requireAuth, async (req, res, next) => {
         [student.id, req.user.id, sourceMistakeId, JSON.stringify(generated.questions || generated)]
       )
     ).rows[0];
+    await recordTokenUsage(req.user.id, 10, "AI生成相似题", { feature: "mistake-practice", practiceId: saved.id });
     res.json({ practice: generated, saved });
   } catch (error) {
     next(error);
@@ -542,6 +636,7 @@ app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
         [student.id, req.user.id, topic, JSON.stringify(note), imageBase64 || null]
       )
     ).rows[0];
+    await recordTokenUsage(req.user.id, 35, "AI知识图生成", { feature: "knowledge-note", noteId: saved.id });
     res.json({ note, imageBase64, saved });
   } catch (error) {
     next(error);
@@ -586,6 +681,39 @@ app.post("/api/admin/lt/recharge", requireAdminToken, async (req, res) => {
     );
   });
   res.json({ account: await buildAccountSnapshot(user.id) });
+});
+
+app.get("/api/admin/users", requireAdminToken, async (req, res) => {
+  const users = (
+    await query(
+      `SELECT
+        u.id,
+        u.identifier,
+        u.display_name,
+        u.created_at,
+        s.name AS student_name,
+        m.plan_name,
+        m.status AS membership_status,
+        m.expires_at,
+        w.balance,
+        q.base_mb,
+        q.expansion_mb,
+        q.used_bytes
+      FROM users u
+      LEFT JOIN students s ON s.user_id = u.id
+      LEFT JOIN LATERAL (
+        SELECT * FROM student_memberships sm
+        WHERE sm.user_id = u.id
+        ORDER BY sm.created_at DESC
+        LIMIT 1
+      ) m ON true
+      LEFT JOIN learning_token_wallets w ON w.user_id = u.id
+      LEFT JOIN storage_quotas q ON q.user_id = u.id
+      ORDER BY u.created_at DESC
+      LIMIT 100`
+    )
+  ).rows;
+  res.json({ users, plans: Object.values(membershipPlans), tokenPackages: Object.values(ltPackages) });
 });
 
 app.use((error, req, res, next) => {

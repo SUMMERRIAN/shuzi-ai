@@ -56,8 +56,16 @@ const subPages = [
 ];
 
 const memberPlans = [
-  { id: "monthly", name: "VIP月度会员", price: "¥19.9/月", description: `适合单个孩子持续使用AI分析、错题训练和下载资料，包含${storagePlans.vip.storageGb}GB基础存储。` },
-  { id: "season", name: "VIP季度会员", price: "¥59/季", description: "适合完整跟进一个学习阶段，持续使用AI分析、错题训练、资料下载和个人档案能力。" },
+  { id: "monthly", name: "月付会员", price: "¥19.9/月", description: `适合先体验完整学习系统，包含AI分析、错题训练、资料下载和${storagePlans.vip.storageGb}GB基础存储。` },
+  { id: "season", name: "季付会员", price: "¥59/季", description: "适合跟进一个阶段的学习调整，持续保存个人档案和学习记录。" },
+  { id: "halfYear", name: "半年会员", price: "¥109/半年", description: "适合稳定训练学习方法、错题复测和阶段性学习策略优化。" },
+  { id: "yearly", name: "年度会员", price: "¥199/年", description: "适合长期建立学生学习数据库，持续跟踪学情变化和训练结果。" },
+];
+
+const tokenPackages = [
+  { id: "token-100", label: "¥100", tokens: 10000 },
+  { id: "token-300", label: "¥300", tokens: 30000 },
+  { id: "token-500", label: "¥500", tokens: 50000 },
 ];
 
 const defaultForumPosts = [
@@ -1455,6 +1463,23 @@ function App() {
     password: "",
     confirmPassword: "",
   });
+  const [memberCenter, setMemberCenter] = useState({
+    loading: false,
+    message: "",
+    data: null,
+    displayName: "",
+    oldPassword: "",
+    newPassword: "",
+  });
+  const [adminPanel, setAdminPanel] = useState({
+    token: "",
+    message: "",
+    users: [],
+    identifier: "",
+    planId: "monthly",
+    tokenAmount: "10000",
+  });
+  const [customTokenAmount, setCustomTokenAmount] = useState("");
   const [currentStep, setCurrentStep] = useState(0);
   const [answers, setAnswers] = useState(defaultAnswers);
   const [submitted, setSubmitted] = useState(false);
@@ -1645,12 +1670,128 @@ function App() {
     }
   }
 
+  async function requestTokenOrder(packageId = "token-100", customAmount = "") {
+    if (!member.isLoggedIn) {
+      setAuthModal((prev) => ({ ...prev, message: "请先注册或登录，再提交Token充值申请。" }));
+      return;
+    }
+    try {
+      const data = await apiRequest("/lt/orders", {
+        method: "POST",
+        body: JSON.stringify({ packageId, customAmount }),
+      });
+      setAccountNotice(data.message || "已提交Token充值申请。");
+      setAuthModal((prev) => ({ ...prev, message: "充值申请已提交。请扫码付款后等待管理员确认入账。" }));
+    } catch (error) {
+      setAuthModal((prev) => ({ ...prev, message: error.message || "Token充值申请提交失败。" }));
+    }
+  }
+
   function logoutMember() {
     pendingMemberActionRef.current = null;
     memberActionBypassRef.current = false;
     setAuthToken("");
     setAccountNotice("");
     setMember({ isLoggedIn: false, isPaid: false, identifier: "", provider: "用户名", plan: "", ltBalance: 0, storageTotalMb: 50 });
+  }
+
+  async function loadMemberCenter() {
+    if (!member.isLoggedIn) {
+      setAuthModal({ open: true, actionName: "会员中心", message: "请先注册或登录，再查看会员中心。" });
+      return;
+    }
+    setActivePage("memberCenter");
+    setMemberCenter((prev) => ({ ...prev, loading: true, message: "" }));
+    try {
+      const data = await apiRequest("/account/center");
+      setMemberCenter((prev) => ({
+        ...prev,
+        loading: false,
+        data,
+        displayName: data.account?.student?.name || data.account?.user?.displayName || "",
+      }));
+      setMember(mapAccountToMember(data.account));
+    } catch (error) {
+      setMemberCenter((prev) => ({ ...prev, loading: false, message: error.message || "会员中心加载失败。" }));
+    }
+  }
+
+  async function updateMemberProfile() {
+    try {
+      const data = await apiRequest("/account/profile", {
+        method: "POST",
+        body: JSON.stringify({ displayName: memberCenter.displayName }),
+      });
+      setMember(mapAccountToMember(data.account));
+      setMemberCenter((prev) => ({ ...prev, message: "资料已更新。" }));
+      loadMemberCenter();
+    } catch (error) {
+      setMemberCenter((prev) => ({ ...prev, message: error.message || "资料更新失败。" }));
+    }
+  }
+
+  async function updateMemberPassword() {
+    try {
+      await apiRequest("/account/password", {
+        method: "POST",
+        body: JSON.stringify({ oldPassword: memberCenter.oldPassword, newPassword: memberCenter.newPassword }),
+      });
+      setMemberCenter((prev) => ({ ...prev, oldPassword: "", newPassword: "", message: "密码已修改。" }));
+    } catch (error) {
+      setMemberCenter((prev) => ({ ...prev, message: error.message || "密码修改失败。" }));
+    }
+  }
+
+  async function recordDownload(title, filename, href) {
+    try {
+      await apiRequest("/account/downloads", {
+        method: "POST",
+        body: JSON.stringify({ title, filename, href }),
+      });
+    } catch {
+      // 下载不能因为记录失败而中断。
+    }
+  }
+
+  async function loadAdminUsers() {
+    if (!adminPanel.token.trim()) {
+      setAdminPanel((prev) => ({ ...prev, message: "请输入管理员口令。" }));
+      return;
+    }
+    try {
+      const data = await apiRequest("/admin/users", { headers: { "x-admin-token": adminPanel.token.trim() } });
+      setAdminPanel((prev) => ({ ...prev, users: data.users || [], message: "管理员数据已刷新。" }));
+    } catch (error) {
+      setAdminPanel((prev) => ({ ...prev, message: error.message || "管理员数据加载失败。" }));
+    }
+  }
+
+  async function adminActivateMembership() {
+    try {
+      await apiRequest("/admin/memberships/activate", {
+        method: "POST",
+        headers: { "x-admin-token": adminPanel.token.trim() },
+        body: JSON.stringify({ identifier: adminPanel.identifier, planId: adminPanel.planId }),
+      });
+      setAdminPanel((prev) => ({ ...prev, message: "会员已开通。" }));
+      loadAdminUsers();
+    } catch (error) {
+      setAdminPanel((prev) => ({ ...prev, message: error.message || "开通失败。" }));
+    }
+  }
+
+  async function adminRechargeToken() {
+    try {
+      await apiRequest("/admin/lt/recharge", {
+        method: "POST",
+        headers: { "x-admin-token": adminPanel.token.trim() },
+        body: JSON.stringify({ identifier: adminPanel.identifier, amount: Number(adminPanel.tokenAmount), note: "管理员手动充值" }),
+      });
+      setAdminPanel((prev) => ({ ...prev, message: "Token已入账。" }));
+      loadAdminUsers();
+    } catch (error) {
+      setAdminPanel((prev) => ({ ...prev, message: error.message || "充值失败。" }));
+    }
   }
 
   function closeAuthModal() {
@@ -2195,6 +2336,7 @@ function App() {
     link.click();
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    recordDownload("下载知识图", `${knowledgeNote.title}.svg`, "AI知识图");
   }
 
   function runStrategyAi(section, mode, targetId = "") {
@@ -2238,6 +2380,7 @@ function App() {
 
   function printPage(actionName = "下载或打印PDF", message = "PDF下载和打印属于会员资料导出能力，需要登录并开通会员。") {
     if (!requireMemberAction(actionName, () => printPage(actionName, message), message)) return;
+    recordDownload(actionName, "浏览器打印或另存为PDF", window.location.href);
     window.print();
   }
 
@@ -2249,6 +2392,7 @@ function App() {
       document.body.appendChild(link);
       link.click();
       link.remove();
+      recordDownload(actionName, filename, href);
     }, "下载学习工具表格需要会员权限。");
   }
 
@@ -2343,7 +2487,7 @@ function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand">
+        <div className="brand" onDoubleClick={() => setActivePage("admin")}>
           <div className="brand-mark">
             <img src="/assets/shuzi-logo.png" alt="树子AI" />
           </div>
@@ -2390,9 +2534,9 @@ function App() {
       <main className="workspace">
         <header className="topbar">
           <div className="topbar-actions">
-            <button className={member.isPaid ? "member-pill is-active" : "member-pill"} onClick={() => setAuthModal({ open: true, actionName: "会员中心", message: "管理登录账号和会员开通状态。" })}>
+            <button className={member.isPaid ? "member-pill is-active" : "member-pill"} onClick={loadMemberCenter}>
               {member.isPaid ? <Crown size={17} /> : <LockKeyhole size={17} />}
-              {member.isPaid ? "正式会员" : member.isLoggedIn ? "开通会员" : "登录 / 注册"}
+              {member.isLoggedIn ? "会员中心" : "登录 / 注册"}
             </button>
             {member.isLoggedIn && (
               <button className="ghost-action" onClick={logoutMember}>
@@ -2560,6 +2704,29 @@ function App() {
             sendFreeAsk={sendFreeAsk}
           />
         )}
+
+        {activePage === "memberCenter" && (
+          <MemberCenterPage
+            member={member}
+            state={memberCenter}
+            setState={setMemberCenter}
+            refresh={loadMemberCenter}
+            updateProfile={updateMemberProfile}
+            updatePassword={updateMemberPassword}
+            openPayment={() => setAuthModal({ open: true, actionName: "会员开通与Token充值", message: "选择会员方案或Token充值额度，扫码付款后等待管理员确认。" })}
+          />
+        )}
+
+        {activePage === "admin" && (
+          <AdminPanelPage
+            state={adminPanel}
+            setState={setAdminPanel}
+            loadUsers={loadAdminUsers}
+            activateMembership={adminActivateMembership}
+            rechargeToken={adminRechargeToken}
+            plans={memberPlans}
+          />
+        )}
       </main>
 
       {authModal.open && (
@@ -2570,6 +2737,9 @@ function App() {
           setAuthForm={setAuthForm}
           completeAuth={completeAuth}
           activateMember={activateMember}
+          requestTokenOrder={requestTokenOrder}
+          customTokenAmount={customTokenAmount}
+          setCustomTokenAmount={setCustomTokenAmount}
           closeAuthModal={closeAuthModal}
         />
       )}
@@ -2838,16 +3008,16 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, update
   );
 }
 
-function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, activateMember, closeAuthModal }) {
+function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, activateMember, requestTokenOrder, customTokenAmount, setCustomTokenAmount, closeAuthModal }) {
   const loggedIn = member.isLoggedIn;
   const paid = member.isPaid;
   return (
     <div className="member-modal-backdrop" role="dialog" aria-modal="true" aria-label="会员登录与开通">
-      <section className="member-modal">
+      <section className="member-modal member-payment-modal">
         <div className="member-modal-head">
           <div>
             <span className="eyebrow">会员系统</span>
-            <h2>{paid ? "会员中心" : loggedIn ? "开通会员后继续使用" : "注册或登录后继续"}</h2>
+            <h2>{paid ? "会员与充值" : loggedIn ? "开通会员后继续使用" : "注册或登录后继续"}</h2>
             <p>{authModal.message}</p>
           </div>
           <button type="button" className="modal-close" onClick={closeAuthModal} aria-label="关闭会员弹窗">
@@ -2958,10 +3128,224 @@ function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, a
                 <p>会员可以保存个人学习档案，使用AI分析、错题训练、知识图生成和学习资料下载等能力。</p>
               </article>
             </div>
+
+            <div className="payment-layout">
+              <section className="payment-qr-panel">
+                <div>
+                  <span className="eyebrow">扫码付款</span>
+                  <h3>付款后等待管理员确认开通或入账</h3>
+                  <p>付款时请备注用户名：{member.identifier}。管理员确认后，会在后台为你开通会员或增加Token。</p>
+                </div>
+                <div className="payment-qr-grid">
+                  <article>
+                    <img src="/assets/payment/alipay.jpg" alt="支付宝收款码" />
+                    <strong>支付宝</strong>
+                  </article>
+                  <article>
+                    <img src="/assets/payment/wechat.png" alt="微信支付收款码" />
+                    <strong>微信支付</strong>
+                  </article>
+                </div>
+              </section>
+
+              <section className="token-order-panel">
+                <div>
+                  <span className="eyebrow">Token充值</span>
+                  <h3>用于AI分析、错题训练和知识图生成</h3>
+                </div>
+                <div className="token-package-grid">
+                  {tokenPackages.map((pack) => (
+                    <button key={pack.id} type="button" className="token-package-button" onClick={() => requestTokenOrder(pack.id)}>
+                      <strong>{pack.label}</strong>
+                      <span>{pack.tokens.toLocaleString("zh-CN")} Token</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="custom-token-row">
+                  <input
+                    type="number"
+                    min="1"
+                    value={customTokenAmount}
+                    onChange={(event) => setCustomTokenAmount(event.target.value)}
+                    placeholder="自定义充值金额"
+                  />
+                  <button type="button" className="ghost-action" onClick={() => requestTokenOrder("custom", customTokenAmount)}>
+                    提交自定义充值
+                  </button>
+                </div>
+              </section>
+            </div>
           </div>
         )}
       </section>
     </div>
+  );
+}
+
+function MemberCenterPage({ member, state, setState, refresh, updateProfile, updatePassword, openPayment }) {
+  const data = state.data || {};
+  const downloads = data.downloads || [];
+  const tokenRecords = data.tokenRecords || [];
+  const orders = data.orders || [];
+  return (
+    <section className="stack">
+      <div className="hero-band compact">
+        <div>
+          <span className="eyebrow">会员中心</span>
+          <h2>管理个人资料、下载记录和Token使用记录</h2>
+          <p>这里保存学生账号信息、会员状态、资料下载记录和AI功能使用记录，方便后续回看和继续使用。</p>
+        </div>
+        <button type="button" className="primary-action" onClick={openPayment}>
+          <CreditCard size={17} />
+          开通 / 充值
+        </button>
+      </div>
+
+      <div className="member-center-grid">
+        <article className="panel">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">个人信息</span>
+              <h2>{member.identifier || "未登录账号"}</h2>
+            </div>
+            <button type="button" className="ghost-action" onClick={refresh}>
+              刷新
+            </button>
+          </div>
+          <div className="member-form-grid">
+            <label>
+              <span>学生姓名或昵称</span>
+              <input value={state.displayName} onChange={(event) => setState((prev) => ({ ...prev, displayName: event.target.value }))} />
+            </label>
+            <button type="button" className="primary-action" onClick={updateProfile}>
+              保存资料
+            </button>
+            <label>
+              <span>原密码</span>
+              <input type="password" value={state.oldPassword} onChange={(event) => setState((prev) => ({ ...prev, oldPassword: event.target.value }))} />
+            </label>
+            <label>
+              <span>新密码</span>
+              <input type="password" value={state.newPassword} onChange={(event) => setState((prev) => ({ ...prev, newPassword: event.target.value }))} />
+            </label>
+            <button type="button" className="ghost-action" onClick={updatePassword}>
+              修改密码
+            </button>
+          </div>
+          {state.message && <p className="account-notice">{state.message}</p>}
+        </article>
+
+        <article className="panel">
+          <span className="eyebrow">会员状态</span>
+          <div className="member-status-grid">
+            <strong>{member.isPaid ? member.plan || "正式会员" : "尚未开通会员"}</strong>
+            <span>Token余额：{member.ltBalance || 0}</span>
+            <span>存储空间：{member.storageTotalMb || 50}MB</span>
+          </div>
+        </article>
+      </div>
+
+      <div className="records-grid">
+        <RecordList title="PDF与资料下载记录" empty="还没有下载记录。" items={downloads.map((item) => ({
+          id: item.id,
+          title: item.title,
+          meta: item.payload?.filename || "下载记录",
+          time: item.created_at,
+        }))} />
+        <RecordList title="Token使用记录" empty="还没有Token记录。" items={tokenRecords.map((item) => ({
+          id: item.id,
+          title: item.note || item.type,
+          meta: `${item.amount > 0 ? "+" : ""}${item.amount} Token`,
+          time: item.created_at,
+        }))} />
+        <RecordList title="会员与充值申请" empty="还没有申请记录。" items={orders.map((item) => ({
+          id: item.id,
+          title: item.title,
+          meta: `${item.status} · ¥${item.amount_cny}`,
+          time: item.created_at,
+        }))} />
+      </div>
+    </section>
+  );
+}
+
+function RecordList({ title, items, empty }) {
+  return (
+    <article className="panel record-list-panel">
+      <h2>{title}</h2>
+      {items.length === 0 && <p className="muted-text">{empty}</p>}
+      {items.map((item) => (
+        <div className="record-row" key={item.id}>
+          <strong>{item.title}</strong>
+          <span>{item.meta}</span>
+          <small>{item.time ? new Date(item.time).toLocaleString("zh-CN") : ""}</small>
+        </div>
+      ))}
+    </article>
+  );
+}
+
+function AdminPanelPage({ state, setState, loadUsers, activateMembership, rechargeToken, plans }) {
+  return (
+    <section className="stack">
+      <div className="hero-band compact admin-hero">
+        <div>
+          <span className="eyebrow">管理员平台</span>
+          <h2>手动确认会员与Token</h2>
+          <p>这个页面不在普通导航中展示。输入管理员口令后，可以按用户名查询用户、开通会员、手动增加Token。</p>
+        </div>
+      </div>
+      <article className="panel admin-control-panel">
+        <label>
+          <span>管理员口令</span>
+          <input type="password" value={state.token} onChange={(event) => setState((prev) => ({ ...prev, token: event.target.value }))} />
+        </label>
+        <label>
+          <span>学生用户名</span>
+          <input value={state.identifier} onChange={(event) => setState((prev) => ({ ...prev, identifier: event.target.value }))} placeholder="输入学生用户名" />
+        </label>
+        <label>
+          <span>会员方案</span>
+          <select value={state.planId} onChange={(event) => setState((prev) => ({ ...prev, planId: event.target.value }))}>
+            {plans.map((plan) => (
+              <option key={plan.id} value={plan.id}>
+                {plan.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>增加Token</span>
+          <input type="number" value={state.tokenAmount} onChange={(event) => setState((prev) => ({ ...prev, tokenAmount: event.target.value }))} />
+        </label>
+        <div className="admin-actions">
+          <button type="button" className="ghost-action" onClick={loadUsers}>刷新用户</button>
+          <button type="button" className="primary-action" onClick={activateMembership}>开通会员</button>
+          <button type="button" className="primary-action" onClick={rechargeToken}>增加Token</button>
+        </div>
+        {state.message && <p className="account-notice">{state.message}</p>}
+      </article>
+
+      <article className="panel admin-user-table">
+        <h2>用户列表</h2>
+        <div className="admin-table-head">
+          <span>用户名</span>
+          <span>姓名</span>
+          <span>会员</span>
+          <span>Token</span>
+          <span>到期时间</span>
+        </div>
+        {state.users.map((user) => (
+          <button key={user.id} type="button" className="admin-table-row" onClick={() => setState((prev) => ({ ...prev, identifier: user.identifier }))}>
+            <span>{user.identifier}</span>
+            <span>{user.student_name || user.display_name || "-"}</span>
+            <span>{user.membership_status || "free"} · {user.plan_name || "免费用户"}</span>
+            <span>{user.balance || 0}</span>
+            <span>{user.expires_at ? new Date(user.expires_at).toLocaleDateString("zh-CN") : "-"}</span>
+          </button>
+        ))}
+      </article>
+    </section>
   );
 }
 
