@@ -1582,6 +1582,8 @@ function App() {
   const audioChunksRef = useRef([]);
   const pendingMemberActionRef = useRef(null);
   const memberActionBypassRef = useRef(false);
+  const freeAskSendingRef = useRef(false);
+  const freeAskLastSubmitRef = useRef({ signature: "", time: 0 });
 
   const questionnaireSteps = useMemo(() => buildQuestionnaireSteps(answers), [answers.weakSubjects]);
   const progress = Math.round(((currentStep + 1) / questionnaireSteps.length) * 100);
@@ -1615,7 +1617,6 @@ function App() {
 
   function requireMemberAction(actionName, callback, message = "") {
     if (memberActionBypassRef.current || (member.isLoggedIn && member.isPaid)) {
-      callback?.();
       return true;
     }
     pendingMemberActionRef.current = callback || null;
@@ -2610,9 +2611,15 @@ function App() {
 
   async function sendFreeAsk() {
     if (!requireMemberAction("使用AI自由问", sendFreeAsk, "AI自由问可以回答问题、识别上传材料、生成学习解释或知识图片，需要登录并开通会员后使用。")) return;
-    if (freeAskStatus === "loading") return;
+    if (freeAskSendingRef.current || freeAskStatus === "loading") return;
     const content = freeAskInput.trim();
     if (!content && !freeAskFiles.length) return;
+    const fileSignature = freeAskFiles.map((file) => `${file.name}:${file.size}:${file.type}`).join("|");
+    const submitSignature = `${content}::${fileSignature}`;
+    const now = Date.now();
+    if (freeAskLastSubmitRef.current.signature === submitSignature && now - freeAskLastSubmitRef.current.time < 3000) return;
+    freeAskSendingRef.current = true;
+    freeAskLastSubmitRef.current = { signature: submitSignature, time: now };
     setFreeAskStatus("loading");
     clearAiNotice();
     console.info("树子AI任务提示词", buildAgentPrompt("freeAsk", buildStudentArchiveSnapshot({ answers, records, paperAnalysis })));
@@ -2671,6 +2678,7 @@ function App() {
         )
       );
     } finally {
+      freeAskSendingRef.current = false;
       setFreeAskStatus("idle");
     }
   }
@@ -5310,12 +5318,13 @@ function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
+                event.stopPropagation();
                 if (status !== "loading") sendFreeAsk();
               }
             }}
             placeholder="输入问题，也可以先点左侧 + 上传图片或文件"
           />
-          <button type="button" className="free-send" onClick={sendFreeAsk} aria-label="发送问题" disabled={status === "loading"}>
+          <button type="button" className="free-send" onClick={sendFreeAsk} aria-label="发送问题" disabled={status === "loading"} aria-busy={status === "loading"}>
             {status === "loading" ? <Loader2 className="spin" size={20} /> : <Send size={20} />}
           </button>
         </div>

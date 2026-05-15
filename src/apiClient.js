@@ -21,12 +21,19 @@ export async function apiRequest(path, options = {}) {
     : {
         "Content-Type": "application/json",
         ...(options.headers || {}),
-      };
+  };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers,
-  });
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      headers,
+    });
+  } catch (cause) {
+    const error = new Error("无法连接到AI后端服务，请刷新页面或稍后再试。");
+    error.cause = cause;
+    throw error;
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = `${data.message || ""} ${data.detail || ""}`;
