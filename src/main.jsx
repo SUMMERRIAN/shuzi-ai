@@ -1451,6 +1451,7 @@ function App() {
     storageTotalMb: 50,
   });
   const [accountNotice, setAccountNotice] = useState("");
+  const [aiNotice, setAiNotice] = useState("");
   const [authModal, setAuthModal] = useState({
     open: false,
     actionName: "",
@@ -1552,10 +1553,13 @@ function App() {
     previewUrl: "",
   });
   const [selectedMistakeId, setSelectedMistakeId] = useState(defaultMistakes[0].id);
+  const [mistakeAiStatus, setMistakeAiStatus] = useState("idle");
+  const [similarAiStatus, setSimilarAiStatus] = useState("idle");
   const [similarCount, setSimilarCount] = useState(3);
   const [similarQuestions, setSimilarQuestions] = useState(defaultSimilarQuestions);
   const [knowledgeQuestion, setKnowledgeQuestion] = useState("细胞结构");
   const [knowledgeNote, setKnowledgeNote] = useState(() => buildKnowledgeNote("细胞结构"));
+  const [knowledgeAiStatus, setKnowledgeAiStatus] = useState("idle");
   const [forumPosts, setForumPosts] = useState(defaultForumPosts);
   const [activeForumPostId, setActiveForumPostId] = useState(defaultForumPosts[0].id);
   const [forumDraft, setForumDraft] = useState({
@@ -1566,6 +1570,7 @@ function App() {
   });
   const [freeAskInput, setFreeAskInput] = useState("");
   const [freeAskFiles, setFreeAskFiles] = useState([]);
+  const [freeAskStatus, setFreeAskStatus] = useState("idle");
   const [freeAskMessages, setFreeAskMessages] = useState([
     {
       id: "welcome",
@@ -1582,6 +1587,14 @@ function App() {
   const progress = Math.round(((currentStep + 1) / questionnaireSteps.length) * 100);
   const completion = useMemo(() => calculateCompletion(answers, questionnaireSteps), [answers, questionnaireSteps]);
   const reportReady = submitted || aiInsight;
+
+  function showAiError(error, fallback = "AI服务暂时不可用，请稍后再试。") {
+    setAiNotice(error?.message || fallback);
+  }
+
+  function clearAiNotice() {
+    setAiNotice("");
+  }
 
   useEffect(() => {
     if (currentStep >= questionnaireSteps.length) {
@@ -2025,6 +2038,7 @@ function App() {
     const url = URL.createObjectURL(file);
     let transcriptText = "";
     try {
+      clearAiNotice();
       const formData = new FormData();
       formData.append("audio", file);
       const data = await apiRequest("/ai/transcribe", {
@@ -2033,7 +2047,7 @@ function App() {
       });
       transcriptText = data.transcript || "";
     } catch (error) {
-      setAccountNotice(error.message || "语音已添加到页面，但暂时没有完成服务器转写。");
+      showAiError(error, "语音已添加到页面，但暂时没有完成服务器转写。");
     }
     setRecords((prev) => [
       {
@@ -2085,11 +2099,13 @@ function App() {
 
   async function runPaperAnalysis() {
     if (!requireMemberAction("AI分析试卷与作业", runPaperAnalysis, "AI试卷分析会识别图片或PDF中的题目、答案和批改痕迹，需要会员权限。")) return;
+    if (paperAnalysisStatus === "loading") return;
     if (!paperDraft.files.length) return;
     const prompt = buildAgentPrompt("paperAnalysis", buildStudentArchiveSnapshot({ answers, records, paperAnalysis }));
     console.info("树子AI任务提示词", prompt);
     setPaperAnalysisStatus("loading");
     try {
+      clearAiNotice();
       const formData = new FormData();
       formData.append("subject", paperDraft.subject);
       formData.append("examName", paperDraft.examName);
@@ -2118,7 +2134,7 @@ function App() {
       setPaperAnalysisStatus("done");
       return;
     } catch (error) {
-      setAccountNotice(error.message || "服务器AI分析暂时不可用，已保留前端演示分析。");
+      showAiError(error, "服务器AI分析暂时不可用，已保留前端演示分析。");
     }
     window.setTimeout(() => {
       const subject = paperDraft.subject;
@@ -2161,6 +2177,8 @@ function App() {
 
   function generateProfileAnalysis() {
     if (!requireMemberAction("生成学情画像统一分析", generateProfileAnalysis, "学情画像会整合问卷、陈述、试卷分析和学习记录，需要会员权限。")) return;
+    if (aiStatus === "loading") return;
+    clearAiNotice();
     const archiveSnapshot = buildStudentArchiveSnapshot({
       answers,
       records,
@@ -2313,11 +2331,18 @@ function App() {
     }));
   }
 
-  async function saveMistake() {
-    if (!requireMemberAction("保存错题到个人题库", saveMistake, "保存错题会写入学生个人题库，需要登录并开通会员。")) return;
+  async function saveMistake(useAi = false) {
+    const actionName = useAi ? "AI识别错题并保存" : "保存错题到个人题库";
+    const actionMessage = useAi
+      ? "AI识别错题会读取上传图片或PDF，分析错因和解题方法，需要登录并开通会员。"
+      : "保存错题会写入学生个人题库，需要登录并开通会员。";
+    if (!requireMemberAction(actionName, () => saveMistake(useAi), actionMessage)) return;
+    if (mistakeAiStatus === "loading") return;
+    setMistakeAiStatus("loading");
     let aiAnalysis = null;
-    if (mistakeDraft.rawFile) {
+    if (useAi && mistakeDraft.rawFile) {
       try {
+        clearAiNotice();
         const formData = new FormData();
         formData.append("subject", mistakeDraft.subject);
         formData.append("title", mistakeDraft.title);
@@ -2329,7 +2354,7 @@ function App() {
         });
         aiAnalysis = data.analysis;
       } catch (error) {
-        setAccountNotice(error.message || "错题已保存到页面，但服务器AI识别暂时不可用。");
+        showAiError(error, "错题会先保存到页面，服务器AI识别暂时不可用。");
       }
     }
     const next = {
@@ -2344,7 +2369,11 @@ function App() {
       date: "刚刚",
       previewUrl: mistakeDraft.previewUrl,
     };
-    setMistakes((prev) => [next, ...prev]);
+    setMistakes((prev) => {
+      const duplicateKey = `${next.subject}|${next.title}|${next.fileName}`;
+      const withoutDuplicate = prev.filter((item) => `${item.subject}|${item.title}|${item.fileName}` !== duplicateKey);
+      return [next, ...withoutDuplicate];
+    });
     setSelectedMistakeId(next.id);
     setMistakeDraft({
       title: "新上传错题",
@@ -2357,13 +2386,17 @@ function App() {
       rawFile: null,
       previewUrl: "",
     });
+    setMistakeAiStatus("done");
   }
 
   async function generateSimilarQuestions() {
     if (!requireMemberAction("AI生成相似题", generateSimilarQuestions, "相似题生成会调用AI出题能力，需要会员权限。")) return;
+    if (similarAiStatus === "loading") return;
+    setSimilarAiStatus("loading");
     console.info("树子AI任务提示词", buildAgentPrompt("mistakePractice", buildStudentArchiveSnapshot({ answers, records, paperAnalysis })));
     const selected = mistakes.find((item) => item.id === selectedMistakeId) || mistakes[0];
     try {
+      clearAiNotice();
       const data = await apiRequest("/ai/mistakes/practice", {
         method: "POST",
         body: JSON.stringify({
@@ -2377,10 +2410,11 @@ function App() {
         setSimilarQuestions(
           questions.map((item, index) => `【相似题${index + 1}】${item.question}\n答案：${item.answer}\n思路：${Array.isArray(item.solution_steps) ? item.solution_steps.join("；") : item.solution_steps || ""}`)
         );
+        setSimilarAiStatus("done");
         return;
       }
     } catch (error) {
-      setAccountNotice(error.message || "服务器相似题生成暂时不可用，已使用前端演示题。");
+      showAiError(error, "服务器相似题生成暂时不可用，已使用前端演示题。");
     }
     const base = selected?.subject || "数学";
     const method = selected?.method || "先识别题型、关键条件和解题步骤。";
@@ -2388,12 +2422,33 @@ function App() {
       `【相似题${index + 1}】围绕「${selected?.title || "当前错题"}」生成一道${base}训练题：要求学生使用类似思路：${method}`
     );
     setSimilarQuestions(pool);
+    setSimilarAiStatus("done");
+  }
+
+  function arrangeMistakeBook() {
+    if (!requireMemberAction("AI重新编排错题集", arrangeMistakeBook, "错题重新编排会整理当前错题库，形成更适合下载和复习的错题集结构，需要会员权限。")) return;
+    clearAiNotice();
+    setMistakes((prev) => {
+      const seen = new Set();
+      return [...prev]
+        .sort((a, b) => `${a.subject}${a.title}`.localeCompare(`${b.subject}${b.title}`, "zh-CN"))
+        .filter((mistake) => {
+          const key = `${mistake.subject}|${mistake.title}|${mistake.fileName}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+    });
+    setAiNotice("错题集已按科目和标题重新整理，并去除了重复记录。后续可继续下载错题整理PDF。");
   }
 
   async function generateKnowledgeNote() {
     if (!requireMemberAction("AI生成知识图", generateKnowledgeNote, "知识图生成会调用AI图片与讲解能力，需要会员权限。")) return;
+    if (knowledgeAiStatus === "loading") return;
+    setKnowledgeAiStatus("loading");
     console.info("树子AI任务提示词", buildAgentPrompt("knowledgeNote", buildStudentArchiveSnapshot({ answers, records, paperAnalysis })));
     try {
+      clearAiNotice();
       const data = await apiRequest("/ai/knowledge-note", {
         method: "POST",
         body: JSON.stringify({
@@ -2410,12 +2465,14 @@ function App() {
           svg: `<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254"><image href="data:image/png;base64,${data.imageBase64}" width="1254" height="1254"/></svg>`,
           prompt: data.note?.prompt || "",
         });
+        setKnowledgeAiStatus("done");
         return;
       }
     } catch (error) {
-      setAccountNotice(error.message || "服务器知识图生成暂时不可用，已使用前端知识图。");
+      showAiError(error, "服务器知识图生成暂时不可用，已使用前端知识图。");
     }
     setKnowledgeNote(buildKnowledgeNote(knowledgeQuestion));
+    setKnowledgeAiStatus("done");
   }
 
   function downloadKnowledgeImage() {
@@ -2536,6 +2593,7 @@ function App() {
       name: file.name,
       type: file.type || "unknown",
       size: file.size,
+      rawFile: file,
       previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : "",
     }));
     setFreeAskFiles((prev) => [...prev, ...nextFiles]);
@@ -2550,14 +2608,17 @@ function App() {
     });
   }
 
-  function sendFreeAsk() {
+  async function sendFreeAsk() {
     if (!requireMemberAction("使用AI自由问", sendFreeAsk, "AI自由问可以回答问题、识别上传材料、生成学习解释或知识图片，需要登录并开通会员后使用。")) return;
+    if (freeAskStatus === "loading") return;
     const content = freeAskInput.trim();
     if (!content && !freeAskFiles.length) return;
+    setFreeAskStatus("loading");
+    clearAiNotice();
     console.info("树子AI任务提示词", buildAgentPrompt("freeAsk", buildStudentArchiveSnapshot({ answers, records, paperAnalysis })));
     const wantsImage = /图|图片|结构图|画|生成图片|知识卡片/.test(content);
-    const note = wantsImage ? buildKnowledgeNote(content.replace(/生成|图片|结构图|画|知识卡片/g, "").trim() || content) : null;
     const attachmentText = freeAskFiles.length ? `我上传了 ${freeAskFiles.length} 个附件，请结合附件一起看。` : "";
+    const assistantId = `ask-ai-${Date.now()}`;
     const userMessage = {
       id: `ask-user-${Date.now()}`,
       role: "user",
@@ -2565,16 +2626,53 @@ function App() {
       attachments: freeAskFiles,
     };
     const assistantMessage = {
-      id: `ask-ai-${Date.now()}`,
+      id: assistantId,
       role: "assistant",
-      content: wantsImage
-        ? "我会把这个问题整理成“知识图 + 标注解释 + 学习总结”的形式，尽量让你一眼看懂结构和重点。"
-        : "我会先判断你的问题属于学习、知识理解、解题思路、生活常识还是开放想法，再用清楚的结论、原因和下一步建议来回答。",
-      note,
+      content: "我正在阅读你的问题和附件，请稍等。",
+      note: null,
     };
     setFreeAskMessages((prev) => [...prev, userMessage, assistantMessage]);
     setFreeAskInput("");
     setFreeAskFiles([]);
+    try {
+      const formData = new FormData();
+      formData.append("question", content);
+      formData.append("wantsImage", wantsImage ? "true" : "false");
+      freeAskFiles.forEach((file) => {
+        if (file.rawFile) formData.append("files", file.rawFile);
+      });
+      const data = await apiRequest("/ai/free-ask", {
+        method: "POST",
+        body: formData,
+      });
+      const note = wantsImage ? buildKnowledgeNote(content.replace(/生成|图片|结构图|画|知识卡片/g, "").trim() || content) : null;
+      setFreeAskMessages((prev) =>
+        prev.map((message) =>
+          message.id === assistantId
+            ? {
+                ...message,
+                content: data.answer || "AI已完成回答，但返回内容为空，请换一种问法再试。",
+                note,
+              }
+            : message
+        )
+      );
+    } catch (error) {
+      showAiError(error, "AI自由问暂时没有响应，请稍后再试。");
+      setFreeAskMessages((prev) =>
+        prev.map((message) =>
+          message.id === assistantId
+            ? {
+                ...message,
+                content: "AI自由问暂时没有响应。你可以稍后再试，或者把问题拆短一点重新发送。",
+                note: wantsImage ? buildKnowledgeNote(content.replace(/生成|图片|结构图|画|知识卡片/g, "").trim() || content) : null,
+              }
+            : message
+        )
+      );
+    } finally {
+      setFreeAskStatus("idle");
+    }
   }
 
   return (
@@ -2637,6 +2735,17 @@ function App() {
             )}
           </div>
         </header>
+        {aiNotice && (
+          <div className="ai-service-notice" role="status">
+            <div>
+              <strong>AI服务提示</strong>
+              <p>{aiNotice}</p>
+            </div>
+            <button type="button" onClick={() => setAiNotice("")} aria-label="关闭AI服务提示">
+              ×
+            </button>
+          </div>
+        )}
 
         {activePage === "home" && <HomePage setActivePage={setActivePage} />}
 
@@ -2755,6 +2864,9 @@ function App() {
             setSimilarCount={setSimilarCount}
             similarQuestions={similarQuestions}
             generateSimilarQuestions={generateSimilarQuestions}
+            mistakeAiStatus={mistakeAiStatus}
+            similarAiStatus={similarAiStatus}
+            arrangeMistakeBook={arrangeMistakeBook}
             printPage={printPage}
             requireMemberAction={requireMemberAction}
           />
@@ -2767,6 +2879,7 @@ function App() {
             knowledgeNote={knowledgeNote}
             generateKnowledgeNote={generateKnowledgeNote}
             downloadKnowledgeImage={downloadKnowledgeImage}
+            status={knowledgeAiStatus}
           />
         )}
 
@@ -2793,6 +2906,7 @@ function App() {
             handleFiles={handleFreeAskFiles}
             removeFile={removeFreeAskFile}
             sendFreeAsk={sendFreeAsk}
+            status={freeAskStatus}
           />
         )}
 
@@ -4210,7 +4324,7 @@ function ModernProfilePage({ answers, records, aiInsight, aiStatus, submitted, c
               <span className="eyebrow">AI统一分析画像</span>
               <h2>整合问卷、陈述和试卷分析，形成完整学习判断</h2>
             </div>
-            <button className="primary-action" onClick={generateProfileAnalysis}>
+            <button className="primary-action" onClick={generateProfileAnalysis} disabled={aiStatus === "loading"}>
               {aiStatus === "loading" ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
               {aiStatus === "loading" ? "AI正在分析" : "AI统一分析画像"}
             </button>
@@ -4831,10 +4945,22 @@ function MistakeSpecialPage({
   setSimilarCount,
   similarQuestions,
   generateSimilarQuestions,
+  mistakeAiStatus,
+  similarAiStatus,
+  arrangeMistakeBook,
   printPage,
   requireMemberAction,
 }) {
   const selected = mistakes.find((item) => item.id === selectedMistakeId) || mistakes[0];
+  const visibleMistakes = [];
+  const seenMistakes = new Set();
+  mistakes.forEach((mistake) => {
+    const key = `${mistake.subject}|${mistake.title}|${mistake.fileName}`;
+    if (!seenMistakes.has(key)) {
+      seenMistakes.add(key);
+      visibleMistakes.push(mistake);
+    }
+  });
 
   return (
     <section className="stack mistake-page">
@@ -4898,13 +5024,13 @@ function MistakeSpecialPage({
           </div>
 
           <div className="ai-action-row">
-            <button type="button" className="primary-action" onClick={saveMistake}>
-              <Save size={17} />
-              保存到错题库
+            <button type="button" className="primary-action" onClick={() => saveMistake(false)} disabled={mistakeAiStatus === "loading"}>
+              {mistakeAiStatus === "loading" ? <Loader2 className="spin" size={17} /> : <Save size={17} />}
+              {mistakeAiStatus === "loading" ? "正在保存" : "保存到错题库"}
             </button>
-            <button type="button" className="ghost-action" onClick={() => requireMemberAction("AI识别错题", null, "错题识别会调用AI视觉识别和错因分析能力，需要会员权限。")}>
-              <Sparkles size={17} />
-              AI识别错题
+            <button type="button" className="ghost-action" onClick={() => saveMistake(true)} disabled={mistakeAiStatus === "loading" || !mistakeDraft.rawFile}>
+              {mistakeAiStatus === "loading" ? <Loader2 className="spin" size={17} /> : <Sparkles size={17} />}
+              {mistakeAiStatus === "loading" ? "AI正在识别" : "AI识别错题"}
             </button>
           </div>
         </article>
@@ -4918,7 +5044,7 @@ function MistakeSpecialPage({
             <Library size={24} />
           </div>
           <div className="mistake-library">
-            {mistakes.map((mistake) => (
+            {visibleMistakes.map((mistake) => (
               <button
                 key={mistake.id}
                 type="button"
@@ -4950,7 +5076,7 @@ function MistakeSpecialPage({
             <p>学生可以从错题库中选择一道最想训练的题，AI会围绕这道题的题型、方法和错因生成相似训练。</p>
           </div>
           <select value={selectedMistakeId} onChange={(event) => setSelectedMistakeId(event.target.value)}>
-            {mistakes.map((mistake) => (
+            {visibleMistakes.map((mistake) => (
               <option key={mistake.id} value={mistake.id}>
                 {mistake.subject}｜{mistake.title}
               </option>
@@ -4975,9 +5101,9 @@ function MistakeSpecialPage({
                 ))}
               </select>
             </label>
-            <button type="button" className="primary-action" onClick={generateSimilarQuestions}>
-              <Sparkles size={17} />
-              AI生成相似题
+            <button type="button" className="primary-action" onClick={generateSimilarQuestions} disabled={similarAiStatus === "loading" || !visibleMistakes.length}>
+              {similarAiStatus === "loading" ? <Loader2 className="spin" size={17} /> : <Sparkles size={17} />}
+              {similarAiStatus === "loading" ? "AI正在生成" : "AI生成相似题"}
             </button>
           </div>
         </div>
@@ -5001,7 +5127,7 @@ function MistakeSpecialPage({
           <Download size={24} />
         </div>
         <div className="mistake-export-list">
-          {mistakes.map((mistake, index) => (
+          {visibleMistakes.map((mistake, index) => (
             <article key={mistake.id}>
               <span>{String(index + 1).padStart(2, "0")}</span>
               <div>
@@ -5017,7 +5143,7 @@ function MistakeSpecialPage({
             <FileDown size={17} />
             下载错题整理PDF
           </button>
-          <button type="button" className="ghost-action" onClick={() => requireMemberAction("AI重新编排错题集", null, "错题重新编排会调用AI整理错题和生成PDF结构，需要会员权限。")}>
+          <button type="button" className="ghost-action" onClick={arrangeMistakeBook}>
             <Sparkles size={17} />
             AI重新编排错题集
           </button>
@@ -5039,7 +5165,7 @@ function downloadNoteSvg(note) {
   URL.revokeObjectURL(url);
 }
 
-function ModernKnowledgeNotePage({ knowledgeQuestion, setKnowledgeQuestion, knowledgeNote, generateKnowledgeNote, downloadKnowledgeImage }) {
+function ModernKnowledgeNotePage({ knowledgeQuestion, setKnowledgeQuestion, knowledgeNote, generateKnowledgeNote, downloadKnowledgeImage, status }) {
   const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(knowledgeNote.svg)}`;
   return (
     <section className="stack knowledge-page">
@@ -5066,9 +5192,9 @@ function ModernKnowledgeNotePage({ knowledgeQuestion, setKnowledgeQuestion, know
         <div className="knowledge-input-row">
           <textarea value={knowledgeQuestion} onChange={(event) => setKnowledgeQuestion(event.target.value)} placeholder="例如：动物细胞结构、光合作用、二次函数图像、牛顿第一定律……" />
           <div className="knowledge-actions">
-            <button type="button" className="primary-action" onClick={generateKnowledgeNote}>
-              <Sparkles size={17} />
-              AI生成知识图
+            <button type="button" className="primary-action" onClick={generateKnowledgeNote} disabled={status === "loading"}>
+              {status === "loading" ? <Loader2 className="spin" size={17} /> : <Sparkles size={17} />}
+              {status === "loading" ? "AI正在生成" : "AI生成知识图"}
             </button>
             <button type="button" className="ghost-action" onClick={downloadKnowledgeImage}>
               <Download size={17} />
@@ -5124,7 +5250,7 @@ function ModernKnowledgeNotePage({ knowledgeQuestion, setKnowledgeQuestion, know
   );
 }
 
-function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile, sendFreeAsk }) {
+function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile, sendFreeAsk, status }) {
   const quickPrompts = ["帮我分析一道数学题", "把细胞结构做成知识图", "黑洞为什么会形成", "我总是拖延怎么办"];
   const formatSize = (size) => (size > 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(size / 1024))} KB`);
   return (
@@ -5184,13 +5310,13 @@ function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
-                sendFreeAsk();
+                if (status !== "loading") sendFreeAsk();
               }
             }}
             placeholder="输入问题，也可以先点左侧 + 上传图片或文件"
           />
-          <button type="button" className="free-send" onClick={sendFreeAsk} aria-label="发送问题">
-            <Send size={20} />
+          <button type="button" className="free-send" onClick={sendFreeAsk} aria-label="发送问题" disabled={status === "loading"}>
+            {status === "loading" ? <Loader2 className="spin" size={20} /> : <Send size={20} />}
           </button>
         </div>
         <div className="free-ask-prompts">

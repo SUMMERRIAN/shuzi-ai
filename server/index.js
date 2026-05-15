@@ -691,6 +691,64 @@ app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
   }
 });
 
+app.post("/api/ai/free-ask", requireAuth, upload.array("files", 6), async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    ensureOpenAIKey();
+    const student = await getPrimaryStudent(req.user);
+    const { question = "", wantsImage = "false" } = req.body || {};
+    const files = req.files || [];
+    const imageInputs = makeImageInputs(files);
+    if (!String(question).trim() && !files.length) {
+      return res.status(400).json({ error: "QUESTION_REQUIRED", message: "请输入问题，或上传图片/文件。" });
+    }
+    const fileSummary = files.length
+      ? files.map((file) => `${file.originalname}（${file.mimetype || "未知类型"}）`).join("、")
+      : "无附件";
+    const response = await openai.responses.create({
+      model: textModel,
+      input: [
+        {
+          role: "system",
+          content:
+            "你是树子AI自由问助手。可以回答学习问题、知识问题、作业问题，也可以回答学生对科学、生活、兴趣和开放想法的提问。回答要清晰、友好、适合中学生理解；如果问题涉及学习，要给出可执行的下一步；如果用户要求做知识图，先用文字说明结构和重点。",
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: `学生问题：${question || "请结合附件回答。"}\n是否希望生成知识图方向：${wantsImage === "true" ? "是" : "否"}\n附件：${fileSummary}`,
+            },
+            ...imageInputs,
+          ],
+        },
+      ],
+    });
+    const answer = getResponseText(response) || "AI已阅读你的问题，但暂时没有生成有效回答，请换一种问法再试。";
+    if (files.length) {
+      await withTransaction(async (client) => {
+        const fileRows = await saveUploadedFiles(client, req.user, student, "free_ask", files);
+        await client.query(
+          `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
+           VALUES ($1, $2, 'free_ask', $3, $4)`,
+          [student.id, req.user.id, "AI自由问", JSON.stringify({ question, answer, fileIds: fileRows.map((item) => item.id) })]
+        );
+      });
+    } else {
+      await query(
+        `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
+         VALUES ($1, $2, 'free_ask', $3, $4)`,
+        [student.id, req.user.id, "AI自由问", JSON.stringify({ question, answer })]
+      );
+    }
+    await recordTokenUsage(req.user.id, wantsImage === "true" ? 12 : 5, "AI自由问", { feature: "free-ask" });
+    res.json({ answer });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/admin/memberships/activate", requireAdminToken, async (req, res) => {
   const { identifier, planId = "monthly", durationDays, paidAmountCny = 0, startDate } = req.body || {};
   const plan = membershipPlans[planId];

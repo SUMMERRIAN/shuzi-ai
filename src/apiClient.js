@@ -29,7 +29,16 @@ export async function apiRequest(path, options = {}) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(data.message || data.error || "请求失败");
+    const detail = `${data.message || ""} ${data.detail || ""}`;
+    let message = data.message || data.error || "请求失败";
+    if (response.status === 429) {
+      message = "AI当前请求过多，请稍等10-30秒后再试。";
+    } else if (response.status === 403 && /verified|verify|organization/i.test(detail)) {
+      message = "当前OpenAI组织还没有完成模型权限验证，请完成验证或切换到可用模型。";
+    } else if (/country|region|territory/i.test(detail)) {
+      message = "当前服务器地区暂时不能使用OpenAI服务，请更换支持地区的服务器。";
+    }
+    const error = new Error(message);
     error.status = response.status;
     error.payload = data;
     throw error;
