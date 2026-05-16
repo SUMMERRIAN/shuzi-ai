@@ -3,6 +3,9 @@ import express from "express";
 import cors from "cors";
 import fs from "node:fs";
 import bcrypt from "bcryptjs";
+import mammoth from "mammoth";
+import pdfParse from "pdf-parse";
+import ExcelJS from "exceljs";
 import { ensureSchema } from "./schema.js";
 import { query, withTransaction } from "./db.js";
 import { requireAdminToken, requireAuth, signToken } from "./auth.js";
@@ -162,6 +165,51 @@ function makeImageInputs(files) {
       type: "input_image",
       image_url: readFileAsDataUrl(file),
     }));
+}
+
+async function extractDocumentText(file) {
+  const mime = file.mimetype || "";
+  const name = (file.originalname || "").toLowerCase();
+  try {
+    if (mime.startsWith("text/") || name.endsWith(".txt") || name.endsWith(".csv")) {
+      return fs.readFileSync(file.path, "utf8").slice(0, 12000);
+    }
+    if (name.endsWith(".docx")) {
+      const result = await mammoth.extractRawText({ path: file.path });
+      return (result.value || "").slice(0, 12000);
+    }
+    if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.readFile(file.path);
+      return workbook.worksheets
+        .map((sheet) => {
+          const rows = [];
+          sheet.eachRow((row) => {
+            rows.push(row.values.slice(1).map((value) => (value == null ? "" : String(value))).join(","));
+          });
+          return `【${sheet.name}】\n${rows.join("\n")}`;
+        })
+        .join("\n\n")
+        .slice(0, 12000);
+    }
+    if (mime === "application/pdf" || name.endsWith(".pdf")) {
+      const result = await pdfParse(fs.readFileSync(file.path));
+      return (result.text || "").slice(0, 12000);
+    }
+  } catch (error) {
+    console.warn("Failed to extract uploaded document text", file.originalname, error.message);
+  }
+  return "";
+}
+
+async function makeDocumentTextSummary(files) {
+  const chunks = [];
+  for (const file of files) {
+    if ((file.mimetype || "").startsWith("image/")) continue;
+    const text = await extractDocumentText(file);
+    chunks.push(`文件：${file.originalname}\n类型：${file.mimetype || "未知"}\n内容摘录：\n${text || "暂时无法自动提取文字，请根据文件名和学生说明进行保守分析。"}`);
+  }
+  return chunks.join("\n\n---\n\n").slice(0, 30000);
 }
 
 function jsonInstruction(schemaDescription) {
@@ -524,6 +572,86 @@ app.post("/api/ai/study-plan", requireAuth, async (req, res, next) => {
     );
     await recordTokenUsage(req.user.id, 8, "AI辅助制定学习计划", { feature: "study-plan" });
     res.json({ plan });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    ensureOpenAIKey();
+    const files = req.files || [];
+    const student = await getPrimaryStudent(req.user);
+    const {
+      taskType = "analyzeMistake",
+      prompt = "",
+      subject = "",
+      title = "错题专项处理",
+      source = "",
+      archiveSnapshot = "{}",
+    } = req.body || {};
+    if (!prompt.trim() && !files.length) return res.status(400).json({ error: "PROMPT_OR_FILE_REQUIRED" });
+
+    const taskMap = {
+      analyzeMistake: "AI分析错题：识别题目内容、知识点、错误类型、错因、解题方法缺口和后续训练建议。",
+      generateSimilar: "AI生成类似题：根据上传或选择的错题生成1-3道同类型训练题，包含答案、步骤和训练目的。",
+      analyzePaper: "AI分析试卷：整理试卷/作业中的错题清单、薄弱知识点、错误类型、优先训练顺序和复习建议。",
+    };
+    const documentText = await makeDocumentTextSummary(files);
+    const response = await openai.responses.create({
+      model: textModel,
+      input: [
+        {
+          role: "system",
+          content:
+            "你是树子AI错题专项智能体。你的任务只围绕错题、同类题训练、作业/试卷材料分析和错题档案沉淀。输出要像给学生看的学习报告，干净、完整、具体、可执行。不要生成学情画像总报告，不要制定完整周计划。必须输出严格JSON。",
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: `${jsonInstruction(
+                "{title, summary, sections:[{title,content}], extracted_questions:[{id,title,question_content,subject,error_type,knowledge_points,method_gap,correction_steps,suggestion,is_likely_wrong}], similar_questions:[{title,question,answer,solution_steps,training_goal,difficulty}], training_suggestions:[string], archive_note}"
+              )}\n任务类型：${taskMap[taskType] || taskMap.analyzeMistake}\n科目：${subject}\n标题：${title}\n来源：${source}\n学生提示词：${prompt}\n学生档案摘要：${archiveSnapshot}\n上传文档文字摘录：\n${documentText || "无可提取文档文字；如有图片，请结合图片内容分析。"}`,
+            },
+            ...makeImageInputs(files),
+          ],
+        },
+      ],
+    });
+    const report = parseJsonText(getResponseText(response), {
+      title,
+      summary: "",
+      sections: [],
+      extracted_questions: [],
+      similar_questions: [],
+      training_suggestions: [],
+    });
+    const saved = await withTransaction(async (client) => {
+      const fileRows = await saveUploadedFiles(client, req.user, student, "mistake", files);
+      const row = (
+        await client.query(
+          `INSERT INTO mistake_files (student_id, user_id, subject, title, file_ids, analysis)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING *`,
+          [student.id, req.user.id, subject, title, fileRows.map((item) => item.id), JSON.stringify({ taskType, prompt, report })]
+        )
+      ).rows[0];
+      await client.query(
+        `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
+         VALUES ($1, $2, 'mistake_workspace', $3, $4)`,
+        [student.id, req.user.id, title, JSON.stringify({ taskType, prompt, report, fileCount: files.length })]
+      );
+      return row;
+    });
+    await recordTokenUsage(req.user.id, taskType === "generateSimilar" ? 10 : 12, taskMap[taskType] || "错题专项AI处理", {
+      feature: "mistake-workflow",
+      taskType,
+      mistakeId: saved.id,
+    });
+    res.json({ report, saved });
   } catch (error) {
     next(error);
   }
