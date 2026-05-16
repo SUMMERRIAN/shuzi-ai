@@ -459,73 +459,6 @@ app.get("/api/archive", requireAuth, async (req, res) => {
   res.json({ events });
 });
 
-app.post("/api/ai/paper-analysis", requireAuth, upload.array("files", 8), async (req, res, next) => {
-  try {
-    await assertPaidMember(req.user.id);
-    ensureOpenAIKey();
-    const files = req.files || [];
-    if (!files.length) return res.status(400).json({ error: "FILES_REQUIRED", message: "请上传试卷、错题或作业图片。" });
-    const student = await getPrimaryStudent(req.user);
-    const { subject = "", examName = "", note = "" } = req.body || {};
-    const imageInputs = makeImageInputs(files);
-    if (!imageInputs.length) {
-      return res.status(400).json({ error: "IMAGE_REQUIRED", message: "当前AI视觉分析请先上传图片文件。" });
-    }
-    const response = await openai.responses.create({
-      model: textModel,
-      input: [
-        {
-          role: "system",
-          content:
-            "你是树子AI的试卷与作业分析智能体。只分析上传材料中的错题、题型、知识漏洞、方法缺口、审题步骤、书写表达和后续训练建议，不制定完整周计划。",
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: `${jsonInstruction(
-                "{summary, extracted_questions:[{title, content, student_answer, correct_answer, error_type}], wrong_types, knowledge_gaps, method_gaps, evidence, training_suggestions:[{task, detail, standard}]}"
-              )}\n科目：${subject}\n试卷/作业名称：${examName}\n学生补充说明：${note}`,
-            },
-            ...imageInputs,
-          ],
-        },
-      ],
-    });
-    const report = parseJsonText(getResponseText(response), { summary: "AI已完成分析，但返回格式需要人工复核。" });
-    const saved = await withTransaction(async (client) => {
-      const fileRows = await saveUploadedFiles(client, req.user, student, "paper_analysis", files);
-      const uploadRow = (
-        await client.query(
-          `INSERT INTO paper_uploads (student_id, user_id, subject, exam_name, note, file_ids)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           RETURNING *`,
-          [student.id, req.user.id, subject, examName, note, fileRows.map((item) => item.id)]
-        )
-      ).rows[0];
-      const reportRow = (
-        await client.query(
-          `INSERT INTO paper_analysis_reports (paper_upload_id, student_id, user_id, report)
-           VALUES ($1, $2, $3, $4)
-           RETURNING *`,
-          [uploadRow.id, student.id, req.user.id, JSON.stringify(report)]
-        )
-      ).rows[0];
-      await client.query(
-        `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
-         VALUES ($1, $2, 'paper_analysis', $3, $4)`,
-        [student.id, req.user.id, `${subject || "试卷"}分析`, JSON.stringify({ upload: uploadRow, report })]
-      );
-      return { upload: uploadRow, report: reportRow, files: fileRows };
-    });
-    await recordTokenUsage(req.user.id, 18, "AI试卷分析", { feature: "paper-analysis", reportId: saved.report?.id });
-    res.json({ report, saved });
-  } catch (error) {
-    next(error);
-  }
-});
-
 app.post("/api/ai/transcribe", requireAuth, upload.single("audio"), async (req, res, next) => {
   try {
     await assertPaidMember(req.user.id);
@@ -561,6 +494,41 @@ app.post("/api/ai/transcribe", requireAuth, upload.single("audio"), async (req, 
   }
 });
 
+app.post("/api/ai/study-plan", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    ensureOpenAIKey();
+    const student = await getPrimaryStudent(req.user);
+    const { archiveSnapshot = {}, currentPlanRows = [], methodFocusRows = [], habitFocusRows = [] } = req.body || {};
+    const response = await openai.responses.create({
+      model: textModel,
+      input: [
+        {
+          role: "system",
+          content:
+            "你是树子AI学习计划制定智能体。只根据已确认的学情画像、科目策略、学习任务、空闲时间和方法习惯目标，生成可以由学生继续修改的周学习计划。不要重新诊断学情，不要分析图片，不要生成相似题。输出必须具体、可执行、时间不过量。",
+        },
+        {
+          role: "user",
+          content: `${jsonInstruction(
+            "{note, rows:[{cells:{星期一:{start,end,task,note},星期二:{start,end,task,note},星期三:{start,end,task,note},星期四:{start,end,task,note},星期五:{start,end,task,note},星期六:{start,end,task,note},星期日:{start,end,task,note}}}], method_focus_suggestions, habit_focus_suggestions, execution_notes}"
+          )}\n学生档案摘要：${JSON.stringify(archiveSnapshot)}\n当前计划表：${JSON.stringify(currentPlanRows)}\n方法训练目标：${JSON.stringify(methodFocusRows)}\n习惯培养目标：${JSON.stringify(habitFocusRows)}`,
+        },
+      ],
+    });
+    const plan = parseJsonText(getResponseText(response), { rows: [], note: "" });
+    await query(
+      `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
+       VALUES ($1, $2, 'study_plan_ai', 'AI辅助制定学习计划', $3)`,
+      [student.id, req.user.id, JSON.stringify({ plan })]
+    );
+    await recordTokenUsage(req.user.id, 8, "AI辅助制定学习计划", { feature: "study-plan" });
+    res.json({ plan });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/ai/mistakes/analyze", requireAuth, upload.array("files", 6), async (req, res, next) => {
   try {
     await assertPaidMember(req.user.id);
@@ -575,7 +543,7 @@ app.post("/api/ai/mistakes/analyze", requireAuth, upload.array("files", 6), asyn
         {
           role: "system",
           content:
-            "你是树子AI错题专项智能体。只围绕错题识别、错因归类、解题方法、相似题训练建议和复测安排输出。",
+            "你是树子AI错题专项智能体。只围绕上传材料中的错题识别、题目拆分、错因归类、知识点、解题方法缺口、相似题训练建议和复测安排输出。如果材料里有多道题，要拆成题目清单；不要制定完整周计划，不要做学情画像总报告。",
         },
         {
           role: "user",
@@ -583,7 +551,7 @@ app.post("/api/ai/mistakes/analyze", requireAuth, upload.array("files", 6), asyn
             {
               type: "input_text",
               text: `${jsonInstruction(
-                "{mistake_title, subject, question_content, error_reason, knowledge_points, method_gap, correction_steps, similar_question_requirements, review_schedule}"
+                "{summary, extracted_questions:[{id,title,question_content,subject,error_type,knowledge_points,method_gap,correction_steps,suggestion,is_likely_wrong}], analysis:{test_point,error_reason,method_gap,correction_steps,training_suggestions,review_schedule}}"
               )}\n科目：${subject}\n标题：${title}\n学生补充：${note}`,
             },
             ...makeImageInputs(files),

@@ -20,6 +20,7 @@ import {
   Home,
   Image as ImageIcon,
   Library,
+  ListChecks,
   Loader2,
   LockKeyhole,
   LogIn,
@@ -45,7 +46,6 @@ const subPages = [
   { id: "home", label: "首页", icon: Home },
   { id: "questionnaire", label: "学情问卷", icon: ClipboardList },
   { id: "statement", label: "学情陈述", icon: Mic },
-  { id: "paperAnalysis", label: "试卷分析", icon: FileText },
   { id: "profile", label: "学情画像", icon: BarChart3 },
   { id: "strategy", label: "策略与任务", icon: BookOpen },
   { id: "plan", label: "学习计划", icon: CalendarDays },
@@ -117,28 +117,6 @@ const statementIssueOptions = [
   "手机干扰",
   "亲子沟通压力",
 ];
-
-const paperSubjects = ["语文", "数学", "英语", "物理", "化学", "生物", "历史", "地理", "政治"];
-
-const defaultPaperAnalysis = {
-  summary: "上传试卷、错题或作业图片后，AI会整理出题目内容、出错类型、知识漏洞、方法问题和后续训练建议。",
-  scoreView: "当前还没有可分析的试卷样本。建议至少上传1张清晰图片，最好包含题干、学生作答过程和老师批改痕迹。",
-  wrongItems: [
-    {
-      title: "示例：综合题审题信息遗漏",
-      type: "方法迁移 / 审题定位",
-      knowledge: "题目条件提取、关键词标注、模型识别",
-      issue: "学生知道部分知识点，但没有把题目条件和对应方法连接起来。",
-    },
-  ],
-  knowledgeGaps: ["知识点掌握情况待识别", "题型模型待归类", "作答步骤待分析"],
-  methodGaps: ["审题标注", "步骤规范", "错题复测"],
-  trainingPlan: [
-    "先选出最典型的3道错题，分别写清楚：错在知识、方法、计算、审题还是表达。",
-    "把同一类型错题集中训练，避免今天改一道、明天又忘一道。",
-    "每道错题至少安排当天重做、隔天复做、一周后复测三次。",
-  ],
-};
 
 const subjectNames = ["语文", "数学", "英语", "物理", "化学", "生物", "历史", "地理", "政治"];
 
@@ -256,7 +234,7 @@ const reviewRows = [
 ];
 
 const examRows = [
-  "我常常做试卷分析。",
+  "我常常做考后复盘。",
   "卷子或作业发回后，有错题我会弄清楚为什么错、怎样做才对。",
   "我一般只关心得了多少分，不太关注错在哪里。",
   "我会统计丢分原因，比如粗心、概念不清、审题错误等。",
@@ -553,11 +531,11 @@ function buildCoreSteps() {
     {
       id: "review-exam",
       title: "复习巩固",
-      description: "复习和试卷分析决定知识能不能真正留住、迁移和减少丢分。",
+      description: "复习和考后复盘决定知识能不能真正留住、迁移和减少丢分。",
       analysisTarget: "判断学生是否有复习体系、知识整理能力、弱项强化、试卷归因和考试策略反思。",
       questions: [
         { id: "reviewGrid", label: "复习巩固情况", type: "yesNoGrid", rows: reviewRows },
-        { id: "examGrid", label: "试卷分析情况", type: "yesNoGrid", rows: examRows },
+        { id: "examGrid", label: "考后复盘情况", type: "yesNoGrid", rows: examRows },
       ],
     },
     {
@@ -666,7 +644,7 @@ const profileSections = [
     score: 5.7,
     question: "知识储备和能力水平是否具备进一步学习的基础？",
     finding: "部分科目存在前置知识漏洞，尤其是综合题、模型题和错题复现。",
-    evidence: "来自平时成绩、科目专项、作业难题处理和试卷分析。",
+    evidence: "来自平时成绩、科目专项、作业难题处理和考后复盘。",
     explanation:
       "这里关注孩子之前储备的知识和能力，能否支持当下的学习，能否有效理解和运用知识。如果基础不成立，后续学习会变成消耗时间和精力。遇到这种情况，需要谦卑地回到孩子能够学习的部分，重新打基础、训练能力。",
     sources: ["平时成绩矩阵", "各科专项弱项", "作业难题处理", "考试失分原因"],
@@ -690,10 +668,10 @@ const profileSections = [
     score: 5.4,
     question: "孩子是否具有相对稳定的知识生产流程？",
     finding: "预习、上课、作业、改错、复习、测试之间没有形成完整闭环。",
-    evidence: "来自上课、作业、错题、复习、试卷分析五个流程模块。",
+    evidence: "来自上课、作业、错题、复习、考后复盘五个流程模块。",
     explanation:
       "学习链就像知识生产线。一个知识从不懂到掌握，需要经过预习、上课、作业、评讲、复习、测试等环节。学习流程环环相扣，任何一环断开，都可能影响最终效果。改善成绩要从根本上完善学习流程细节，而不是只靠更多补课。",
-    sources: ["上课与笔记题组", "作业过程题组", "错题处理", "复习巩固", "试卷分析"],
+    sources: ["上课与笔记题组", "作业过程题组", "错题处理", "复习巩固", "考后复盘"],
     suggestion: "优先找断点：是预习没有、听课不懂、作业不规范、错题不复测，还是复习测试缺失。",
   },
   {
@@ -714,7 +692,7 @@ const profileSections = [
     score: 6.3,
     question: "孩子是否具有提高学习效率的核心方法或素质？",
     finding: "孩子有部分方法意识，但错题复测、总结反思和主动复习还不稳定。",
-    evidence: "来自一般学习方法、笔记整理、错题处理、复习和试卷分析。",
+    evidence: "来自一般学习方法、笔记整理、错题处理、复习和考后复盘。",
     explanation:
       "当基础问题相对稳定后，我们会关注孩子是否具备能提升效率的核心方法或习惯。这些方法可以帮助孩子更轻松地学习，并看到更稳定的成绩改善。它主要体现在学习方法、行为习惯和日常执行细节里。",
     sources: ["一般学习方法题组", "笔记整理", "审题草稿检查", "总结反思", "经验交流"],
@@ -1524,14 +1502,6 @@ function App() {
   const [audioUrl, setAudioUrl] = useState("");
   const [aiStatus, setAiStatus] = useState("idle");
   const [aiInsight, setAiInsight] = useState(null);
-  const [paperDraft, setPaperDraft] = useState({
-    subject: "数学",
-    examName: "本周数学试卷",
-    note: "",
-    files: [],
-  });
-  const [paperAnalysisStatus, setPaperAnalysisStatus] = useState("idle");
-  const [paperAnalysis, setPaperAnalysis] = useState(defaultPaperAnalysis);
   const [activeSubject, setActiveSubject] = useState("数学");
   const [strategyWorkspaces, setStrategyWorkspaces] = useState(() =>
     Object.fromEntries(strategySubjects.map((subject) => [subject, createSubjectWorkspace(subject)]))
@@ -1539,6 +1509,7 @@ function App() {
   const [strategyAiStatus, setStrategyAiStatus] = useState("");
   const [planRows, setPlanRows] = useState(() => normalizePlanRows(defaultPlanRows));
   const [planNote, setPlanNote] = useState("本周先保证每天有明确空闲时间、明确任务和每日反思，不追求任务数量。");
+  const [planAiStatus, setPlanAiStatus] = useState("idle");
   const [methodFocusRows, setMethodFocusRows] = useState(() => createFocusRows("method", methodTrainingOptions));
   const [habitFocusRows, setHabitFocusRows] = useState(() => createFocusRows("habit", habitTrainingOptions));
   const [mistakes, setMistakes] = useState(defaultMistakes);
@@ -1552,6 +1523,9 @@ function App() {
     type: "",
     previewUrl: "",
   });
+  const [mistakeExtractedQuestions, setMistakeExtractedQuestions] = useState([]);
+  const [selectedExtractedQuestionIds, setSelectedExtractedQuestionIds] = useState([]);
+  const [mistakeAnalysis, setMistakeAnalysis] = useState(null);
   const [selectedMistakeId, setSelectedMistakeId] = useState(defaultMistakes[0].id);
   const [mistakeAiStatus, setMistakeAiStatus] = useState("idle");
   const [similarAiStatus, setSimilarAiStatus] = useState("idle");
@@ -2067,123 +2041,14 @@ function App() {
     ]);
   }
 
-  function updatePaperDraft(field, value) {
-    setPaperDraft((prev) => ({ ...prev, [field]: value }));
-  }
-
-  function handlePaperFiles(event) {
-    if (!requireMemberAction("上传试卷或作业图片", null, "试卷、错题和作业图片会进入学生个人档案，并用于AI视觉分析，需要会员权限。")) {
-      event.target.value = "";
-      return;
-    }
-    const files = Array.from(event.target.files || []);
-    if (!files.length) return;
-    const nextFiles = files.map((file) => ({
-      id: `${file.name}-${file.lastModified}-${Math.random().toString(36).slice(2)}`,
-      name: file.name,
-      type: file.type || "unknown",
-      size: file.size,
-      rawFile: file,
-      previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : "",
-    }));
-    setPaperDraft((prev) => ({ ...prev, files: [...prev.files, ...nextFiles] }));
-    event.target.value = "";
-  }
-
-  function removePaperFile(fileId) {
-    setPaperDraft((prev) => {
-      const target = prev.files.find((file) => file.id === fileId);
-      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
-      return { ...prev, files: prev.files.filter((file) => file.id !== fileId) };
-    });
-  }
-
-  async function runPaperAnalysis() {
-    if (!requireMemberAction("AI分析试卷与作业", runPaperAnalysis, "AI试卷分析会识别图片或PDF中的题目、答案和批改痕迹，需要会员权限。")) return;
-    if (paperAnalysisStatus === "loading") return;
-    if (!paperDraft.files.length) return;
-    const prompt = buildAgentPrompt("paperAnalysis", buildStudentArchiveSnapshot({ answers, records, paperAnalysis }));
-    console.info("树子AI任务提示词", prompt);
-    setPaperAnalysisStatus("loading");
-    try {
-      clearAiNotice();
-      const formData = new FormData();
-      formData.append("subject", paperDraft.subject);
-      formData.append("examName", paperDraft.examName);
-      formData.append("note", paperDraft.note);
-      paperDraft.files.forEach((file) => {
-        if (file.rawFile) formData.append("files", file.rawFile);
-      });
-      const data = await apiRequest("/ai/paper-analysis", {
-        method: "POST",
-        body: formData,
-      });
-      const report = data.report || {};
-      setPaperAnalysis({
-        summary: report.summary || "AI已完成试卷分析。",
-        scoreView: report.scoreView || report.core_conclusion || "AI已识别试卷中的错题、知识漏洞和方法缺口。",
-        wrongItems: (report.extracted_questions || []).map((item, index) => ({
-          title: item.title || `错题${index + 1}`,
-          type: item.error_type || "待分类",
-          knowledge: Array.isArray(item.knowledge_points) ? item.knowledge_points.join("、") : item.knowledge || "待识别知识点",
-          issue: item.content || item.student_answer || "AI已识别该题，需要继续复盘。",
-        })),
-        knowledgeGaps: report.knowledge_gaps || [],
-        methodGaps: report.method_gaps || [],
-        trainingPlan: (report.training_suggestions || []).map((item) => (typeof item === "string" ? item : `${item.task || "训练任务"}：${item.detail || ""}${item.standard ? ` 完成标准：${item.standard}` : ""}`)),
-      });
-      setPaperAnalysisStatus("done");
-      return;
-    } catch (error) {
-      showAiError(error, "服务器AI分析暂时不可用，已保留前端演示分析。");
-    }
-    window.setTimeout(() => {
-      const subject = paperDraft.subject;
-      const fileCount = paperDraft.files.length;
-      setPaperAnalysis({
-        summary: `本次上传了 ${fileCount} 份${subject}试卷、错题或作业材料。AI会优先识别错题题干、学生作答过程、批改痕迹和错因线索，再判断问题来自知识、方法、步骤、计算、表达还是考试状态。`,
-        scoreView: "从当前样本看，学生不是单纯不会，而是存在“知识点识别不稳定 + 解题流程不完整 + 错题复盘不足”的组合问题。后续可以把每道题对应到具体知识点和能力维度。",
-        wrongItems: [
-          {
-            title: `${subject}典型错题一：条件提取不完整`,
-            type: "审题与信息提取",
-            knowledge: subject === "数学" ? "函数图像、几何条件、方程关系" : "核心概念、题干关键词、材料信息",
-            issue: "题目中给出的条件没有完整转化为可用信息，导致后续方法选择不稳定。",
-          },
-          {
-            title: `${subject}典型错题二：会听但不会独立迁移`,
-            type: "方法迁移",
-            knowledge: subject === "英语" ? "句法结构、语境判断、选项辨析" : "题型模型、步骤顺序、知识调用",
-            issue: "课堂上能理解讲解，但自己面对新题时不知道先从哪个入口开始。",
-          },
-          {
-            title: `${subject}典型错题三：订正后缺少复测`,
-            type: "错题管理",
-            knowledge: "错因归类、同类题训练、间隔复测",
-            issue: "错题订正停留在看懂答案，没有形成再次独立做出的证据。",
-          },
-        ],
-        knowledgeGaps: ["核心概念边界不够清楚", "题型识别和知识调用不稳定", "基础题到综合题之间缺少过渡训练", "错题背后的前置知识没有回补"],
-        methodGaps: ["审题时没有标出关键词和已知条件", "解题步骤没有固定流程", "不会把错题归类成知识错、方法错、计算错或表达错", "订正后没有安排隔天复做和一周复测"],
-        trainingPlan: [
-          "把本次试卷错题按知识点和错因分成3类，每类先选1道最典型的题重做。",
-          "每道错题补一句“这题以后看到什么特征，就应该想到什么方法”。",
-          "安排三次复测：当天重做、隔天换纸重做、一周后生成同类题训练。",
-          "把高频错因同步到学习策略页，转化成本周具体学习任务。",
-        ],
-      });
-      setPaperAnalysisStatus("done");
-    }, 800);
-  }
-
   function generateProfileAnalysis() {
-    if (!requireMemberAction("生成学情画像统一分析", generateProfileAnalysis, "学情画像会整合问卷、陈述、试卷分析和学习记录，需要会员权限。")) return;
+    if (!requireMemberAction("生成学情画像统一分析", generateProfileAnalysis, "学情画像会整合问卷、陈述、错题专项和学习记录，需要会员权限。")) return;
     if (aiStatus === "loading") return;
     clearAiNotice();
     const archiveSnapshot = buildStudentArchiveSnapshot({
       answers,
       records,
-      paperAnalysis,
+      mistakes,
       strategies: strategyWorkspaces,
       plans: { planRows, methodFocusRows, habitFocusRows },
     });
@@ -2193,14 +2058,14 @@ function App() {
     window.setTimeout(() => {
       const weakSubjects = Array.isArray(answers.weakSubjects) && answers.weakSubjects.length ? answers.weakSubjects.join("、") : "数学、英语等薄弱科目";
       setAiInsight({
-        summary: `AI已整合学情问卷、${records.length}条学情陈述和试卷分析记录，形成当前学生学习档案快照。`,
+        summary: `AI已整合学情问卷、${records.length}条学情陈述和错题专项记录，形成当前学生学习档案快照。`,
         core: `当前核心判断：学生需要先把${weakSubjects}中的基础漏洞、错题复测和计划执行连接起来，避免只靠临时努力。`,
-        reasons: ["学情问卷反映学习链和方法习惯需要继续稳定", "学情陈述显示学生能说出困扰，但需要把问题落到科目和场景", "试卷分析提示知识调用、审题步骤和错题复测需要重点跟进", "学习计划需要从少量、明确、可检查的任务开始"],
-        evidence: ["问卷数据：基础信息、学习链、作业错题、复习巩固和科目专项", "陈述数据：文字/语音陈述、发生场景、影响程度", "试卷数据：错题类型、知识漏洞、方法缺口", "执行数据：计划、方法习惯训练、反思讨论会持续更新画像"],
+        reasons: ["学情问卷反映学习链和方法习惯需要继续稳定", "学情陈述显示学生能说出困扰，但需要把问题落到科目和场景", "错题专项提示知识调用、审题步骤和错题复测需要重点跟进", "学习计划需要从少量、明确、可检查的任务开始"],
+        evidence: ["问卷数据：基础信息、学习链、作业错题、复习巩固和科目专项", "陈述数据：文字/语音陈述、发生场景、影响程度", "错题数据：错题类型、知识漏洞、方法缺口", "执行数据：计划、方法习惯训练、反思讨论会持续更新画像"],
         tags: ["动态学情画像", "知识漏洞", "方法习惯", "计划执行"],
         questions: ["最近一周最影响学习效率的固定场景是什么？", "哪一类错题已经重复出现三次以上？", "学生最愿意先训练的一个方法或习惯是什么？", "家长能提供的稳定支持是什么？"],
         next: "下一步进入“策略与任务”，先为薄弱科目制定1-3个可执行任务，再进入“学习计划”安排到具体空闲时间。",
-        archiveConclusion: "该画像不是一次性结论，会随着问卷补充、试卷分析、错题训练、每日反思和每周讨论持续更新。",
+        archiveConclusion: "该画像不是一次性结论，会随着问卷补充、错题训练、每日反思和每周讨论持续更新。",
         source: JSON.stringify(prompt),
       });
       setAiStatus("done");
@@ -2299,6 +2164,58 @@ function App() {
     setPlanRows((prev) => prev.filter((row) => row.id !== rowId));
   }
 
+  async function runPlanAi() {
+    if (!requireMemberAction("AI辅助制定学习计划", runPlanAi, "AI会根据已经形成的学情画像、策略任务和方法习惯目标生成可修改的周计划，需要会员权限。")) return;
+    if (planAiStatus === "loading") return;
+    setPlanAiStatus("loading");
+    clearAiNotice();
+    const archiveSnapshot = buildStudentArchiveSnapshot({
+      answers,
+      records,
+      mistakes,
+      strategies: strategyWorkspaces,
+      plans: { planRows, methodFocusRows, habitFocusRows },
+    });
+    console.info("树子AI任务提示词", buildAgentPrompt("plan", archiveSnapshot));
+    try {
+      const data = await apiRequest("/ai/study-plan", {
+        method: "POST",
+        body: JSON.stringify({
+          archiveSnapshot,
+          currentPlanRows: planRows,
+          methodFocusRows,
+          habitFocusRows,
+        }),
+      });
+      const rows = Array.isArray(data.plan?.rows) ? data.plan.rows : [];
+      if (rows.length) {
+        setPlanRows(
+          normalizePlanRows(
+            rows.slice(0, 8).map((row, index) => ({
+              id: `ai-plan-row-${Date.now()}-${index}`,
+              cells: row.cells || row,
+            }))
+          )
+        );
+      }
+      if (data.plan?.note) setPlanNote(data.plan.note);
+      setPlanAiStatus("done");
+      return;
+    } catch (error) {
+      showAiError(error, "AI学习计划暂时没有响应，已先生成一份可修改的基础计划。");
+    }
+    const weakSubject = Array.isArray(answers.weakSubjects) && answers.weakSubjects[0] ? answers.weakSubjects[0] : "数学";
+    setPlanRows(
+      normalizePlanRows([
+        { id: `ai-plan-row-${Date.now()}-1`, cells: { 星期一: { start: "19:30", end: "20:10", task: `${weakSubject}基础回补`, note: "先做课本例题和基础题" }, 星期三: { start: "19:30", end: "20:10", task: `${weakSubject}错题复测`, note: "重做1-2道典型错题" } } },
+        { id: `ai-plan-row-${Date.now()}-2`, cells: { 星期二: { start: "19:30", end: "20:00", task: "方法训练", note: "使用本周选定学习方法" }, 星期四: { start: "19:30", end: "20:00", task: "同类题训练", note: "控制题量，写清步骤" } } },
+        { id: `ai-plan-row-${Date.now()}-3`, cells: { 星期五: { start: "20:30", end: "20:50", task: "本周复盘", note: "记录完成情况和下周调整点" }, 星期日: { start: "19:30", end: "20:00", task: "整理错题", note: "更新错题库和复测安排" } } },
+      ])
+    );
+    setPlanNote("AI建议先把任务安排得少而清楚：每次只处理一个明确问题，并在备注里写完成标准。");
+    setPlanAiStatus("done");
+  }
+
   function updateFocusRow(kind, rowId, field, value) {
     const setter = kind === "method" ? setMethodFocusRows : setHabitFocusRows;
     setter((prev) => prev.map((row) => (row.id === rowId ? { ...row, [field]: value } : row)));
@@ -2330,17 +2247,29 @@ function App() {
       title: prev.title === "新上传错题" ? file.name.replace(/\.[^.]+$/, "") : prev.title,
       previewUrl,
     }));
+    setMistakeExtractedQuestions([]);
+    setSelectedExtractedQuestionIds([]);
+    setMistakeAnalysis(null);
+  }
+
+  function toggleExtractedQuestion(questionId) {
+    setSelectedExtractedQuestionIds((prev) =>
+      prev.includes(questionId) ? prev.filter((id) => id !== questionId) : [...prev, questionId]
+    );
+  }
+
+  function selectAllExtractedQuestions() {
+    setSelectedExtractedQuestionIds(mistakeExtractedQuestions.map((question) => question.id));
   }
 
   async function saveMistake(useAi = false) {
-    const actionName = useAi ? "AI识别错题并保存" : "保存错题到个人题库";
+    const actionName = useAi ? "AI识别错题" : "保存错题到个人题库";
     const actionMessage = useAi
-      ? "AI识别错题会读取上传图片或PDF，分析错因和解题方法，需要登录并开通会员。"
+      ? "AI识别错题会读取上传图片或PDF，提取题目、错因和解题方法，需要登录并开通会员。"
       : "保存错题会写入学生个人题库，需要登录并开通会员。";
     if (!requireMemberAction(actionName, () => saveMistake(useAi), actionMessage)) return;
     if (mistakeAiStatus === "loading") return;
     setMistakeAiStatus("loading");
-    let aiAnalysis = null;
     if (useAi && mistakeDraft.rawFile) {
       try {
         clearAiNotice();
@@ -2353,29 +2282,75 @@ function App() {
           method: "POST",
           body: formData,
         });
-        aiAnalysis = data.analysis;
+        const analysis = data.analysis || {};
+        const extracted = Array.isArray(analysis.extracted_questions) && analysis.extracted_questions.length
+          ? analysis.extracted_questions
+          : [
+              {
+                title: analysis.mistake_title || mistakeDraft.title || "AI识别错题",
+                question_content: analysis.question_content || "",
+                error_type: analysis.error_reason || "待确认错因",
+                knowledge_points: analysis.knowledge_points || [],
+                method_gap: analysis.method_gap || "",
+                correction_steps: analysis.correction_steps || "",
+                suggestion: analysis.similar_question_requirements || analysis.review_schedule || "",
+                subject: analysis.subject || mistakeDraft.subject,
+              },
+            ];
+        const normalized = extracted.map((question, index) => ({
+          id: question.id || `extracted-${Date.now()}-${index}`,
+          title: question.title || question.mistake_title || `识别错题 ${index + 1}`,
+          question_content: question.question_content || question.content || "",
+          subject: question.subject || analysis.subject || mistakeDraft.subject,
+          error_type: question.error_type || analysis.error_reason || "待确认错因",
+          knowledge_points: Array.isArray(question.knowledge_points) ? question.knowledge_points : analysis.knowledge_points || [],
+          method_gap: question.method_gap || analysis.method_gap || "",
+          correction_steps: question.correction_steps || analysis.correction_steps || "",
+          suggestion: question.suggestion || question.review_schedule || analysis.review_schedule || "",
+          is_likely_wrong: question.is_likely_wrong !== false,
+        }));
+        setMistakeExtractedQuestions(normalized);
+        setSelectedExtractedQuestionIds(normalized.filter((question) => question.is_likely_wrong).map((question) => question.id));
+        setMistakeAnalysis(analysis.analysis || analysis);
+        setMistakeAiStatus("done");
+        return;
       } catch (error) {
         showAiError(error, "错题会先保存到页面，服务器AI识别暂时不可用。");
       }
     }
-    const next = {
-      id: `mistake-${Date.now()}`,
-      title: aiAnalysis?.mistake_title || mistakeDraft.title || "未命名错题",
-      subject: aiAnalysis?.subject || mistakeDraft.subject,
+    const selectedExtracted = mistakeExtractedQuestions.filter((question) => selectedExtractedQuestionIds.includes(question.id));
+    const sourceQuestions = selectedExtracted.length
+      ? selectedExtracted
+      : [
+          {
+            title: mistakeDraft.title || "未命名错题",
+            subject: mistakeDraft.subject,
+            error_type: mistakeDraft.reason,
+            method_gap: mistakeDraft.method,
+            correction_steps: "",
+            suggestion: "",
+          },
+        ];
+    const nextItems = sourceQuestions.map((question, index) => ({
+      id: `mistake-${Date.now()}-${index}`,
+      title: question.title || mistakeDraft.title || "未命名错题",
+      subject: question.subject || mistakeDraft.subject,
       source: mistakeDraft.source || "未填写来源",
       fileName: mistakeDraft.fileName || "未上传文件",
       type: mistakeDraft.type || "手动记录",
-      reason: aiAnalysis?.error_reason || mistakeDraft.reason || "等待AI识别错因，学生也可以先手动补充。",
-      method: aiAnalysis?.method_gap || aiAnalysis?.correction_steps || mistakeDraft.method || "等待AI整理解题方法或思路。",
+      reason: question.error_type || mistakeDraft.reason || "等待补充错因。",
+      method: question.method_gap || question.correction_steps || mistakeDraft.method || "等待补充解题方法或思路。",
       date: "刚刚",
       previewUrl: mistakeDraft.previewUrl,
-    };
+      knowledgePoints: question.knowledge_points || [],
+      suggestion: question.suggestion || "",
+    }));
     setMistakes((prev) => {
-      const duplicateKey = `${next.subject}|${next.title}|${next.fileName}`;
-      const withoutDuplicate = prev.filter((item) => `${item.subject}|${item.title}|${item.fileName}` !== duplicateKey);
-      return [next, ...withoutDuplicate];
+      const nextKeys = new Set(nextItems.map((item) => `${item.subject}|${item.title}|${item.fileName}`));
+      const withoutDuplicate = prev.filter((item) => !nextKeys.has(`${item.subject}|${item.title}|${item.fileName}`));
+      return [...nextItems, ...withoutDuplicate];
     });
-    setSelectedMistakeId(next.id);
+    setSelectedMistakeId(nextItems[0]?.id || selectedMistakeId);
     setMistakeDraft({
       title: "新上传错题",
       subject: "数学",
@@ -2387,6 +2362,9 @@ function App() {
       rawFile: null,
       previewUrl: "",
     });
+    setMistakeExtractedQuestions([]);
+    setSelectedExtractedQuestionIds([]);
+    setMistakeAnalysis(null);
     setMistakeAiStatus("done");
   }
 
@@ -2394,7 +2372,7 @@ function App() {
     if (!requireMemberAction("AI生成相似题", generateSimilarQuestions, "相似题生成会调用AI出题能力，需要会员权限。")) return;
     if (similarAiStatus === "loading") return;
     setSimilarAiStatus("loading");
-    console.info("树子AI任务提示词", buildAgentPrompt("mistakePractice", buildStudentArchiveSnapshot({ answers, records, paperAnalysis })));
+    console.info("树子AI任务提示词", buildAgentPrompt("mistakePractice", buildStudentArchiveSnapshot({ answers, records, mistakes })));
     const selected = mistakes.find((item) => item.id === selectedMistakeId) || mistakes[0];
     try {
       clearAiNotice();
@@ -2447,7 +2425,7 @@ function App() {
     if (!requireMemberAction("AI生成知识图", generateKnowledgeNote, "知识图生成会调用AI图片与讲解能力，需要会员权限。")) return;
     if (knowledgeAiStatus === "loading") return;
     setKnowledgeAiStatus("loading");
-    console.info("树子AI任务提示词", buildAgentPrompt("knowledgeNote", buildStudentArchiveSnapshot({ answers, records, paperAnalysis })));
+    console.info("树子AI任务提示词", buildAgentPrompt("knowledgeNote", buildStudentArchiveSnapshot({ answers, records, mistakes })));
     try {
       clearAiNotice();
       const data = await apiRequest("/ai/knowledge-note", {
@@ -2492,7 +2470,7 @@ function App() {
 
   function runStrategyAi(section, mode, targetId = "") {
     if (!requireMemberAction("AI生成或优化学习策略", () => runStrategyAi(section, mode, targetId), "科目策略、任务建议和AI修改都需要结合学生画像调用AI能力，需要会员权限。")) return;
-    console.info("树子AI任务提示词", buildAgentPrompt("strategy", buildStudentArchiveSnapshot({ answers, records, paperAnalysis, strategies: strategyWorkspaces })));
+    console.info("树子AI任务提示词", buildAgentPrompt("strategy", buildStudentArchiveSnapshot({ answers, records, mistakes, strategies: strategyWorkspaces })));
     const subject = activeSubject;
     const data = subjectStrategyData[subject];
     const studentName = answers.name || "这位同学";
@@ -2622,7 +2600,7 @@ function App() {
     freeAskLastSubmitRef.current = { signature: submitSignature, time: now };
     setFreeAskStatus("loading");
     clearAiNotice();
-    console.info("树子AI任务提示词", buildAgentPrompt("freeAsk", buildStudentArchiveSnapshot({ answers, records, paperAnalysis })));
+    console.info("树子AI任务提示词", buildAgentPrompt("freeAsk", buildStudentArchiveSnapshot({ answers, records, mistakes })));
     const wantsImage = /图|图片|结构图|画|生成图片|知识卡片/.test(content);
     const attachmentText = freeAskFiles.length ? `我上传了 ${freeAskFiles.length} 个附件，请结合附件一起看。` : "";
     const assistantId = `ask-ai-${Date.now()}`;
@@ -2703,7 +2681,6 @@ function App() {
               <span>{label}</span>
               {id === "questionnaire" && submitted && <CheckCircle2 size={16} />}
               {id === "statement" && records.length > 0 && <CheckCircle2 size={16} />}
-              {id === "paperAnalysis" && paperDraft.files.length > 0 && <CheckCircle2 size={16} />}
               {id === "profile" && reportReady && <CheckCircle2 size={16} />}
               {id === "strategy" && <Sparkles size={16} />}
               {id === "plan" && <Clock3 size={16} />}
@@ -2801,18 +2778,6 @@ function App() {
           />
         )}
 
-        {activePage === "paperAnalysis" && (
-          <PaperAnalysisPage
-            draft={paperDraft}
-            analysis={paperAnalysis}
-            status={paperAnalysisStatus}
-            updateDraft={updatePaperDraft}
-            handleFiles={handlePaperFiles}
-            removeFile={removePaperFile}
-            runAnalysis={runPaperAnalysis}
-          />
-        )}
-
         {activePage === "profile" && (
           <ModernProfilePage
             answers={answers}
@@ -2847,6 +2812,8 @@ function App() {
             planRows={planRows}
             updatePlanCell={updatePlanCell}
             addPlanRow={addPlanRow}
+            runPlanAi={runPlanAi}
+            planAiStatus={planAiStatus}
             removePlanRow={removePlanRow}
             planNote={planNote}
             setPlanNote={setPlanNote}
@@ -2866,6 +2833,11 @@ function App() {
             updateMistakeDraft={updateMistakeDraft}
             handleMistakeFile={handleMistakeFile}
             saveMistake={saveMistake}
+            mistakeExtractedQuestions={mistakeExtractedQuestions}
+            selectedExtractedQuestionIds={selectedExtractedQuestionIds}
+            toggleExtractedQuestion={toggleExtractedQuestion}
+            selectAllExtractedQuestions={selectAllExtractedQuestions}
+            mistakeAnalysis={mistakeAnalysis}
             selectedMistakeId={selectedMistakeId}
             setSelectedMistakeId={setSelectedMistakeId}
             similarCount={similarCount}
@@ -3740,10 +3712,13 @@ function QuestionnairePage({
               保存草稿
             </button>
             {isLast ? (
-              <button className="primary-action" onClick={submitQuestionnaire}>
-                <Send size={18} />
-                {submitted ? "重新提交问卷" : "提交问卷"}
-              </button>
+              <div className="submit-with-hint">
+                <button className="primary-action" onClick={submitQuestionnaire}>
+                  <Send size={18} />
+                  {submitted ? "重新提交问卷" : "提交问卷"}
+                </button>
+                <span>提交后会自动保存进个人学情档案，供后续画像和学习策略使用。</span>
+              </div>
             ) : (
               <button className="primary-action" onClick={() => setCurrentStep(Math.min(questionnaireSteps.length - 1, currentStep + 1))}>
                 下一步
@@ -3834,7 +3809,7 @@ function ScoreTable({ question, value, updateAnswer }) {
         <div className="score-table-head">
           <span>科目</span>
           <span>实际分数</span>
-          <span>总分</span>
+          <span>试卷总分</span>
         </div>
         {question.subjects.map((subject) => (
           <div className="score-table-row" key={subject}>
@@ -3894,148 +3869,6 @@ function YesNoGrid({ question, value, updateAnswer }) {
         ))}
       </div>
     </div>
-  );
-}
-
-function PaperAnalysisPage({ draft, analysis, status, updateDraft, handleFiles, removeFile, runAnalysis }) {
-  const hasFiles = draft.files.length > 0;
-  const formatSize = (size) => (size > 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(size / 1024))} KB`);
-
-  return (
-    <section className="stack paper-analysis-page">
-      <div className="hero-band compact paper-analysis-hero">
-        <div>
-          <span className="eyebrow">试卷分析</span>
-          <h2>上传试卷、错题或作业图片，分析孩子到底卡在哪里</h2>
-          <p>上传材料后，AI会围绕题目内容、出错类型、知识漏洞、解题方法、审题步骤和训练任务进行整理，帮助学生知道下一步该补什么、练什么。</p>
-        </div>
-        <div className="strategy-status">
-          <strong>{draft.files.length}</strong>
-          <span>已上传材料</span>
-        </div>
-      </div>
-
-      <section className="panel paper-upload-panel">
-        <div className="panel-heading">
-          <div>
-            <span className="eyebrow">1. 文件上传</span>
-            <h2>上传试卷图片、错题图片、作业图片或PDF</h2>
-          </div>
-          <UploadCloud size={24} />
-        </div>
-
-        <div className="paper-upload-layout">
-          <label className="paper-dropzone">
-            <UploadCloud size={34} />
-            <strong>点击上传学习材料</strong>
-            <span>支持 JPG、PNG、WEBP、PDF。建议图片清晰包含题干、作答过程和批改痕迹。</span>
-            <input type="file" accept="image/*,.pdf,application/pdf" multiple onChange={handleFiles} />
-          </label>
-
-          <div className="paper-meta-card">
-            <label>
-              <span>科目</span>
-              <select value={draft.subject} onChange={(event) => updateDraft("subject", event.target.value)}>
-                {paperSubjects.map((subject) => (
-                  <option key={subject} value={subject}>
-                    {subject}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>试卷 / 作业名称</span>
-              <input value={draft.examName} onChange={(event) => updateDraft("examName", event.target.value)} />
-            </label>
-            <label>
-              <span>学生补充说明</span>
-              <textarea value={draft.note} onChange={(event) => updateDraft("note", event.target.value)} placeholder="例如：这次主要是压轴题不会做，选择题错得多，或者老师说我的步骤不规范。" />
-            </label>
-          </div>
-        </div>
-
-        <div className="paper-file-list">
-          {hasFiles ? (
-            draft.files.map((file) => (
-              <article key={file.id} className="paper-file-card">
-                {file.previewUrl ? <img src={file.previewUrl} alt={file.name} /> : <FileText size={26} />}
-                <div>
-                  <strong>{file.name}</strong>
-                  <span>{file.type || "文件"} · {formatSize(file.size)}</span>
-                </div>
-                <button type="button" onClick={() => removeFile(file.id)} aria-label={`移除${file.name}`}>
-                  <Trash2 size={17} />
-                </button>
-              </article>
-            ))
-          ) : (
-            <div className="paper-empty-file">
-              <FileText size={22} />
-              <span>还没有上传材料。建议先上传1-3张最能代表问题的试卷或错题图片。</span>
-            </div>
-          )}
-        </div>
-      </section>
-
-      <section className="panel paper-analysis-panel">
-        <div className="panel-heading">
-          <div>
-            <span className="eyebrow">2. AI整理和分析</span>
-            <h2>从试卷中提取错题、错因和后续训练任务</h2>
-          </div>
-          <WandSparkles size={24} />
-        </div>
-
-        <div className="paper-analysis-actions">
-          <button type="button" className="primary-action" onClick={runAnalysis} disabled={!hasFiles || status === "loading"}>
-            {status === "loading" ? <Loader2 className="spin" size={17} /> : <Sparkles size={17} />}
-            {status === "loading" ? "AI正在分析" : "开始AI分析"}
-          </button>
-          <p>分析结果会进入学情画像，用来判断孩子哪些知识没掌握、哪些解题方法没形成、哪些题型需要专项训练。</p>
-        </div>
-
-        <div className="paper-analysis-summary">
-          <article>
-            <span>整体判断</span>
-            <p>{analysis.summary}</p>
-          </article>
-          <article>
-            <span>成绩与作答线索</span>
-            <p>{analysis.scoreView}</p>
-          </article>
-        </div>
-
-        <div className="paper-wrong-grid">
-          {analysis.wrongItems.map((item) => (
-            <article key={item.title}>
-              <span>{item.type}</span>
-              <h3>{item.title}</h3>
-              <p><strong>涉及知识：</strong>{item.knowledge}</p>
-              <p><strong>问题判断：</strong>{item.issue}</p>
-            </article>
-          ))}
-        </div>
-
-        <div className="paper-diagnosis-grid">
-          <PaperDiagnosisList title="知识掌握薄弱点" items={analysis.knowledgeGaps} />
-          <PaperDiagnosisList title="解题方法缺口" items={analysis.methodGaps} />
-          <PaperDiagnosisList title="后续训练建议" items={analysis.trainingPlan} />
-        </div>
-      </section>
-    </section>
-  );
-}
-
-function PaperDiagnosisList({ title, items }) {
-  return (
-    <article className="paper-diagnosis-card">
-      <h3>{title}</h3>
-      <ul>
-        {items.map((item) => (
-          <li key={item}>{item}</li>
-        ))}
-      </ul>
-    </article>
   );
 }
 
@@ -4153,7 +3986,7 @@ function ModernStatementPage({
               <div className="action-row">
                 <button className="primary-action" onClick={saveStatement}>
                   <Save size={18} />
-                  只保存
+                  保存
                 </button>
               </div>
             </section>
@@ -4330,7 +4163,7 @@ function ModernProfilePage({ answers, records, aiInsight, aiStatus, submitted, c
           <div className="profile-unified-head">
             <div>
               <span className="eyebrow">AI统一分析画像</span>
-              <h2>整合问卷、陈述和试卷分析，形成完整学习判断</h2>
+              <h2>整合问卷、陈述和错题专项，形成完整学习判断</h2>
             </div>
             <button className="primary-action" onClick={generateProfileAnalysis} disabled={aiStatus === "loading"}>
               {aiStatus === "loading" ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
@@ -4339,7 +4172,7 @@ function ModernProfilePage({ answers, records, aiInsight, aiStatus, submitted, c
           </div>
           <div className="profile-unified-body">
             <h3>{aiInsight?.core || "点击“AI统一分析画像”后，这里会显示学生学习问题的整体判断。"}</h3>
-            <p>{aiInsight?.archiveConclusion || "AI会统一阅读前面的学情问卷、学情陈述和试卷分析，综合判断学生的基础、方法、执行、习惯、动机和情绪精力等情况。"}</p>
+            <p>{aiInsight?.archiveConclusion || "AI会统一阅读前面的学情问卷、学情陈述和错题专项，综合判断学生的基础、方法、执行、习惯、动机和情绪精力等情况。"}</p>
             {aiInsight?.summary && <p>{aiInsight.summary}</p>}
             {aiInsight?.reasons?.length > 0 && (
               <ul className="profile-unified-list">
@@ -4348,7 +4181,7 @@ function ModernProfilePage({ answers, records, aiInsight, aiStatus, submitted, c
                 ))}
               </ul>
             )}
-            <p className="profile-source-note">当前档案来源：学情陈述 {records.length} 条，问卷完成度 {completion}%，试卷分析会在上传材料后持续补充。</p>
+            <p className="profile-source-note">当前档案来源：学情陈述 {records.length} 条，问卷完成度 {completion}%，错题专项会随着上传和训练持续补充。</p>
           </div>
         </section>
 
@@ -4618,6 +4451,8 @@ function StudyPlanPage({
   planRows,
   updatePlanCell,
   addPlanRow,
+  runPlanAi,
+  planAiStatus,
   removePlanRow,
   planNote,
   setPlanNote,
@@ -4666,6 +4501,10 @@ function StudyPlanPage({
                 <button type="button" className="ghost-action" onClick={() => printPage("下载学习计划PDF", "学习计划表和方法习惯训练表可以打印或另存为PDF，需要登录并开通会员后使用。")}>
                   <FileDown size={17} />
                   下载学习计划PDF
+                </button>
+                <button type="button" className="primary-action plan-ai-action" onClick={runPlanAi} disabled={planAiStatus === "loading"}>
+                  {planAiStatus === "loading" ? <Loader2 className="spin" size={17} /> : <WandSparkles size={17} />}
+                  {planAiStatus === "loading" ? "AI正在制定" : "AI辅助制定学习计划"}
                 </button>
                 <button type="button" className="primary-action" onClick={addPlanRow}>
                   <Plus size={17} />
@@ -4947,6 +4786,11 @@ function MistakeSpecialPage({
   updateMistakeDraft,
   handleMistakeFile,
   saveMistake,
+  mistakeExtractedQuestions,
+  selectedExtractedQuestionIds,
+  toggleExtractedQuestion,
+  selectAllExtractedQuestions,
+  mistakeAnalysis,
   selectedMistakeId,
   setSelectedMistakeId,
   similarCount,
@@ -4976,7 +4820,7 @@ function MistakeSpecialPage({
         <div>
           <span className="eyebrow">错题专项</span>
           <h2>上传错题、沉淀错题库，再让AI生成相似题训练</h2>
-          <p>学生可以上传图片或PDF，系统先建立错题档案。后续接入OpenAI API后，可自动识别题目、分析错因、生成1-3道相似题，并整理成错题PDF。</p>
+          <p>建议一次上传一道错题。若一张图片或PDF里有多道题，AI会先整理题目清单，学生选择真正需要训练的错题后再保存入库。</p>
         </div>
         <div className="strategy-status">
           <strong>{mistakes.length}</strong>
@@ -4988,15 +4832,15 @@ function MistakeSpecialPage({
         <article className="panel upload-mistake-panel">
           <div className="panel-heading">
             <div>
-              <span className="eyebrow">1. 上传学生错题</span>
-              <h2>支持图片或PDF</h2>
+              <span className="eyebrow">1. 文件上传</span>
+              <h2>上传错题图片、作业图片或PDF</h2>
             </div>
             <UploadCloud size={24} />
           </div>
           <label className="mistake-upload-box">
             <UploadCloud size={28} />
             <strong>{mistakeDraft.fileName || "点击上传错题图片或PDF"}</strong>
-            <span>支持 JPG、PNG、PDF。上传后会进入个人错题库，方便后续识别、整理和训练。</span>
+            <span>支持 JPG、PNG、PDF。优先一张图对应一道错题，识别后再选择保存。</span>
             <input type="file" accept="image/*,.pdf,application/pdf" onChange={handleMistakeFile} />
           </label>
 
@@ -5034,45 +4878,98 @@ function MistakeSpecialPage({
           <div className="ai-action-row">
             <button type="button" className="primary-action" onClick={() => saveMistake(false)} disabled={mistakeAiStatus === "loading"}>
               {mistakeAiStatus === "loading" ? <Loader2 className="spin" size={17} /> : <Save size={17} />}
-              {mistakeAiStatus === "loading" ? "正在保存" : "保存到错题库"}
+              {mistakeAiStatus === "loading" ? "正在保存" : "保存选中错题"}
             </button>
             <button type="button" className="ghost-action" onClick={() => saveMistake(true)} disabled={mistakeAiStatus === "loading" || !mistakeDraft.rawFile}>
               {mistakeAiStatus === "loading" ? <Loader2 className="spin" size={17} /> : <Sparkles size={17} />}
-              {mistakeAiStatus === "loading" ? "AI正在识别" : "AI识别错题"}
+              {mistakeAiStatus === "loading" ? "AI正在识别" : "AI整理题目与错因"}
             </button>
           </div>
         </article>
+      </section>
 
-        <article className="panel">
+      <section className="mistake-grid">
+        <article className="panel mistake-selection-panel">
           <div className="panel-heading">
             <div>
-              <span className="eyebrow">2. 过往错题库</span>
-              <h2>学生可以随时调取</h2>
+              <span className="eyebrow">2. 识别与选择</span>
+              <h2>确认本次要保存的错题</h2>
             </div>
-            <Library size={24} />
+            <ListChecks size={24} />
           </div>
-          <div className="mistake-library">
-            {visibleMistakes.map((mistake) => (
-              <button
-                key={mistake.id}
-                type="button"
-                className={selectedMistakeId === mistake.id ? "mistake-card is-active" : "mistake-card"}
-                onClick={() => setSelectedMistakeId(mistake.id)}
-              >
-                <span>{mistake.subject} · {mistake.date}</span>
-                <strong>{mistake.title}</strong>
-                <p>{mistake.reason}</p>
-                <em>{mistake.fileName}</em>
-              </button>
-            ))}
+          <p className="section-helper">如果AI识别出多道题，可以只勾选真正做错或需要训练的题；也可以一键全选。</p>
+          {mistakeExtractedQuestions.length > 0 ? (
+            <>
+              <div className="ai-action-row">
+                <button type="button" className="ghost-action" onClick={selectAllExtractedQuestions}>
+                  <CheckCircle2 size={17} />
+                  全选本次识别题目
+                </button>
+              </div>
+              <div className="extracted-question-list">
+                {mistakeExtractedQuestions.map((question, index) => (
+                  <button
+                    key={question.id}
+                    type="button"
+                    className={selectedExtractedQuestionIds.includes(question.id) ? "extracted-question-card is-selected" : "extracted-question-card"}
+                    onClick={() => toggleExtractedQuestion(question.id)}
+                  >
+                    <span>{question.subject || mistakeDraft.subject} · 题目 {index + 1}</span>
+                    <strong>{question.title}</strong>
+                    {question.question_content && <p>{question.question_content}</p>}
+                    <em>{selectedExtractedQuestionIds.includes(question.id) ? "已选择保存" : "点击选择"}</em>
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="empty-state small">
+              <ListChecks size={22} />
+              <p>上传文件后，点击“AI整理题目与错因”，这里会出现题目清单。</p>
+            </div>
+          )}
+        </article>
+
+        <article className="panel mistake-analysis-panel">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">3. AI错题分析</span>
+              <h2>知识点、方法缺口和训练建议</h2>
+            </div>
+            <Sparkles size={24} />
           </div>
+          {mistakeAnalysis ? (
+            <div className="mistake-analysis-grid">
+              <article>
+                <span>考点</span>
+                <strong>{mistakeAnalysis.test_point || mistakeAnalysis.knowledge_points?.join("、") || "待补充"}</strong>
+              </article>
+              <article>
+                <span>错因类型</span>
+                <strong>{mistakeAnalysis.error_reason || mistakeAnalysis.wrong_type || "待补充"}</strong>
+              </article>
+              <article>
+                <span>方法缺口</span>
+                <strong>{mistakeAnalysis.method_gap || "待补充"}</strong>
+              </article>
+              <article>
+                <span>后续训练</span>
+                <strong>{Array.isArray(mistakeAnalysis.training_suggestions) ? mistakeAnalysis.training_suggestions.join("；") : mistakeAnalysis.training_suggestions || mistakeAnalysis.review_schedule || "待补充"}</strong>
+              </article>
+            </div>
+          ) : (
+            <div className="empty-state small">
+              <Sparkles size={22} />
+              <p>AI识别后，这里会显示错题对应的知识掌握、解题方法和训练建议。</p>
+            </div>
+          )}
         </article>
       </section>
 
       <section className="panel">
         <div className="panel-heading">
           <div>
-            <span className="eyebrow">3. AI即时出相似题</span>
+            <span className="eyebrow">4. AI即时出相似题</span>
             <h2>围绕一道错题生成1-3道同类训练题</h2>
           </div>
           <WandSparkles size={24} />
@@ -5083,12 +4980,16 @@ function MistakeSpecialPage({
             <strong>先决定用哪一道错题生成同类题</strong>
             <p>学生可以从错题库中选择一道最想训练的题，AI会围绕这道题的题型、方法和错因生成相似训练。</p>
           </div>
-          <select value={selectedMistakeId} onChange={(event) => setSelectedMistakeId(event.target.value)}>
-            {visibleMistakes.map((mistake) => (
-              <option key={mistake.id} value={mistake.id}>
-                {mistake.subject}｜{mistake.title}
-              </option>
-            ))}
+          <select value={selectedMistakeId || ""} onChange={(event) => setSelectedMistakeId(event.target.value)} disabled={!visibleMistakes.length}>
+            {visibleMistakes.length ? (
+              visibleMistakes.map((mistake) => (
+                <option key={mistake.id} value={mistake.id}>
+                  {mistake.subject}｜{mistake.title}
+                </option>
+              ))
+            ) : (
+              <option value="">请先保存一道错题</option>
+            )}
           </select>
         </div>
         <div className="similar-question-layout">
@@ -5126,10 +5027,35 @@ function MistakeSpecialPage({
         </div>
       </section>
 
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">5. 过往错题库</span>
+            <h2>学生可以随时调取</h2>
+          </div>
+          <Library size={24} />
+        </div>
+        <div className="mistake-library">
+          {visibleMistakes.map((mistake) => (
+            <button
+              key={mistake.id}
+              type="button"
+              className={selectedMistakeId === mistake.id ? "mistake-card is-active" : "mistake-card"}
+              onClick={() => setSelectedMistakeId(mistake.id)}
+            >
+              <span>{mistake.subject} · {mistake.date}</span>
+              <strong>{mistake.title}</strong>
+              <p>{mistake.reason}</p>
+              <em>{mistake.fileName}</em>
+            </button>
+          ))}
+        </div>
+      </section>
+
       <section className="panel mistake-export-panel">
         <div className="panel-heading">
           <div>
-            <span className="eyebrow">4. 错题整理与PDF下载</span>
+            <span className="eyebrow">6. 错题整理与PDF下载</span>
             <h2>把上传错题重新编排成个人错题集</h2>
           </div>
           <Download size={24} />

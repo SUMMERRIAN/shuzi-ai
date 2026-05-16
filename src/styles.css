@@ -1164,6 +1164,19 @@ p {
   font-weight: 800;
 }
 
+.submit-with-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.submit-with-hint span {
+  color: #5f6b76;
+  font-size: 14px;
+  font-weight: 800;
+}
+
 .question-field {
   display: grid;
   gap: 10px;
@@ -3235,6 +3248,90 @@ audio {
   resize: vertical;
 }
 
+.section-helper {
+  margin: 0;
+  color: #5f6b76;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.mistake-selection-panel,
+.mistake-analysis-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.extracted-question-list {
+  display: grid;
+  gap: 10px;
+}
+
+.extracted-question-card {
+  display: grid;
+  gap: 7px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid #dfe5da;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1d2520;
+  text-align: left;
+}
+
+.extracted-question-card.is-selected,
+.extracted-question-card:hover {
+  border-color: #008653;
+  background: #f0f7ea;
+}
+
+.extracted-question-card span,
+.mistake-analysis-grid span {
+  color: #008653;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.extracted-question-card strong {
+  font-size: 17px;
+}
+
+.extracted-question-card p {
+  margin: 0;
+  color: #48534d;
+}
+
+.extracted-question-card em {
+  color: #2e5bff;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.mistake-analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.mistake-analysis-grid article {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid #dfe5da;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.mistake-analysis-grid strong {
+  color: #1d2520;
+  line-height: 1.6;
+}
+
+.empty-state.small {
+  min-height: 130px;
+  padding: 18px;
+}
+
 .mistake-library {
   display: grid;
   gap: 10px;
@@ -4038,244 +4135,6 @@ audio {
   font-size: 14px;
 }
 
-.paper-analysis-page {
-  --paper-border: #d8dee8;
-}
-
-.paper-upload-layout {
-  display: grid;
-  grid-template-columns: minmax(320px, 0.72fr) minmax(0, 1fr);
-  gap: 16px;
-  align-items: stretch;
-}
-
-.paper-dropzone {
-  display: grid;
-  min-height: 260px;
-  place-items: center;
-  align-content: center;
-  gap: 10px;
-  padding: 24px;
-  border: 1px dashed #94a3b8;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #f8fafc, #eef4ff);
-  text-align: center;
-  cursor: pointer;
-}
-
-.paper-dropzone svg {
-  color: #2e5bff;
-}
-
-.paper-dropzone strong {
-  font-size: 20px;
-}
-
-.paper-dropzone span {
-  max-width: 420px;
-  color: #5f6b76;
-  font-size: 14px;
-}
-
-.paper-dropzone input {
-  display: none;
-}
-
-.paper-meta-card {
-  display: grid;
-  gap: 12px;
-  padding: 16px;
-  border: 1px solid var(--paper-border);
-  border-radius: 8px;
-  background: #f8fafc;
-}
-
-.paper-meta-card label {
-  display: grid;
-  gap: 7px;
-}
-
-.paper-meta-card label span {
-  color: #48534d;
-  font-size: 13px;
-  font-weight: 900;
-}
-
-.paper-meta-card input,
-.paper-meta-card select,
-.paper-meta-card textarea {
-  width: 100%;
-  border: 1px solid #cfd8e3;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #182027;
-}
-
-.paper-meta-card input,
-.paper-meta-card select {
-  min-height: 42px;
-  padding: 0 12px;
-}
-
-.paper-meta-card textarea {
-  min-height: 110px;
-  padding: 12px;
-  resize: vertical;
-}
-
-.paper-file-list {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 16px;
-}
-
-.paper-file-card,
-.paper-empty-file {
-  display: grid;
-  align-items: center;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--paper-border);
-  border-radius: 8px;
-  background: #ffffff;
-}
-
-.paper-file-card {
-  grid-template-columns: 58px minmax(0, 1fr) 34px;
-}
-
-.paper-file-card img {
-  width: 58px;
-  height: 58px;
-  object-fit: cover;
-  border-radius: 8px;
-  border: 1px solid #d8dee8;
-}
-
-.paper-file-card > svg {
-  width: 58px;
-  height: 58px;
-  padding: 15px;
-  border-radius: 8px;
-  background: #eef4ff;
-  color: #2e5bff;
-}
-
-.paper-file-card strong {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.paper-file-card span {
-  color: #68736b;
-  font-size: 12px;
-}
-
-.paper-file-card button {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border: 1px solid #d8dee8;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #5f6b76;
-}
-
-.paper-empty-file {
-  grid-column: 1 / -1;
-  grid-template-columns: auto minmax(0, 1fr);
-  color: #5f6b76;
-}
-
-.paper-analysis-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.paper-analysis-actions p {
-  max-width: 760px;
-  margin-bottom: 0;
-  color: #5f6b76;
-}
-
-.paper-analysis-summary {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.paper-analysis-summary article,
-.paper-wrong-grid article,
-.paper-diagnosis-card {
-  padding: 16px;
-  border: 1px solid var(--paper-border);
-  border-radius: 8px;
-  background: #f8fafc;
-}
-
-.paper-analysis-summary span,
-.paper-wrong-grid span {
-  display: inline-flex;
-  margin-bottom: 8px;
-  color: #008653;
-  font-size: 13px;
-  font-weight: 900;
-}
-
-.paper-analysis-summary p,
-.paper-wrong-grid p {
-  margin-bottom: 0;
-  color: #344039;
-}
-
-.paper-wrong-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.paper-wrong-grid h3 {
-  margin-bottom: 8px;
-  font-size: 18px;
-  line-height: 1.3;
-}
-
-.paper-wrong-grid p + p {
-  margin-top: 8px;
-}
-
-.paper-diagnosis-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.paper-diagnosis-card {
-  background: #ffffff;
-}
-
-.paper-diagnosis-card h3 {
-  margin-bottom: 10px;
-  font-size: 18px;
-}
-
-.paper-diagnosis-card ul {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding-left: 18px;
-  color: #344039;
-}
-
 .mistake-library {
   max-height: 360px;
   overflow-y: auto;
@@ -4559,11 +4418,6 @@ audio {
   .knowledge-layout,
   .forum-layout,
   .forum-feed-layout,
-  .paper-upload-layout,
-  .paper-file-list,
-  .paper-analysis-summary,
-  .paper-wrong-grid,
-  .paper-diagnosis-grid,
   .agent-archive-strip,
   .profile-overall-grid,
   .report-summary,
