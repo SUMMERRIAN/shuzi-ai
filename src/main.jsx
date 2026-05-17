@@ -1948,13 +1948,15 @@ function App() {
     if (!requireMemberAction("保存学情陈述", saveStatement, "学情陈述会被保存到个人档案，后续会在学情画像页面统一分析。")) return;
     const content = statementText.trim();
     if (!content) return;
-    const tags = [statementSubject, statementScene, statementIntensity >= 8 ? "高影响" : "需跟进"];
+    const selectedSubject = statementSubject || "未选主题";
+    const selectedScene = statementScene || "未选场景";
+    const tags = [selectedSubject, selectedScene, statementIntensity >= 8 ? "高影响" : "需跟进"];
     try {
       await apiRequest("/archive/statements", {
         method: "POST",
         body: JSON.stringify({
-          subject: statementSubject,
-          scene: statementScene,
+          subject: selectedSubject,
+          scene: selectedScene,
           intensity: statementIntensity,
           content,
           guidedAnswers,
@@ -1967,11 +1969,11 @@ function App() {
       {
         id: Date.now(),
         type: "文字申述",
-        title: `${statementSubject} · ${statementScene}`,
+        title: `${selectedSubject} · ${selectedScene}`,
         content,
         time: "刚刚",
-        subject: statementSubject,
-        scene: statementScene,
+        subject: selectedSubject,
+        scene: selectedScene,
         intensity: statementIntensity,
         tags,
         guidedAnswers,
@@ -3576,14 +3578,16 @@ function RecordList({ title, items, empty }) {
   return (
     <article className="panel record-list-panel">
       <h2>{title}</h2>
-      {items.length === 0 && <p className="muted-text">{empty}</p>}
-      {items.map((item) => (
-        <div className="record-row" key={item.id}>
-          <strong>{item.title}</strong>
-          <span>{item.meta}</span>
-          <small>{item.time ? new Date(item.time).toLocaleString("zh-CN") : ""}</small>
-        </div>
-      ))}
+      <div className="record-list-scroll">
+        {items.length === 0 && <p className="muted-text">{empty}</p>}
+        {items.map((item) => (
+          <div className="record-row" key={item.id}>
+            <strong>{item.title}</strong>
+            <span>{item.meta}</span>
+            <small>{item.time ? new Date(item.time).toLocaleString("zh-CN") : ""}</small>
+          </div>
+        ))}
+      </div>
     </article>
   );
 }
@@ -3948,7 +3952,9 @@ function ModernStatementPage({
   function appendCombination() {
     const existing = statementText.trim();
     const nextIndex = existing ? existing.split(/\n(?=\d+\.)/).length + 1 : 1;
-    const line = `${nextIndex}. ${statementSubject}+${statementScene}：`;
+    const selectedSubject = statementSubject || "未选主题";
+    const selectedScene = statementScene || "未选场景";
+    const line = `${nextIndex}. ${selectedSubject}+${selectedScene}：`;
     setStatementText(existing ? `${existing}\n${line}` : line);
   }
 
@@ -3991,7 +3997,7 @@ function ModernStatementPage({
                   <strong>相关主题</strong>
                   <div className="compact-options">
                     {statementSubjects.map((item) => (
-                      <button key={item} className={statementSubject === item ? "mini-choice is-selected" : "mini-choice"} onClick={() => setStatementSubject(item)}>
+                      <button key={item} className={statementSubject === item ? "mini-choice is-selected" : "mini-choice"} onClick={() => setStatementSubject((current) => (current === item ? "" : item))}>
                         {item}
                       </button>
                     ))}
@@ -4001,7 +4007,7 @@ function ModernStatementPage({
                   <strong>发生场景</strong>
                   <div className="compact-options">
                     {statementScenes.map((item) => (
-                      <button key={item} className={statementScene === item ? "mini-choice is-selected" : "mini-choice"} onClick={() => setStatementScene(item)}>
+                      <button key={item} className={statementScene === item ? "mini-choice is-selected" : "mini-choice"} onClick={() => setStatementScene((current) => (current === item ? "" : item))}>
                         {item}
                       </button>
                     ))}
@@ -4712,6 +4718,10 @@ function StudyPlanPage({
   );
 }
 
+function isCustomFocusItem(item) {
+  return item === "自定义训练" || item === "自定义习惯";
+}
+
 function FocusTrainingTable({ title, kind, rows, options, updateFocusRow, updateFocusScore }) {
   return (
     <div className="focus-training-block">
@@ -4742,6 +4752,14 @@ function FocusTrainingTable({ title, kind, rows, options, updateFocusRow, update
                       </option>
                     ))}
                   </select>
+                  {isCustomFocusItem(row.item) && (
+                    <input
+                      className="focus-custom-title"
+                      value={row.customTitle || ""}
+                      onChange={(event) => updateFocusRow(kind, row.id, "customTitle", event.target.value)}
+                      placeholder="写下自定义训练标题"
+                    />
+                  )}
                 </td>
                 <td>
                   <textarea

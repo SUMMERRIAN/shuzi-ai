@@ -911,6 +911,14 @@ p {
   gap: 10px;
 }
 
+.record-list-scroll {
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
 .record-row {
   display: grid;
   gap: 4px;
@@ -2314,7 +2322,7 @@ audio {
 
 .strategy-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+  grid-template-columns: 1fr;
   gap: 18px;
   align-items: stretch;
 }
@@ -2410,8 +2418,10 @@ audio {
 .material-list {
   display: grid;
   gap: 12px;
+  max-height: 430px;
+  overflow-y: auto;
+  padding-right: 6px;
   margin: 0;
-  padding: 0;
   list-style: none;
 }
 
@@ -3058,6 +3068,7 @@ audio {
 
 .focus-training-table select,
 .focus-training-table textarea,
+.focus-training-table input,
 .reflection-table select,
 .reflection-table textarea,
 .discussion-card textarea,
@@ -3071,6 +3082,7 @@ audio {
 }
 
 .focus-training-table select,
+.focus-training-table input,
 .reflection-table select,
 .discussion-card select,
 .discussion-card input {
@@ -3248,6 +3260,10 @@ audio {
 
 .mistake-workspace {
   gap: 18px;
+}
+
+.focus-custom-title {
+  margin-top: 8px;
 }
 
 .mistake-tabs {
