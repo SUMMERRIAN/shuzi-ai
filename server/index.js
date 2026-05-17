@@ -4,7 +4,7 @@ import cors from "cors";
 import fs from "node:fs";
 import bcrypt from "bcryptjs";
 import mammoth from "mammoth";
-import pdfParse from "pdf-parse";
+import { PDFParse } from "pdf-parse";
 import ExcelJS from "exceljs";
 import { ensureSchema } from "./schema.js";
 import { query, withTransaction } from "./db.js";
@@ -42,6 +42,16 @@ function getOpenAITextModel(mode = "fast") {
 
 function getGeminiModel(mode = "fast") {
   return normalizeAiMode(mode) === "thinking" ? geminiThinkingModel : geminiFastModel;
+}
+
+async function extractPdfText(buffer) {
+  const parser = new PDFParse({ data: buffer });
+  try {
+    const result = await parser.getText();
+    return result.text || "";
+  } finally {
+    await parser.destroy();
+  }
 }
 
 function normalizeIdentifier(identifier = "") {
@@ -214,8 +224,8 @@ async function extractDocumentText(file) {
         .slice(0, 12000);
     }
     if (mime === "application/pdf" || name.endsWith(".pdf")) {
-      const result = await pdfParse(fs.readFileSync(file.path));
-      return (result.text || "").slice(0, 12000);
+      const text = await extractPdfText(fs.readFileSync(file.path));
+      return text.slice(0, 12000);
     }
   } catch (error) {
     console.warn("Failed to extract uploaded document text", file.originalname, error.message);
