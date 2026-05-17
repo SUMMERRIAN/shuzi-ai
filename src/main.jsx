@@ -1058,7 +1058,18 @@ function createSubjectWorkspace(subject) {
   const data = subjectStrategyData[subject];
   return {
     strategy: data.strategy,
+    strategySuggestion: "点击“生成AI策略建议”后，这里会结合学情画像、学情陈述和当前科目，生成一份可以选择接受或重新生成的学习策略。",
+    acceptedStrategy: "",
+    studentStrategy: "",
     materials: data.materials.map((item, index) => ({ ...item, id: `${subject}-material-${index}` })),
+    customMaterials: [
+      {
+        id: `${subject}-custom-material-0`,
+        name: "",
+        purpose: "",
+        usage: "",
+      },
+    ],
     tasks: data.tasks.map((task, index) => ({ ...task, id: `${subject}-task-${index}` })),
     aiNote: "AI建议会根据学情画像、申述记录和当前科目内容生成。",
   };
@@ -1116,6 +1127,7 @@ function createFocusRows(type, options) {
 }
 
 const methodTrainingOptions = [
+  "自定义训练",
   "三遍做题法",
   "费曼讲解法",
   "错题归因复测",
@@ -1129,6 +1141,7 @@ const methodTrainingOptions = [
 ];
 
 const habitTrainingOptions = [
+  "自定义习惯",
   "每天固定时间开始学习",
   "学习前准备好资料",
   "手机远离学习区",
@@ -2109,8 +2122,29 @@ function App() {
     }));
   }
 
-  function updateStrategyText(value) {
-    updateStrategyWorkspace(activeSubject, (workspace) => ({ ...workspace, strategy: value }));
+  function updateStrategyText(value, field = "studentStrategy") {
+    updateStrategyWorkspace(activeSubject, (workspace) => ({
+      ...workspace,
+      [field]: value,
+      strategy: field === "studentStrategy" ? value || workspace.acceptedStrategy || workspace.strategy : workspace.strategy,
+    }));
+  }
+
+  function acceptStrategySuggestion() {
+    updateStrategyWorkspace(activeSubject, (workspace) => ({
+      ...workspace,
+      acceptedStrategy: workspace.strategySuggestion,
+      strategy: workspace.strategySuggestion,
+      aiNote: "已接受当前AI策略建议，这份策略会作为本学科后续任务和计划设计的依据。",
+    }));
+  }
+
+  function rejectStrategySuggestion() {
+    updateStrategyWorkspace(activeSubject, (workspace) => ({
+      ...workspace,
+      acceptedStrategy: "",
+      aiNote: "当前AI策略建议暂未采用。可以重新生成，或以学生自己的策略为准继续设计任务。",
+    }));
   }
 
   function updateStrategyTask(taskId, field, value) {
@@ -2120,10 +2154,32 @@ function App() {
     }));
   }
 
-  function updateMaterialUsage(materialId, value) {
+  function updateMaterialUsage(materialId, field, value) {
     updateStrategyWorkspace(activeSubject, (workspace) => ({
       ...workspace,
-      materials: workspace.materials.map((material) => (material.id === materialId ? { ...material, usage: value } : material)),
+      materials: workspace.materials.map((material) => (material.id === materialId ? { ...material, [field]: value } : material)),
+    }));
+  }
+
+  function updateCustomMaterial(materialId, field, value) {
+    updateStrategyWorkspace(activeSubject, (workspace) => ({
+      ...workspace,
+      customMaterials: workspace.customMaterials.map((material) => (material.id === materialId ? { ...material, [field]: value } : material)),
+    }));
+  }
+
+  function addCustomMaterial() {
+    updateStrategyWorkspace(activeSubject, (workspace) => ({
+      ...workspace,
+      customMaterials: [
+        ...workspace.customMaterials,
+        {
+          id: `${activeSubject}-custom-material-${Date.now()}`,
+          name: "",
+          purpose: "",
+          usage: "",
+        },
+      ],
     }));
   }
 
@@ -2463,13 +2519,32 @@ function App() {
     if (section === "strategy") {
       updateStrategyWorkspace(subject, (workspace) => ({
         ...workspace,
-        strategy: `${studentName}当前弱项集中在${weakSubjects}。针对${subject}，建议先围绕“${problemText}”建立学习策略：${data.strategy} 本周不要追求任务数量，而要先保证每天有一个能完成、能记录、能复盘的小闭环。`,
-        aiNote: `已结合学情画像为${subject}生成策略，可继续点击“AI帮我修改”压缩成学生更容易执行的版本。`,
+        strategySuggestion: `${studentName}当前弱项集中在${weakSubjects}。针对${subject}，建议先围绕“${problemText}”建立学习策略：${data.strategy} 本周不要追求任务数量，而要先保证每天有一个能完成、能记录、能复盘的小闭环。`,
+        aiNote: `已结合学情画像为${subject}生成策略建议。接受后，它才会作为本学科正式策略继续使用。`,
       }));
       return;
     }
 
     if (section === "task") {
+      if (!targetId) {
+        updateStrategyWorkspace(subject, (workspace) => ({
+          ...workspace,
+          tasks: [
+            ...workspace.tasks,
+            {
+              id: `${subject}-ai-task-${Date.now()}`,
+              title: `${subject}AI建议任务`,
+              problem: problemText,
+              time: "本周选择 2-3 次，每次 25-40 分钟",
+              material: workspace.materials?.[0]?.name || "课本、课堂笔记、错题本",
+              detail: `围绕当前学情画像中的主要问题，先完成一个小任务：准备资料，完成基础练习，记录错因或收获，再让AI继续帮忙优化。`,
+              standard: "能说清楚这个任务解决了什么问题，完成后留下记录，并知道下一次如何复测。",
+              studentNote: "",
+            },
+          ],
+        }));
+        return;
+      }
       updateStrategyWorkspace(subject, (workspace) => ({
         ...workspace,
         tasks: workspace.tasks.map((task) =>
@@ -2782,7 +2857,11 @@ function App() {
             updateStrategyText={updateStrategyText}
             updateStrategyTask={updateStrategyTask}
             updateMaterialUsage={updateMaterialUsage}
+            updateCustomMaterial={updateCustomMaterial}
+            addCustomMaterial={addCustomMaterial}
             addStrategyTask={addStrategyTask}
+            acceptStrategySuggestion={acceptStrategySuggestion}
+            rejectStrategySuggestion={rejectStrategySuggestion}
             runStrategyAi={runStrategyAi}
           />
         )}
@@ -2921,11 +3000,6 @@ function HomePage({ setActivePage }) {
     ["3", "制定策略与任务", "每个科目形成学习策略、资料使用方法和具体学习任务。"],
     ["4", "学习计划与训练", "把任务安排进每周计划，并通过错题专项和知识笔记持续训练。"],
   ];
-  const cases = [
-    ["会听不会做", "重点检查作业过程、错题归因和复测机制，先建立小闭环。"],
-    ["计划总是失败", "把任务压缩到明确时间段，先完成1-3个可执行动作。"],
-    ["错题反复错", "通过错题库选择一道题，生成同类题，训练方法迁移。"],
-  ];
   return (
     <section className="stack home-page">
       <div className="hero-band compact home-hero">
@@ -2938,6 +3012,28 @@ function HomePage({ setActivePage }) {
           <span>学习教练</span>
         </div>
       </div>
+
+      <section className="panel home-about-panel">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">什么是树子AI？</span>
+            <h2>一个帮助学生学习成长的AI学习伙伴</h2>
+          </div>
+          <Sparkles size={24} />
+        </div>
+        <div className="home-about-grid">
+          <article className="home-about-main">
+            <strong>核心理念：让AI更了解你的学习情况，从而更精准地帮助你。</strong>
+            <p>
+              树子AI会先了解学生的问卷、陈述、试卷和错题，再帮助分析学习问题、制定科目策略、安排学习计划、整理错题和知识盲点，并陪伴学生长期改进。
+            </p>
+          </article>
+          <article>
+            <strong>学生可以随时提问</strong>
+            <p>学习问题、方法困惑、计划安排、复习方向、作业题目和知识点，都可以在这里继续追问。</p>
+          </article>
+        </div>
+      </section>
 
       <section className="panel">
         <div className="panel-heading">
@@ -2955,24 +3051,6 @@ function HomePage({ setActivePage }) {
           {workflow.map(([index, title, desc]) => (
             <article key={title}>
               <span>{index}</span>
-              <strong>{title}</strong>
-              <p>{desc}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="panel">
-        <div className="panel-heading">
-          <div>
-            <span className="eyebrow">案例示范</span>
-            <h2>常见学习问题如何被拆解</h2>
-          </div>
-          <BookOpen size={24} />
-        </div>
-        <div className="home-case-grid">
-          {cases.map(([title, desc]) => (
-            <article key={title}>
               <strong>{title}</strong>
               <p>{desc}</p>
             </article>
@@ -3021,18 +3099,6 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, update
 
   return (
     <section className="stack forum-page">
-      <div className="hero-band compact forum-hero">
-        <div>
-          <span className="eyebrow">学习社区</span>
-          <h2>像贴吧一样交流学习问题、学习心得和版主答疑</h2>
-          <p>所有人都可以浏览帖子和回复。只有会员可以发帖、留言、分享自己的学习问题和心得，也可以向版主提出疑问。</p>
-        </div>
-        <div className="strategy-status">
-          <strong>{posts.length}</strong>
-          <span>主题帖</span>
-        </div>
-      </div>
-
       <section className="forum-feed-layout">
         <main className="forum-board">
           <div className="panel forum-board-toolbar">
@@ -4247,7 +4313,11 @@ function StrategyDesignPage({
   updateStrategyText,
   updateStrategyTask,
   updateMaterialUsage,
+  updateCustomMaterial,
+  addCustomMaterial,
   addStrategyTask,
+  acceptStrategySuggestion,
+  rejectStrategySuggestion,
   runStrategyAi,
 }) {
   const workspace = workspaces[activeSubject];
@@ -4261,7 +4331,7 @@ function StrategyDesignPage({
           <span className="eyebrow">策略与任务</span>
           <h2>先确定这个科目应该怎么学，再拆成资料使用和具体任务</h2>
           <p>
-            这一页以学情画像为基础，由AI给出科目策略和学习任务建议。学生可以自己写资料使用细节，也可以让AI提出建议或帮忙修改，最后形成可执行的科目学习方案。
+            这一页以学情画像为基础，由AI给出科目策略和学习任务建议。学生可以自己写资料使用细节，也可以让AI帮忙修改，最后形成可执行的科目学习方案。
           </p>
         </div>
         <div className="strategy-status">
@@ -4296,7 +4366,7 @@ function StrategyDesignPage({
         <article className="panel strategy-editor-panel">
           <div className="panel-heading">
             <div>
-              <span className="eyebrow">1. AI科目学习策略建议</span>
+              <span className="eyebrow">1. 科目学习策略</span>
               <h2>{activeSubject}应该怎么学习？</h2>
             </div>
             <Sparkles size={24} />
@@ -4307,27 +4377,43 @@ function StrategyDesignPage({
             <p>{subjectData.diagnosis}</p>
           </div>
 
-          <textarea
-            className="strategy-textarea"
-            value={workspace.strategy}
-            onChange={(event) => updateStrategyText(event.target.value)}
-            aria-label={`${activeSubject}学习策略`}
-          />
-
-          <div className="ai-action-row">
-            <button type="button" className="primary-action" onClick={() => runStrategyAi("strategy", "generate")}>
-              <Sparkles size={17} />
-              AI生成策略
-            </button>
-            <button type="button" className="ghost-action" onClick={() => runStrategyAi("strategy", "suggest")}>
-              <WandSparkles size={17} />
-              AI提出建议
-            </button>
-            <button type="button" className="ghost-action" onClick={() => runStrategyAi("strategy", "revise")}>
-              <Save size={17} />
-              AI帮我修改
-            </button>
+          <div className="strategy-advice-box">
+            <div className="strategy-advice-head">
+              <div>
+                <span className="eyebrow">AI策略建议</span>
+                <strong>{workspace.acceptedStrategy ? "已接受当前AI建议" : "等待确认的AI建议"}</strong>
+              </div>
+              <button type="button" className="primary-action" onClick={() => runStrategyAi("strategy", "generate")}>
+                <Sparkles size={17} />
+                生成AI策略建议
+              </button>
+            </div>
+            <p>{workspace.strategySuggestion}</p>
+            <div className="ai-action-row">
+              <button type="button" className="ghost-action" onClick={acceptStrategySuggestion}>
+                <CheckCircle2 size={17} />
+                接受建议
+              </button>
+              <button type="button" className="ghost-action" onClick={rejectStrategySuggestion}>
+                不接受建议
+              </button>
+              <button type="button" className="ghost-action" onClick={() => runStrategyAi("strategy", "generate")}>
+                <WandSparkles size={17} />
+                重新生成
+              </button>
+            </div>
           </div>
+
+          <label className="strategy-student-box">
+            <span>我认为的科目学习策略</span>
+            <textarea
+              className="strategy-textarea"
+              value={workspace.studentStrategy}
+              onChange={(event) => updateStrategyText(event.target.value, "studentStrategy")}
+              placeholder="学生可以写：我觉得这个科目应该先补什么、每天怎么做、哪些方法适合我。"
+              aria-label={`${activeSubject}学生自己的学习策略`}
+            />
+          </label>
         </article>
 
         <aside className="panel material-panel">
@@ -4338,21 +4424,68 @@ function StrategyDesignPage({
             </div>
             <FileText size={24} />
           </div>
+          <h3 className="material-subtitle">AI推荐资料</h3>
           <div className="material-list">
             {workspace.materials.map((material) => (
               <article className="material-card" key={material.id}>
                 <strong>{material.name}</strong>
                 <p>{material.description}</p>
                 <label>
+                  <span>这本资料的作用</span>
+                  <textarea
+                    value={material.aiUseNote || material.description}
+                    onChange={(event) => updateMaterialUsage(material.id, "aiUseNote", event.target.value)}
+                  />
+                </label>
+                <label>
                   <span>学生资料使用细节</span>
                   <textarea
                     placeholder="例如：我准备用这本资料做哪一章、什么时间做、每次做多少、做完怎样检查。"
                     value={material.usage}
-                    onChange={(event) => updateMaterialUsage(material.id, event.target.value)}
+                    onChange={(event) => updateMaterialUsage(material.id, "usage", event.target.value)}
                   />
                 </label>
               </article>
             ))}
+          </div>
+          <div className="custom-material-section">
+            <div className="custom-material-head">
+              <h3 className="material-subtitle">我认为需要的学习资料</h3>
+              <button type="button" className="ghost-action" onClick={addCustomMaterial}>
+                <Plus size={16} />
+                添加资料
+              </button>
+            </div>
+            <div className="material-list">
+              {workspace.customMaterials.map((material, index) => (
+                <article className="material-card" key={material.id}>
+                  <label>
+                    <span>资料名称 {index + 1}</span>
+                    <input
+                      value={material.name}
+                      onChange={(event) => updateCustomMaterial(material.id, "name", event.target.value)}
+                      placeholder="例如：我的错题本、老师发的专题卷、课外阅读材料"
+                    />
+                  </label>
+                  <label>
+                    <span>资料作用</span>
+                    <textarea
+                      value={material.purpose}
+                      onChange={(event) => updateCustomMaterial(material.id, "purpose", event.target.value)}
+                      placeholder="写清楚这份资料主要帮你解决什么问题。"
+                    />
+                  </label>
+                  <label>
+                    <span>使用细节</span>
+                    <textarea
+                      value={material.usage}
+                      onChange={(event) => updateCustomMaterial(material.id, "usage", event.target.value)}
+                      placeholder="写清楚什么时候用、每次用多少、完成后怎么检查。"
+                    />
+                  </label>
+                </article>
+              ))}
+            </div>
           </div>
           <div className="strategy-explain">
             <strong>设计原则</strong>
@@ -4367,10 +4500,16 @@ function StrategyDesignPage({
             <span className="eyebrow">2. 学习任务设计</span>
             <h2>把策略拆成学生能执行的任务</h2>
           </div>
-          <button type="button" className="primary-action" onClick={addStrategyTask}>
-            <ClipboardList size={17} />
-            添加任务
-          </button>
+          <div className="ai-action-row">
+            <button type="button" className="ghost-action" onClick={() => runStrategyAi("task", "suggest")}>
+              <Sparkles size={17} />
+              AI学习任务建议
+            </button>
+            <button type="button" className="primary-action" onClick={addStrategyTask}>
+              <ClipboardList size={17} />
+              添加任务
+            </button>
+          </div>
         </div>
 
         <div className="task-card-grid">
@@ -4411,10 +4550,6 @@ function StrategyDesignPage({
               </label>
 
               <div className="ai-action-row compact-actions">
-                <button type="button" className="ghost-action" onClick={() => runStrategyAi("task", "suggest", task.id)}>
-                  <WandSparkles size={16} />
-                  AI提出建议
-                </button>
                 <button type="button" className="ghost-action" onClick={() => runStrategyAi("task", "revise", task.id)}>
                   <Save size={16} />
                   AI帮我修改
@@ -4805,7 +4940,7 @@ function MistakeSpecialPage({
     <section className="stack mistake-workspace">
       <div className="mistake-tabs">
         <button type="button" className={mistakeWorkspaceTab === "ai" ? "is-active" : ""} onClick={() => setMistakeWorkspaceTab("ai")}>
-          AI处理
+          AI错题处理
         </button>
         <button type="button" className={mistakeWorkspaceTab === "archive" ? "is-active" : ""} onClick={() => setMistakeWorkspaceTab("archive")}>
           错题档案
@@ -4972,7 +5107,7 @@ function MistakeSpecialPage({
               ) : (
                 <div className="mistake-empty-result">
                   <Library size={28} />
-                  <p>错题档案为空。先在AI处理页上传材料并完成分析。</p>
+                  <p>错题档案为空。先在AI错题处理页上传材料并完成分析。</p>
                 </div>
               )}
             </article>
@@ -5074,18 +5209,6 @@ function ModernKnowledgeNotePage({ knowledgeQuestion, setKnowledgeQuestion, know
   const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(knowledgeNote.svg)}`;
   return (
     <section className="stack knowledge-page">
-      <div className="hero-band compact knowledge-hero">
-        <div>
-          <span className="eyebrow">知识笔记</span>
-          <h2>学生提出任意问题，AI生成严谨、丰富、可下载的知识图</h2>
-          <p>适合整理概念、结构、流程和易混知识。生成内容会尽量包含清晰结构、关键标注、功能解释和学习总结，方便学生复习和保存。</p>
-        </div>
-        <div className="strategy-status">
-          <strong>SVG</strong>
-          <span>可下载保存</span>
-        </div>
-      </div>
-
       <section className="panel knowledge-control-panel">
         <div className="panel-heading">
           <div>
@@ -5107,10 +5230,6 @@ function ModernKnowledgeNotePage({ knowledgeQuestion, setKnowledgeQuestion, know
             </button>
           </div>
         </div>
-        <details className="knowledge-prompt-box">
-          <summary>后台制图提示词方向</summary>
-          <textarea readOnly value={knowledgeNote.prompt || ""} />
-        </details>
       </section>
 
       <section className="knowledge-layout">
