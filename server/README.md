@@ -20,8 +20,13 @@ ADMIN_SETUP_TOKEN=change-this-admin-token
 PORT=3001
 OPENAI_API_KEY=sk-your-key
 OPENAI_MODEL_TEXT=gpt-5
-OPENAI_MODEL_IMAGE=gpt-5
+OPENAI_MODEL_FAST=gpt-5
+OPENAI_MODEL_THINKING=gpt-5
+OPENAI_MODEL_IMAGE=gpt-image-2
 OPENAI_MODEL_TRANSCRIBE=gpt-4o-mini-transcribe
+GEMINI_API_KEY=your-gemini-api-key
+GEMINI_MODEL_FAST=gemini-2.5-flash
+GEMINI_MODEL_THINKING=gemini-2.5-pro
 UPLOAD_DIR=/var/www/shuzi-ai/uploads
 ```
 

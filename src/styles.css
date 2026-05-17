@@ -4511,7 +4511,7 @@ audio {
 
 .free-ask-input {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 48px;
+  grid-template-columns: 44px minmax(0, 1fr) 132px 48px;
   align-items: center;
   gap: 8px;
   margin-top: 18px;
@@ -4555,6 +4555,18 @@ audio {
   outline: 0;
   resize: none;
   color: #182027;
+}
+
+.free-model-select {
+  height: 38px;
+  min-width: 0;
+  border: 1px solid #d6dce5;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #182027;
+  font-weight: 800;
+  padding: 0 10px;
+  outline: 0;
 }
 
 .free-ask-input .free-send {
@@ -4735,6 +4747,16 @@ audio {
   .progress-card {
     width: 136px;
     height: 136px;
+  }
+
+  .free-ask-input {
+    grid-template-columns: 44px minmax(0, 1fr) 48px;
+    border-radius: 24px;
+  }
+
+  .free-model-select {
+    grid-column: 2 / 4;
+    width: 100%;
   }
 }
 

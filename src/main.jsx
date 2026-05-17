@@ -67,6 +67,12 @@ const tokenPackages = [
   { id: "token-500", label: "¥500", priceCny: 500, tokens: 50000 },
 ];
 
+const freeAskModelOptions = [
+  { value: "openai-fast", provider: "openai", mode: "fast", label: "OpenAI · 快速" },
+  { value: "openai-thinking", provider: "openai", mode: "thinking", label: "OpenAI · 思考" },
+  { value: "gemini-fast", provider: "gemini", mode: "fast", label: "Gemini · 快速" },
+  { value: "gemini-thinking", provider: "gemini", mode: "thinking", label: "Gemini · 思考" },
+];
 const defaultForumPosts = [
   {
     id: "post-1",
@@ -1567,6 +1573,7 @@ function App() {
   const [freeAskInput, setFreeAskInput] = useState("");
   const [freeAskFiles, setFreeAskFiles] = useState([]);
   const [freeAskStatus, setFreeAskStatus] = useState("idle");
+  const [freeAskModelChoice, setFreeAskModelChoice] = useState("openai-fast");
   const [freeAskMessages, setFreeAskMessages] = useState([
     {
       id: "welcome",
@@ -2659,6 +2666,7 @@ function App() {
     clearAiNotice();
     console.info("树子AI任务提示词", buildAgentPrompt("freeAsk", buildStudentArchiveSnapshot({ answers, records, mistakes })));
     const wantsImage = /图|图片|结构图|画|生成图片|知识卡片/.test(content);
+    const selectedModel = freeAskModelOptions.find((option) => option.value === freeAskModelChoice) || freeAskModelOptions[0];
     const attachmentText = freeAskFiles.length ? `我上传了 ${freeAskFiles.length} 个附件，请结合附件一起看。` : "";
     const assistantId = `ask-ai-${Date.now()}`;
     const userMessage = {
@@ -2680,6 +2688,8 @@ function App() {
       const formData = new FormData();
       formData.append("question", content);
       formData.append("wantsImage", wantsImage ? "true" : "false");
+      formData.append("provider", selectedModel.provider);
+      formData.append("mode", selectedModel.mode);
       freeAskFiles.forEach((file) => {
         if (file.rawFile) formData.append("files", file.rawFile);
       });
@@ -2950,6 +2960,8 @@ function App() {
             removeFile={removeFreeAskFile}
             sendFreeAsk={sendFreeAsk}
             status={freeAskStatus}
+            modelChoice={freeAskModelChoice}
+            setModelChoice={setFreeAskModelChoice}
           />
         )}
 
@@ -5292,7 +5304,7 @@ function ModernKnowledgeNotePage({ knowledgeQuestion, setKnowledgeQuestion, know
   );
 }
 
-function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile, sendFreeAsk, status }) {
+function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile, sendFreeAsk, status, modelChoice, setModelChoice }) {
   const quickPrompts = ["帮我分析一道数学题", "把细胞结构做成知识图", "黑洞为什么会形成", "我总是拖延怎么办"];
   const formatSize = (size) => (size > 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(size / 1024))} KB`);
   return (
@@ -5358,6 +5370,18 @@ function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile
             }}
             placeholder="输入问题，也可以先点左侧 + 上传图片或文件"
           />
+          <select
+            className="free-model-select"
+            value={modelChoice}
+            onChange={(event) => setModelChoice(event.target.value)}
+            aria-label="选择AI模型"
+          >
+            {freeAskModelOptions.map((option) => (
+              <option value={option.value} key={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
           <button type="button" className="free-send" onClick={sendFreeAsk} aria-label="发送问题" disabled={status === "loading"} aria-busy={status === "loading"}>
             {status === "loading" ? <Loader2 className="spin" size={20} /> : <Send size={20} />}
           </button>

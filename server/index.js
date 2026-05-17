@@ -11,6 +11,7 @@ import { query, withTransaction } from "./db.js";
 import { requireAdminToken, requireAuth, signToken } from "./auth.js";
 import { ltPackages, membershipPlans, storageExpansionPackages, tokenBillingRules } from "./plans.js";
 import { upload, toStoredFile } from "./uploads.js";
+import { ensureGeminiKey, generateGeminiText } from "./geminiClient.js";
 import { ensureOpenAIKey, getGeneratedImageBase64, getResponseText, openai, parseJsonText, readFileAsDataUrl } from "./openaiClient.js";
 
 const app = express();
@@ -19,9 +20,29 @@ const port = Number(process.env.PORT || 3001);
 app.use(cors({ origin: process.env.CORS_ORIGIN || true }));
 app.use(express.json({ limit: "5mb" }));
 
-const textModel = process.env.OPENAI_MODEL_TEXT || "gpt-5";
-const imageModel = process.env.OPENAI_MODEL_IMAGE || "gpt-5";
+const textModel = process.env.OPENAI_MODEL_TEXT || process.env.OPENAI_MODEL_THINKING || "gpt-5";
+const openaiFastModel = process.env.OPENAI_MODEL_FAST || process.env.OPENAI_MODEL_TEXT || textModel;
+const openaiThinkingModel = process.env.OPENAI_MODEL_THINKING || process.env.OPENAI_MODEL_TEXT || textModel;
+const geminiFastModel = process.env.GEMINI_MODEL_FAST || "gemini-2.5-flash";
+const geminiThinkingModel = process.env.GEMINI_MODEL_THINKING || "gemini-2.5-pro";
+const imageModel = process.env.OPENAI_MODEL_IMAGE || "gpt-image-2";
 const transcriptionModel = process.env.OPENAI_MODEL_TRANSCRIBE || "gpt-4o-mini-transcribe";
+
+function normalizeAiProvider(provider = "") {
+  return String(provider).toLowerCase() === "gemini" ? "gemini" : "openai";
+}
+
+function normalizeAiMode(mode = "") {
+  return String(mode).toLowerCase() === "thinking" ? "thinking" : "fast";
+}
+
+function getOpenAITextModel(mode = "fast") {
+  return normalizeAiMode(mode) === "thinking" ? openaiThinkingModel : openaiFastModel;
+}
+
+function getGeminiModel(mode = "fast") {
+  return normalizeAiMode(mode) === "thinking" ? geminiThinkingModel : geminiFastModel;
+}
 
 function normalizeIdentifier(identifier = "") {
   return String(identifier).trim().toLowerCase();
@@ -580,7 +601,7 @@ app.post("/api/ai/study-plan", requireAuth, async (req, res, next) => {
 app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), async (req, res, next) => {
   try {
     await assertPaidMember(req.user.id);
-    ensureOpenAIKey();
+    ensureGeminiKey();
     const files = req.files || [];
     const student = await getPrimaryStudent(req.user);
     const {
@@ -599,29 +620,24 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
       analyzePaper: "AI分析试卷：整理试卷/作业中的错题清单、薄弱知识点、错误类型、优先训练顺序和复习建议。",
     };
     const documentText = await makeDocumentTextSummary(files);
-    const response = await openai.responses.create({
-      model: textModel,
-      input: [
-        {
-          role: "system",
-          content:
-            "你是树子AI错题专项智能体。你的任务只围绕错题、同类题训练、作业/试卷材料分析和错题档案沉淀。输出要像给学生看的学习报告，干净、完整、具体、可执行。不要生成学情画像总报告，不要制定完整周计划。必须输出严格JSON。",
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: `${jsonInstruction(
-                "{title, summary, sections:[{title,content}], extracted_questions:[{id,title,question_content,subject,error_type,knowledge_points,method_gap,correction_steps,suggestion,is_likely_wrong}], similar_questions:[{title,question,answer,solution_steps,training_goal,difficulty}], training_suggestions:[string], archive_note}"
-              )}\n任务类型：${taskMap[taskType] || taskMap.analyzeMistake}\n科目：${subject}\n标题：${title}\n来源：${source}\n学生提示词：${prompt}\n学生档案摘要：${archiveSnapshot}\n上传文档文字摘录：\n${documentText || "无可提取文档文字；如有图片，请结合图片内容分析。"}`,
-            },
-            ...makeImageInputs(files),
-          ],
-        },
-      ],
-    });
-    const report = parseJsonText(getResponseText(response), {
+    const geminiMode = taskType === "analyzePaper" ? "thinking" : "fast";
+    const geminiModel = getGeminiModel(geminiMode);
+    const geminiPrompt = [
+      "你是树子AI错题专项智能体。你的任务只围绕错题、同类题训练、作业/试卷材料分析和错题档案沉淀。",
+      "输出要像给学生看的学习报告，干净、完整、具体、可执行。不要生成学情画像总报告，不要制定完整周计划。必须输出严格JSON。",
+      jsonInstruction(
+        "{title, summary, sections:[{title,content}], extracted_questions:[{id,title,question_content,subject,error_type,knowledge_points,method_gap,correction_steps,suggestion,is_likely_wrong}], similar_questions:[{title,question,answer,solution_steps,training_goal,difficulty}], training_suggestions:[string], archive_note}"
+      ),
+      `任务类型：${taskMap[taskType] || taskMap.analyzeMistake}`,
+      `科目：${subject}`,
+      `标题：${title}`,
+      `来源：${source}`,
+      `学生提示词：${prompt}`,
+      `学生档案摘要：${archiveSnapshot}`,
+      `上传文档文字摘录：\n${documentText || "无可提取文档文字；如有图片或PDF，请结合附件内容分析。"}`,
+    ].join("\n");
+    const reportText = await generateGeminiText({ model: geminiModel, prompt: geminiPrompt, files });
+    const report = parseJsonText(reportText, {
       title,
       summary: "",
       sections: [],
@@ -636,18 +652,21 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
           `INSERT INTO mistake_files (student_id, user_id, subject, title, file_ids, analysis)
            VALUES ($1, $2, $3, $4, $5, $6)
            RETURNING *`,
-          [student.id, req.user.id, subject, title, fileRows.map((item) => item.id), JSON.stringify({ taskType, prompt, report })]
+          [student.id, req.user.id, subject, title, fileRows.map((item) => item.id), JSON.stringify({ taskType, prompt, provider: "gemini", model: geminiModel, report })]
         )
       ).rows[0];
       await client.query(
         `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
          VALUES ($1, $2, 'mistake_workspace', $3, $4)`,
-        [student.id, req.user.id, title, JSON.stringify({ taskType, prompt, report, fileCount: files.length })]
+        [student.id, req.user.id, title, JSON.stringify({ taskType, prompt, provider: "gemini", model: geminiModel, report, fileCount: files.length })]
       );
       return row;
     });
     await recordTokenUsage(req.user.id, taskType === "generateSimilar" ? 10 : 12, taskMap[taskType] || "错题专项AI处理", {
       feature: "mistake-workflow",
+      provider: "gemini",
+      model: geminiModel,
+      mode: geminiMode,
       taskType,
       mistakeId: saved.id,
     });
@@ -660,34 +679,23 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
 app.post("/api/ai/mistakes/analyze", requireAuth, upload.array("files", 6), async (req, res, next) => {
   try {
     await assertPaidMember(req.user.id);
-    ensureOpenAIKey();
+    ensureGeminiKey();
     const files = req.files || [];
     if (!files.length) return res.status(400).json({ error: "FILES_REQUIRED" });
     const student = await getPrimaryStudent(req.user);
     const { subject = "", title = "错题分析", note = "" } = req.body || {};
-    const response = await openai.responses.create({
-      model: textModel,
-      input: [
-        {
-          role: "system",
-          content:
-            "你是树子AI错题专项智能体。只围绕上传材料中的错题识别、题目拆分、错因归类、知识点、解题方法缺口、相似题训练建议和复测安排输出。如果材料里有多道题，要拆成题目清单；不要制定完整周计划，不要做学情画像总报告。",
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: `${jsonInstruction(
-                "{summary, extracted_questions:[{id,title,question_content,subject,error_type,knowledge_points,method_gap,correction_steps,suggestion,is_likely_wrong}], analysis:{test_point,error_reason,method_gap,correction_steps,training_suggestions,review_schedule}}"
-              )}\n科目：${subject}\n标题：${title}\n学生补充：${note}`,
-            },
-            ...makeImageInputs(files),
-          ],
-        },
-      ],
-    });
-    const analysis = parseJsonText(getResponseText(response), { mistake_title: title });
+    const prompt = [
+      "你是树子AI错题专项智能体。只围绕上传材料中的错题识别、题目拆分、错因归类、知识点、解题方法缺口、相似题训练建议和复测安排输出。",
+      "如果材料里有多道题，要拆成题目清单；不要制定完整周计划，不要做学情画像总报告。必须输出严格JSON。",
+      jsonInstruction(
+        "{summary, extracted_questions:[{id,title,question_content,subject,error_type,knowledge_points,method_gap,correction_steps,suggestion,is_likely_wrong}], analysis:{test_point,error_reason,method_gap,correction_steps,training_suggestions,review_schedule}}"
+      ),
+      `科目：${subject}`,
+      `标题：${title}`,
+      `学生补充：${note}`,
+    ].join("\n");
+    const analysisText = await generateGeminiText({ model: geminiFastModel, prompt, files });
+    const analysis = parseJsonText(analysisText, { mistake_title: title });
     const saved = await withTransaction(async (client) => {
       const fileRows = await saveUploadedFiles(client, req.user, student, "mistake", files);
       const row = (
@@ -695,17 +703,17 @@ app.post("/api/ai/mistakes/analyze", requireAuth, upload.array("files", 6), asyn
           `INSERT INTO mistake_files (student_id, user_id, subject, title, file_ids, analysis)
            VALUES ($1, $2, $3, $4, $5, $6)
            RETURNING *`,
-          [student.id, req.user.id, subject, title, fileRows.map((item) => item.id), JSON.stringify(analysis)]
+          [student.id, req.user.id, subject, title, fileRows.map((item) => item.id), JSON.stringify({ provider: "gemini", model: geminiFastModel, analysis })]
         )
       ).rows[0];
       await client.query(
         `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
          VALUES ($1, $2, 'mistake_analysis', $3, $4)`,
-        [student.id, req.user.id, title, JSON.stringify({ analysis })]
+        [student.id, req.user.id, title, JSON.stringify({ provider: "gemini", model: geminiFastModel, analysis })]
       );
       return row;
     });
-    await recordTokenUsage(req.user.id, 12, "AI错题识别", { feature: "mistake-analyze", mistakeId: saved.id });
+    await recordTokenUsage(req.user.id, 12, "AI错题识别", { feature: "mistake-analyze", provider: "gemini", model: geminiFastModel, mistakeId: saved.id });
     res.json({ analysis, saved });
   } catch (error) {
     next(error);
@@ -715,26 +723,18 @@ app.post("/api/ai/mistakes/analyze", requireAuth, upload.array("files", 6), asyn
 app.post("/api/ai/mistakes/practice", requireAuth, async (req, res, next) => {
   try {
     await assertPaidMember(req.user.id);
-    ensureOpenAIKey();
+    ensureGeminiKey();
     const student = await getPrimaryStudent(req.user);
     const { sourceMistakeId = null, subject = "", mistake = {}, count = 3 } = req.body || {};
-    const response = await openai.responses.create({
-      model: textModel,
-      input: [
-        {
-          role: "system",
-          content:
-            "你是树子AI相似题训练智能体。根据错题的知识点、方法缺口和错误类型，生成1-3道相似题，必须包含答案、步骤和训练目的。",
-        },
-        {
-          role: "user",
-          content: `${jsonInstruction(
-            "{questions:[{title, question, answer, solution_steps, training_goal, difficulty}]}"
-          )}\n科目：${subject}\n数量：${Math.min(3, Math.max(1, Number(count) || 1))}\n错题信息：${JSON.stringify(mistake)}`,
-        },
-      ],
-    });
-    const generated = parseJsonText(getResponseText(response), { questions: [] });
+    const prompt = [
+      "你是树子AI相似题训练智能体。根据错题的知识点、方法缺口和错误类型，生成1-3道相似题，必须包含答案、步骤和训练目的。必须输出严格JSON。",
+      jsonInstruction("{questions:[{title, question, answer, solution_steps, training_goal, difficulty}]}"),
+      `科目：${subject}`,
+      `数量：${Math.min(3, Math.max(1, Number(count) || 1))}`,
+      `错题信息：${JSON.stringify(mistake)}`,
+    ].join("\n");
+    const generatedText = await generateGeminiText({ model: geminiFastModel, prompt });
+    const generated = parseJsonText(generatedText, { questions: [] });
     const saved = (
       await query(
         `INSERT INTO generated_practice (student_id, user_id, source_mistake_id, questions)
@@ -743,7 +743,7 @@ app.post("/api/ai/mistakes/practice", requireAuth, async (req, res, next) => {
         [student.id, req.user.id, sourceMistakeId, JSON.stringify(generated.questions || generated)]
       )
     ).rows[0];
-    await recordTokenUsage(req.user.id, 10, "AI生成相似题", { feature: "mistake-practice", practiceId: saved.id });
+    await recordTokenUsage(req.user.id, 10, "AI生成相似题", { feature: "mistake-practice", provider: "gemini", model: geminiFastModel, practiceId: saved.id });
     res.json({ practice: generated, saved });
   } catch (error) {
     next(error);
@@ -790,56 +790,89 @@ app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
 app.post("/api/ai/free-ask", requireAuth, upload.array("files", 6), async (req, res, next) => {
   try {
     await assertPaidMember(req.user.id);
-    ensureOpenAIKey();
     const student = await getPrimaryStudent(req.user);
-    const { question = "", wantsImage = "false" } = req.body || {};
+    const { question = "", wantsImage = "false", provider = "openai", mode = "fast" } = req.body || {};
     const files = req.files || [];
-    const imageInputs = makeImageInputs(files);
+    const aiProvider = normalizeAiProvider(provider);
+    const aiMode = normalizeAiMode(mode);
     if (!String(question).trim() && !files.length) {
       return res.status(400).json({ error: "QUESTION_REQUIRED", message: "请输入问题，或上传图片/文件。" });
     }
     const fileSummary = files.length
       ? files.map((file) => `${file.originalname}（${file.mimetype || "未知类型"}）`).join("、")
       : "无附件";
-    const response = await openai.responses.create({
-      model: textModel,
-      input: [
-        {
-          role: "system",
-          content:
-            "你是树子AI自由问助手。可以回答学习问题、知识问题、作业问题，也可以回答学生对科学、生活、兴趣和开放想法的提问。回答要清晰、友好、适合中学生理解；如果问题涉及学习，要给出可执行的下一步；如果用户要求做知识图，先用文字说明结构和重点。",
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: `学生问题：${question || "请结合附件回答。"}\n是否希望生成知识图方向：${wantsImage === "true" ? "是" : "否"}\n附件：${fileSummary}`,
-            },
-            ...imageInputs,
-          ],
-        },
-      ],
-    });
-    const answer = getResponseText(response) || "AI已阅读你的问题，但暂时没有生成有效回答，请换一种问法再试。";
+    const documentText = await makeDocumentTextSummary(files);
+    const promptText = [
+      `学生问题：${question || "请结合附件回答。"}`,
+      `是否希望生成知识图方向：${wantsImage === "true" ? "是" : "否"}`,
+      `附件：${fileSummary}`,
+      documentText ? `附件文字摘录：\n${documentText}` : "",
+    ].filter(Boolean).join("\n");
+
+    let answer = "";
+    let model = "";
+    if (aiProvider === "gemini") {
+      model = getGeminiModel(aiMode);
+      answer = await generateGeminiText({
+        model,
+        prompt: [
+          "你是树子AI自由问助手。可以回答学习问题、知识问题、作业问题，也可以回答学生对科学、生活、兴趣和开放想法的提问。回答要清晰、友好、适合中学生理解；如果问题涉及学习，要给出可执行的下一步。",
+          promptText,
+        ].join("\n"),
+        files,
+        temperature: aiMode === "thinking" ? 0.2 : 0.35,
+      });
+    } else {
+      ensureOpenAIKey();
+      model = getOpenAITextModel(aiMode);
+      const imageInputs = makeImageInputs(files);
+      const response = await openai.responses.create({
+        model,
+        input: [
+          {
+            role: "system",
+            content:
+              "你是树子AI自由问助手。可以回答学习问题、知识问题、作业问题，也可以回答学生对科学、生活、兴趣和开放想法的提问。回答要清晰、友好、适合中学生理解；如果问题涉及学习，要给出可执行的下一步；如果用户要求做知识图，先用文字说明结构和重点。",
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text: promptText,
+              },
+              ...imageInputs,
+            ],
+          },
+        ],
+      });
+      answer = getResponseText(response);
+    }
+
+    answer = answer || "AI已阅读你的问题，但暂时没有生成有效回答，请换一种问法再试。";
     if (files.length) {
       await withTransaction(async (client) => {
         const fileRows = await saveUploadedFiles(client, req.user, student, "free_ask", files);
         await client.query(
           `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
            VALUES ($1, $2, 'free_ask', $3, $4)`,
-          [student.id, req.user.id, "AI自由问", JSON.stringify({ question, answer, fileIds: fileRows.map((item) => item.id) })]
+          [student.id, req.user.id, "AI自由问", JSON.stringify({ question, answer, provider: aiProvider, mode: aiMode, model, fileIds: fileRows.map((item) => item.id) })]
         );
       });
     } else {
       await query(
         `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
          VALUES ($1, $2, 'free_ask', $3, $4)`,
-        [student.id, req.user.id, "AI自由问", JSON.stringify({ question, answer })]
+        [student.id, req.user.id, "AI自由问", JSON.stringify({ question, answer, provider: aiProvider, mode: aiMode, model })]
       );
     }
-    await recordTokenUsage(req.user.id, wantsImage === "true" ? 12 : 5, "AI自由问", { feature: "free-ask" });
-    res.json({ answer });
+    await recordTokenUsage(req.user.id, wantsImage === "true" ? 12 : aiMode === "thinking" ? 8 : 5, "AI自由问", {
+      feature: "free-ask",
+      provider: aiProvider,
+      mode: aiMode,
+      model,
+    });
+    res.json({ answer, provider: aiProvider, mode: aiMode, model });
   } catch (error) {
     next(error);
   }
