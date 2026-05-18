@@ -3793,12 +3793,25 @@ audio {
 
 .knowledge-actions {
   display: grid;
-  gap: 10px;
+  grid-template-rows: minmax(150px, auto) auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.knowledge-generate-action {
+  width: 100%;
+  min-height: 64px;
+  align-self: start;
+  border-radius: 10px;
+  font-size: 18px;
+  box-shadow: 0 18px 36px rgba(0, 122, 82, 0.18);
 }
 
 .template-action {
   display: inline-flex;
   min-height: 52px;
+  width: 100%;
+  align-self: start;
   align-items: center;
   justify-content: center;
   gap: 8px;
@@ -4804,6 +4817,10 @@ audio {
 
   .custom-material-head {
     grid-template-columns: 1fr;
+  }
+
+  .knowledge-actions {
+    grid-template-rows: auto;
   }
 
   .flow-step-body label:nth-child(3),

@@ -5310,7 +5310,7 @@ function ModernKnowledgeNotePage({
                   <span className="eyebrow">提示词模板</span>
                   <h3>专业知识图提示词模板</h3>
                 </div>
-                <span>{useTemplate ? "已套用到本次生成" : "可查看，也可修改"}</span>
+                <span>{useTemplate ? "已套用到本次生成" : "可查看，可修改"}</span>
               </div>
               <textarea
                 value={promptTemplate}
@@ -5320,6 +5320,10 @@ function ModernKnowledgeNotePage({
             </div>
           </div>
           <div className="knowledge-actions">
+            <button type="button" className="primary-action knowledge-generate-action" onClick={generateKnowledgeNote} disabled={status === "loading"}>
+              {status === "loading" ? <Loader2 className="spin" size={19} /> : <Sparkles size={19} />}
+              {status === "loading" ? "AI正在生成" : "AI生成知识图"}
+            </button>
             <button
               type="button"
               className={useTemplate ? "template-action is-active" : "template-action"}
@@ -5333,10 +5337,6 @@ function ModernKnowledgeNotePage({
             >
               <Sparkles size={18} />
               {useTemplate ? "已套用模板" : "套用知识图模板"}
-            </button>
-            <button type="button" className="primary-action" onClick={generateKnowledgeNote} disabled={status === "loading"}>
-              {status === "loading" ? <Loader2 className="spin" size={17} /> : <Sparkles size={17} />}
-              {status === "loading" ? "AI正在生成" : "AI生成知识图"}
             </button>
           </div>
         </div>
