@@ -170,6 +170,7 @@ export async function ensureSchema() {
       name TEXT NOT NULL,
       file_id UUID REFERENCES uploaded_files(id) ON DELETE SET NULL,
       content TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
       mime_type TEXT,
       size_bytes BIGINT NOT NULL DEFAULT 0,
       is_starred BOOLEAN NOT NULL DEFAULT false,
@@ -250,4 +251,5 @@ export async function ensureSchema() {
     ALTER TABLE users DROP CONSTRAINT IF EXISTS users_channel_check;
     ALTER TABLE users ADD CONSTRAINT users_channel_check CHECK (channel IN ('username', 'email', 'phone'));
   `);
+  await query(`ALTER TABLE library_items ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''`);
 }

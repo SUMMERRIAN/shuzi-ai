@@ -250,6 +250,7 @@ function toLibraryItem(row) {
     name: row.name,
     fileId: row.file_id,
     content: row.content || "",
+    notes: row.notes || "",
     mimeType: row.mime_type,
     sizeBytes: Number(row.size_bytes || 0),
     isStarred: Boolean(row.is_starred),
@@ -684,24 +685,37 @@ app.post("/api/calendar/events", requireAuth, upload.array("files", 8), async (r
   }
 });
 
-app.patch("/api/calendar/events/:id", requireAuth, async (req, res, next) => {
+app.patch("/api/calendar/events/:id", requireAuth, upload.array("files", 8), async (req, res, next) => {
   try {
     await assertPaidMember(req.user.id);
+    const student = await getPrimaryStudent(req.user);
     const { eventDate, title, content } = req.body || {};
-    const event = (
-      await query(
-        `UPDATE learning_calendar_events
-         SET event_date = COALESCE($3, event_date),
-             title = COALESCE(NULLIF($4, ''), title),
-             content = COALESCE($5, content),
-             updated_at = now()
-         WHERE id = $1 AND user_id = $2
-         RETURNING *`,
-        [req.params.id, req.user.id, eventDate || null, title || "", content ?? null]
-      )
-    ).rows[0];
+    const saved = await withTransaction(async (client) => {
+      const existing = (await client.query("SELECT * FROM learning_calendar_events WHERE id = $1 AND user_id = $2", [req.params.id, req.user.id])).rows[0];
+      if (!existing) return null;
+      const fileRows = await saveUploadedFiles(client, req.user, student, "calendar", req.files || []);
+      const nextFileIds = [...(existing.file_ids || []), ...fileRows.map((file) => file.id)];
+      const event = (
+        await client.query(
+          `UPDATE learning_calendar_events
+           SET event_date = COALESCE($3, event_date),
+               title = COALESCE(NULLIF($4, ''), title),
+               content = COALESCE($5, content),
+               file_ids = $6,
+               updated_at = now()
+           WHERE id = $1 AND user_id = $2
+           RETURNING *`,
+          [req.params.id, req.user.id, eventDate || null, title || "", content ?? null, nextFileIds]
+        )
+      ).rows[0];
+      return { event, fileRows };
+    });
+    const event = saved?.event;
     if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
-    res.json({ event: toCalendarEvent({ ...event, files: [] }) });
+    const fileRows = (
+      await query("SELECT * FROM uploaded_files WHERE id = ANY($1::uuid[]) ORDER BY created_at ASC", [event.file_ids || []])
+    ).rows;
+    res.json({ event: toCalendarEvent({ ...event, files: fileRows.map(toFileSummary) }) });
   } catch (error) {
     next(error);
   }
@@ -723,21 +737,28 @@ app.get("/api/library/items", requireAuth, async (req, res, next) => {
     const view = String(req.query.view || "drive");
     const folderId = req.query.folderId || null;
     const search = String(req.query.search || "").trim();
+    const sort = String(req.query.sort || "name");
+    const dir = String(req.query.dir || "asc").toLowerCase() === "desc" ? "DESC" : "ASC";
     const clauses = ["student_id = $1", "user_id = $2"];
     const values = [student.id, req.user.id];
-    let orderBy = "item_type ASC, name ASC";
+    const sortMap = {
+      name: `item_type ASC, name ${dir}`,
+      date: `updated_at ${dir}`,
+      size: `item_type ASC, size_bytes ${dir}, name ASC`,
+    };
+    let orderBy = sortMap[sort] || sortMap.name;
     if (view === "trash") {
       clauses.push("is_trashed = true");
-      orderBy = "updated_at DESC";
+      orderBy = sortMap[sort] || "updated_at DESC";
     } else {
       clauses.push("is_trashed = false");
       if (view === "starred") {
         clauses.push("is_starred = true");
-        orderBy = "updated_at DESC";
+        orderBy = sortMap[sort] || "updated_at DESC";
       } else if (view === "recent") {
         orderBy = "last_opened_at DESC NULLS LAST, updated_at DESC";
       } else if (view === "home") {
-        orderBy = "updated_at DESC";
+        orderBy = sortMap[sort] || "updated_at DESC";
       } else if (folderId) {
         clauses.push(`parent_id = $${values.length + 1}`);
         values.push(folderId);
@@ -854,10 +875,11 @@ app.patch("/api/library/items/:id", requireAuth, async (req, res, next) => {
         `UPDATE library_items
          SET name = $3,
              content = $4,
-             is_starred = $5,
-             is_trashed = $6,
-             parent_id = $7,
-             last_opened_at = CASE WHEN $8 THEN now() ELSE last_opened_at END,
+             notes = $5,
+             is_starred = $6,
+             is_trashed = $7,
+             parent_id = $8,
+             last_opened_at = CASE WHEN $9 THEN now() ELSE last_opened_at END,
              updated_at = now()
          WHERE id = $1 AND user_id = $2
          RETURNING *`,
@@ -866,6 +888,7 @@ app.patch("/api/library/items/:id", requireAuth, async (req, res, next) => {
           req.user.id,
           patch.name ?? existing.name,
           patch.content ?? existing.content,
+          patch.notes ?? existing.notes,
           patch.isStarred ?? existing.is_starred,
           patch.isTrashed ?? existing.is_trashed,
           patch.parentId === undefined ? existing.parent_id : patch.parentId || null,

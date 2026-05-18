@@ -137,6 +137,41 @@ function fileIconFor(item) {
   if (mime.startsWith("audio/")) return FileMusic;
   return FileText;
 }
+
+function previewKindFor(item) {
+  const mime = item?.mimeType || "";
+  const name = (item?.name || "").toLowerCase();
+  if (mime.startsWith("image/")) return "image";
+  if (mime === "application/pdf" || name.endsWith(".pdf")) return "pdf";
+  if (mime.startsWith("audio/")) return "audio";
+  if (mime.startsWith("video/")) return "video";
+  return "";
+}
+
+function isWordLike(item) {
+  const mime = item?.mimeType || "";
+  const name = (item?.name || "").toLowerCase();
+  return (
+    mime.includes("wordprocessingml") ||
+    mime === "application/msword" ||
+    name.endsWith(".doc") ||
+    name.endsWith(".docx")
+  );
+}
+
+function fileTypeLabel(item) {
+  if (item.type === "folder") return "文件夹";
+  if (item.type === "document") return "云端文档";
+  const mime = item.mimeType || "";
+  if (mime.startsWith("image/")) return "图片";
+  if (mime.startsWith("audio/")) return "音频";
+  if (mime.startsWith("video/")) return "视频";
+  if (mime === "application/pdf") return "PDF";
+  if (isWordLike(item)) return "Word";
+  if (mime.includes("spreadsheet") || mime.includes("excel")) return "Excel";
+  if (mime.includes("presentation") || mime.includes("powerpoint")) return "PPT";
+  return "文件";
+}
 const defaultForumPosts = [
   {
     id: "post-1",
@@ -1685,7 +1720,10 @@ function App() {
   const [libraryView, setLibraryView] = useState("drive");
   const [libraryFolderId, setLibraryFolderId] = useState(null);
   const [librarySearch, setLibrarySearch] = useState("");
+  const [librarySort, setLibrarySort] = useState("name");
+  const [librarySortDir, setLibrarySortDir] = useState("asc");
   const [libraryEditor, setLibraryEditor] = useState(null);
+  const [libraryPreview, setLibraryPreview] = useState(null);
   const [libraryStatus, setLibraryStatus] = useState("idle");
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -1695,6 +1733,7 @@ function App() {
   const freeAskLastSubmitRef = useRef({ signature: "", time: 0 });
   const calendarFileInputRef = useRef(null);
   const libraryFileInputRef = useRef(null);
+  const libraryFolderInputRef = useRef(null);
 
   const questionnaireSteps = useMemo(() => buildQuestionnaireSteps(answers), [answers.weakSubjects]);
   const progress = Math.round(((currentStep + 1) / questionnaireSteps.length) * 100);
@@ -1732,7 +1771,7 @@ function App() {
 
   useEffect(() => {
     if (activePage === "library" && member.isLoggedIn) loadLibraryItems();
-  }, [activePage, member.isLoggedIn, libraryView, libraryFolderId]);
+  }, [activePage, member.isLoggedIn, libraryView, libraryFolderId, librarySort, librarySortDir]);
 
   async function loadCalendarEvents() {
     try {
@@ -1771,6 +1810,25 @@ function App() {
     updateCalendarEditor({ newFiles: picked });
   }
 
+  async function quickCreateCalendarEvent(dateKey, title) {
+    const cleanTitle = title.trim();
+    if (!cleanTitle) return;
+    if (!requireMemberAction("新建学习日历页面", () => quickCreateCalendarEvent(dateKey, cleanTitle), "学习日历会保存到学生个人档案，需要登录并开通会员后继续。")) return;
+    try {
+      setCalendarStatus("saving");
+      const form = new FormData();
+      form.append("eventDate", dateKey);
+      form.append("title", cleanTitle);
+      form.append("content", "");
+      const data = await apiRequest("/calendar/events", { method: "POST", body: form });
+      setCalendarEvents((prev) => [...prev, data.event]);
+      setCalendarStatus("idle");
+    } catch (error) {
+      setCalendarStatus("error");
+      showAiError(error, "学习日历保存失败，请稍后再试。");
+    }
+  }
+
   async function saveCalendarEvent() {
     if (!calendarEditor?.title.trim()) {
       showAiError(new Error("请先写一个标题。"));
@@ -1784,13 +1842,23 @@ function App() {
     try {
       setCalendarStatus("saving");
       if (calendarEditor.id) {
+        const hasNewFiles = (calendarEditor.newFiles || []).length > 0;
+        const requestBody = hasNewFiles ? new FormData() : null;
+        if (requestBody) {
+          requestBody.append("eventDate", calendarEditor.eventDate);
+          requestBody.append("title", calendarEditor.title);
+          requestBody.append("content", calendarEditor.content || "");
+          (calendarEditor.newFiles || []).forEach((file) => requestBody.append("files", file));
+        }
         const data = await apiRequest(`/calendar/events/${calendarEditor.id}`, {
           method: "PATCH",
-          body: JSON.stringify({
-            eventDate: calendarEditor.eventDate,
-            title: calendarEditor.title,
-            content: calendarEditor.content,
-          }),
+          body:
+            requestBody ||
+            JSON.stringify({
+              eventDate: calendarEditor.eventDate,
+              title: calendarEditor.title,
+              content: calendarEditor.content,
+            }),
         });
         setCalendarEvents((prev) => prev.map((item) => (item.id === data.event.id ? { ...item, ...data.event } : item)));
       } else {
@@ -1821,12 +1889,53 @@ function App() {
     }
   }
 
+  async function fetchFileSummaryBlob(file) {
+    if (!file?.id) return null;
+    const token = getAuthToken();
+    const response = await fetch(`/api/files/${file.id}/download`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) throw new Error("文件读取失败");
+    return response.blob();
+  }
+
+  async function previewCalendarFile(file) {
+    try {
+      const blob = await fetchFileSummaryBlob(file);
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener,noreferrer");
+      setTimeout(() => URL.revokeObjectURL(url), 60 * 1000);
+    } catch (error) {
+      showAiError(error, "文件预览失败，可以先下载查看。");
+    }
+  }
+
+  async function downloadCalendarFile(file) {
+    try {
+      const blob = await fetchFileSummaryBlob(file);
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = file.originalName || "学习日历附件";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      showAiError(error, "文件下载失败。");
+    }
+  }
+
   async function loadLibraryItems() {
     try {
       setLibraryStatus("loading");
       const params = new URLSearchParams({ view: libraryView });
       if (libraryFolderId) params.set("folderId", libraryFolderId);
       if (librarySearch.trim()) params.set("search", librarySearch.trim());
+      params.set("sort", librarySort);
+      params.set("dir", librarySortDir);
       const data = await apiRequest(`/library/items?${params.toString()}`);
       setLibraryItems(data.items || []);
       if (data.account) setMember(mapAccountToMember(data.account));
@@ -1876,7 +1985,7 @@ function App() {
       setLibraryStatus("saving");
       const form = new FormData();
       if (libraryFolderId) form.append("parentId", libraryFolderId);
-      picked.forEach((file) => form.append("files", file));
+      picked.forEach((file) => form.append("files", file, file.webkitRelativePath || file.name));
       const data = await apiRequest("/library/files", { method: "POST", body: form });
       setLibraryItems((prev) => [...(data.items || []), ...prev]);
       if (data.account) setMember(mapAccountToMember(data.account));
@@ -1909,18 +2018,48 @@ function App() {
       return;
     }
     const updated = await updateLibraryItem(item, { opened: true });
-    setLibraryEditor(updated || item);
+    const target = updated || item;
+    const kind = previewKindFor(target);
+    if (kind) {
+      await openLibraryPreview(target, kind);
+      return;
+    }
+    setLibraryEditor(target);
+    setLibraryPreview(null);
+  }
+
+  async function fetchLibraryFileBlob(item) {
+    if (!item.fileId) return;
+    const token = getAuthToken();
+    const response = await fetch(`/api/files/${item.fileId}/download`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) throw new Error("下载失败");
+    return response.blob();
+  }
+
+  async function openLibraryPreview(item, kind = previewKindFor(item)) {
+    if (!item.fileId || !kind) return;
+    try {
+      const blob = await fetchLibraryFileBlob(item);
+      const url = URL.createObjectURL(blob);
+      if (libraryPreview?.url) URL.revokeObjectURL(libraryPreview.url);
+      setLibraryPreview({ item, kind, url });
+      setLibraryEditor(null);
+    } catch (error) {
+      showAiError(error, "文件预览失败，可以先下载原文件查看。");
+    }
+  }
+
+  function closeLibraryPreview() {
+    if (libraryPreview?.url) URL.revokeObjectURL(libraryPreview.url);
+    setLibraryPreview(null);
   }
 
   async function downloadLibraryFile(item) {
     if (!item.fileId) return;
     try {
-      const token = getAuthToken();
-      const response = await fetch(`/api/files/${item.fileId}/download`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!response.ok) throw new Error("下载失败");
-      const blob = await response.blob();
+      const blob = await fetchLibraryFileBlob(item);
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -3266,11 +3405,14 @@ function App() {
             editor={calendarEditor}
             openEditor={openCalendarEditor}
             updateEditor={updateCalendarEditor}
+            quickCreateEvent={quickCreateCalendarEvent}
             saveEvent={saveCalendarEvent}
             removeEvent={removeCalendarEvent}
             closeEditor={() => setCalendarEditor(null)}
             fileInputRef={calendarFileInputRef}
             pickFiles={pickCalendarFiles}
+            previewFile={previewCalendarFile}
+            downloadFile={downloadCalendarFile}
             status={calendarStatus}
             member={member}
           />
@@ -3288,6 +3430,10 @@ function App() {
             setFolderId={setLibraryFolderId}
             search={librarySearch}
             setSearch={setLibrarySearch}
+            sort={librarySort}
+            setSort={setLibrarySort}
+            sortDir={librarySortDir}
+            setSortDir={setLibrarySortDir}
             reload={loadLibraryItems}
             createFolder={createLibraryFolder}
             createDocument={createLibraryDocument}
@@ -3297,7 +3443,11 @@ function App() {
             downloadFile={downloadLibraryFile}
             editor={libraryEditor}
             setEditor={setLibraryEditor}
+            preview={libraryPreview}
+            openPreview={openLibraryPreview}
+            closePreview={closeLibraryPreview}
             fileInputRef={libraryFileInputRef}
+            folderInputRef={libraryFolderInputRef}
             status={libraryStatus}
             member={member}
           />
@@ -3457,14 +3607,19 @@ function LearningCalendarPage({
   editor,
   openEditor,
   updateEditor,
+  quickCreateEvent,
   saveEvent,
   removeEvent,
   closeEditor,
   fileInputRef,
   pickFiles,
+  previewFile,
+  downloadFile,
   status,
   member,
 }) {
+  const [quickDraft, setQuickDraft] = useState(null);
+  const quickDraftSavingRef = useRef(false);
   const monthDays = useMemo(() => buildMonthDays(cursor), [cursor]);
   const eventsByDate = useMemo(() => {
     return events.reduce((acc, event) => {
@@ -3482,13 +3637,27 @@ function LearningCalendarPage({
     setCursor(next);
   }
 
+  function beginQuickDraft(dateKey) {
+    setQuickDraft({ dateKey, title: "" });
+  }
+
+  async function commitQuickDraft() {
+    if (!quickDraft) return;
+    if (quickDraftSavingRef.current) return;
+    quickDraftSavingRef.current = true;
+    const title = quickDraft.title.trim();
+    setQuickDraft(null);
+    if (title) await quickCreateEvent(quickDraft.dateKey, title);
+    quickDraftSavingRef.current = false;
+  }
+
   return (
     <section className="calendar-page">
       <div className="calendar-hero">
         <div>
           <span className="eyebrow">学习日历</span>
           <h2>用日历记录每天的学习过程</h2>
-          <p>点击日期就能建立学习页面，写文字、上传图片，把每天的重要学习痕迹保存进个人档案。</p>
+          <p>双击日期就能建立学习页面，写文字、上传图片，把每天的重要学习痕迹保存进个人档案。</p>
         </div>
         <div className="calendar-hero-actions">
           <button className="ghost-action" type="button" onClick={() => setCursor(new Date())}>今天</button>
@@ -3517,11 +3686,12 @@ function LearningCalendarPage({
           {monthDays.map((day) => {
             const dayEvents = eventsByDate[day.key] || [];
             return (
-              <button
+              <div
                 key={day.key}
-                type="button"
+                role="button"
+                tabIndex={0}
                 className={`calendar-day ${day.inMonth ? "" : "is-muted"} ${day.key === toDateKey(new Date()) ? "is-today" : ""}`}
-                onClick={() => openEditor(day.key)}
+                onDoubleClick={() => beginQuickDraft(day.key)}
               >
                 <span className="calendar-date">{Number(day.key.slice(-2))}</span>
                 <div className="calendar-event-list">
@@ -3537,57 +3707,86 @@ function LearningCalendarPage({
                       {event.title}
                     </span>
                   ))}
+                  {quickDraft?.dateKey === day.key && (
+                    <input
+                      className="calendar-title-draft"
+                      autoFocus
+                      value={quickDraft.title}
+                      onClick={(eventClick) => eventClick.stopPropagation()}
+                      onChange={(event) => setQuickDraft({ dateKey: day.key, title: event.target.value })}
+                      onBlur={commitQuickDraft}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") commitQuickDraft();
+                        if (event.key === "Escape") setQuickDraft(null);
+                      }}
+                      placeholder="输入页面标题"
+                    />
+                  )}
                   {dayEvents.length > 4 && <span className="calendar-more">还有 {dayEvents.length - 4} 条</span>}
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>
       </div>
 
       {editor && (
-        <div className="calendar-editor-panel">
-          <div className="panel-heading-row">
-            <div>
-              <span className="eyebrow">{editor.eventDate}</span>
-              <h3>{editor.id ? "编辑学习页面" : "新建学习页面"}</h3>
+        <div className="modal-backdrop calendar-modal-backdrop" onMouseDown={closeEditor}>
+          <div className="calendar-editor-panel calendar-editor-modal" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="panel-heading-row">
+              <div>
+                <span className="eyebrow">学习页面</span>
+                <h3>{editor.id ? "编辑日历子页面" : "新建日历子页面"}</h3>
+              </div>
+              <button className="icon-button" type="button" onClick={closeEditor}>×</button>
             </div>
-            <button className="icon-button" type="button" onClick={closeEditor}>×</button>
-          </div>
-          <label>
-            标题
-            <input value={editor.title} onChange={(event) => updateEditor({ title: event.target.value })} placeholder="例如：数学错题复盘 / 周末阅读记录" />
-          </label>
-          <label>
-            内容
-            <textarea
-              rows={7}
-              value={editor.content}
-              onChange={(event) => updateEditor({ content: event.target.value })}
-              placeholder="写下今天发生了什么、学到了什么、哪些问题还需要解决。"
-            />
-          </label>
-          <div className="calendar-upload-row">
-            <button className="ghost-action" type="button" onClick={() => fileInputRef.current?.click()}>
-              <UploadCloud size={17} /> 上传图片
-            </button>
-            <input ref={fileInputRef} type="file" hidden multiple accept="image/*" onChange={(event) => pickFiles(event.target.files)} />
-            <span>单张图片最多 25MB。</span>
-          </div>
-          <div className="attached-file-list">
-            {(editor.files || []).map((file) => <span key={file.id}>{file.originalName}</span>)}
-            {(editor.newFiles || []).map((file) => <span key={`${file.name}-${file.size}`}>{file.name}</span>)}
-          </div>
-          <div className="panel-actions">
-            {editor.id && (
-              <button className="ghost-danger" type="button" onClick={() => removeEvent(editor.id)}>
-                <Trash2 size={17} /> 删除
+            <div className="calendar-editor-grid">
+              <label>
+                页面标题
+                <input value={editor.title} onChange={(event) => updateEditor({ title: event.target.value })} placeholder="例如：数学错题复盘 / 周末阅读记录" />
+              </label>
+              <label>
+                日期
+                <input type="date" value={editor.eventDate} onChange={(event) => updateEditor({ eventDate: event.target.value })} />
+              </label>
+            </div>
+            <label>
+              记录内容
+              <textarea
+                rows={9}
+                value={editor.content}
+                onChange={(event) => updateEditor({ content: event.target.value })}
+                placeholder="写下今天发生了什么、学到了什么、哪些问题还需要解决。"
+              />
+            </label>
+            <div className="calendar-upload-row">
+              <button className="ghost-action" type="button" onClick={() => fileInputRef.current?.click()}>
+                <UploadCloud size={17} /> 上传图片或文件
               </button>
-            )}
-            <button className="primary-action" type="button" onClick={saveEvent} disabled={status === "saving"}>
-              {status === "saving" ? <Loader2 className="spin" size={17} /> : <Save size={17} />}
-              保存页面
-            </button>
+              <input ref={fileInputRef} type="file" hidden multiple onChange={(event) => pickFiles(event.target.files)} />
+              <span>图片单张最多 25MB，其他文件按会员存储空间保存。</span>
+            </div>
+            <div className="attached-file-list is-detailed">
+              {(editor.files || []).map((file) => (
+                <span key={file.id}>
+                  {file.originalName}
+                  <button type="button" onClick={() => previewFile(file)}>查看</button>
+                  <button type="button" onClick={() => downloadFile(file)}>下载</button>
+                </span>
+              ))}
+              {(editor.newFiles || []).map((file) => <span key={`${file.name}-${file.size}`}>{file.name}</span>)}
+            </div>
+            <div className="panel-actions">
+              {editor.id && (
+                <button className="ghost-danger" type="button" onClick={() => removeEvent(editor.id)}>
+                  <Trash2 size={17} /> 删除
+                </button>
+              )}
+              <button className="primary-action" type="button" onClick={saveEvent} disabled={status === "saving"}>
+                {status === "saving" ? <Loader2 className="spin" size={17} /> : <Save size={17} />}
+                保存页面
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -3603,16 +3802,23 @@ function LearningLibraryPage({
   setFolderId,
   search,
   setSearch,
+  sort,
+  setSort,
+  sortDir,
+  setSortDir,
   reload,
   createFolder,
-  createDocument,
   uploadFiles,
   updateItem,
   openItem,
   downloadFile,
   editor,
   setEditor,
+  preview,
+  openPreview,
+  closePreview,
   fileInputRef,
+  folderInputRef,
   status,
   member,
 }) {
@@ -3622,7 +3828,7 @@ function LearningLibraryPage({
 
   async function saveEditor() {
     if (!editor) return;
-    const saved = await updateItem(editor, { name: editor.name, content: editor.content });
+    const saved = await updateItem(editor, { name: editor.name, notes: editor.notes });
     if (saved) setEditor(saved);
   }
 
@@ -3630,7 +3836,7 @@ function LearningLibraryPage({
     <section className="drive-page">
       <aside className="drive-sidebar">
         <button className="drive-new-button" type="button" onClick={createFolder}>
-          <Plus size={20} /> 新建
+          <FolderPlus size={20} /> 新建文件夹
         </button>
         {libraryViews.map((item) => {
           const Icon = item.icon;
@@ -3666,15 +3872,16 @@ function LearningLibraryPage({
               </button>
             )}
             <button className="ghost-action" type="button" onClick={createFolder}>
-              <FolderPlus size={17} /> 文件夹
-            </button>
-            <button className="ghost-action" type="button" onClick={createDocument}>
-              <FileText size={17} /> 文档
+              <FolderPlus size={17} /> 新建文件夹
             </button>
             <button className="primary-action" type="button" onClick={() => fileInputRef.current?.click()}>
               <UploadCloud size={17} /> 上传资料
             </button>
+            <button className="ghost-action" type="button" onClick={() => folderInputRef.current?.click()}>
+              <FolderOpen size={17} /> 上传文件夹
+            </button>
             <input ref={fileInputRef} type="file" hidden multiple onChange={(event) => uploadFiles(event.target.files)} />
+            <input ref={folderInputRef} type="file" hidden multiple webkitdirectory="" directory="" onChange={(event) => uploadFiles(event.target.files)} />
           </div>
         </div>
 
@@ -3685,6 +3892,27 @@ function LearningLibraryPage({
           </div>
           {status === "loading" && <span className="muted-inline">正在同步...</span>}
         </div>
+
+        {view !== "storage" && (
+          <div className="drive-filter-row">
+            <label>
+              排序
+              <select value={sort} onChange={(event) => setSort(event.target.value)}>
+                <option value="name">名称</option>
+                <option value="date">日期</option>
+                <option value="size">大小</option>
+              </select>
+            </label>
+            <label>
+              方向
+              <select value={sortDir} onChange={(event) => setSortDir(event.target.value)}>
+                <option value="asc">升序</option>
+                <option value="desc">降序</option>
+              </select>
+            </label>
+            <button className="ghost-action" type="button" onClick={reload}>刷新</button>
+          </div>
+        )}
 
         {view === "storage" ? (
           <div className="storage-summary-card">
@@ -3713,13 +3941,18 @@ function LearningLibraryPage({
                     <button type="button" className="drive-name" onClick={() => openItem(item)}>
                       <Icon size={20} /> <span>{item.name}</span>
                     </button>
-                    <span>{item.type === "folder" ? "文件夹" : item.type === "document" ? "云端文档" : item.mimeType || "文件"}</span>
+                    <span>{fileTypeLabel(item)}</span>
                     <span>{item.type === "folder" ? "-" : formatFileSize(item.sizeBytes)}</span>
                     <span>{item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : "-"}</span>
                     <div className="drive-row-actions">
                       <button className="icon-button" type="button" onClick={() => updateItem(item, { isStarred: !item.isStarred })} title="星标">
                         <Star size={16} fill={item.isStarred ? "currentColor" : "none"} />
                       </button>
+                      {previewKindFor(item) && (
+                        <button className="ghost-action is-compact" type="button" onClick={() => openPreview(item)}>
+                          预览
+                        </button>
+                      )}
                       {item.fileId && (
                         <button className="ghost-action is-compact" type="button" onClick={() => downloadFile(item)}>
                           下载
@@ -3737,20 +3970,60 @@ function LearningLibraryPage({
         )}
       </div>
 
-      {editor && (
-        <div className="library-editor">
+      {preview && (
+        <div className="library-preview-modal">
           <div className="panel-heading-row">
             <div>
-              <span className="eyebrow">云端编辑</span>
+              <span className="eyebrow">文件预览</span>
+              <h3>{preview.item.name}</h3>
+            </div>
+            <div className="panel-actions">
+              <button className="ghost-action" type="button" onClick={() => downloadFile(preview.item)}>下载原文件</button>
+              <button className="icon-button" type="button" onClick={closePreview}>×</button>
+            </div>
+          </div>
+          <div className={`library-preview-body is-${preview.kind}`}>
+            {preview.kind === "image" && <img src={preview.url} alt={preview.item.name} />}
+            {preview.kind === "pdf" && <iframe src={preview.url} title={preview.item.name} />}
+            {preview.kind === "audio" && <audio controls src={preview.url} />}
+            {preview.kind === "video" && <video controls src={preview.url} />}
+          </div>
+        </div>
+      )}
+
+      {editor && (
+        <div className={isWordLike(editor) ? "library-editor is-word-layout" : "library-editor"}>
+          <div className="panel-heading-row">
+            <div>
+              <span className="eyebrow">{isWordLike(editor) ? "Word 预览与整理" : "资料整理"}</span>
               <input value={editor.name} onChange={(event) => setEditor({ ...editor, name: event.target.value })} />
             </div>
             <button className="icon-button" type="button" onClick={() => setEditor(null)}>×</button>
           </div>
-          <textarea
-            value={editor.content || ""}
-            onChange={(event) => setEditor({ ...editor, content: event.target.value })}
-            placeholder="可以在这里编辑文字资料；Word、PDF、Excel 上传后会尽量提取文字，方便学生整理学习笔记。"
-          />
+          {isWordLike(editor) ? (
+            <div className="word-review-grid">
+              <section>
+                <span className="field-title">文档预览</span>
+                <div className="word-preview-text">
+                  {editor.content || "暂时没有提取到可预览文字，可以下载原文件查看。"}
+                </div>
+              </section>
+              <section>
+                <span className="field-title">学习笔记 / 备注 / 整理内容</span>
+                <textarea
+                  value={editor.notes || ""}
+                  onChange={(event) => setEditor({ ...editor, notes: event.target.value })}
+                  placeholder="这里记录你对这份 Word 文档的整理、摘要、重点或后续任务。原文件不会被改动。"
+                />
+              </section>
+            </div>
+          ) : (
+            <textarea
+              value={editor.notes || editor.content || ""}
+              onChange={(event) => setEditor({ ...editor, notes: event.target.value })}
+              placeholder="可以在这里写资料摘要、学习笔记或备注。原文件不会被改动。"
+            />
+          )}
           <div className="panel-actions">
             {editor.fileId && <button className="ghost-action" type="button" onClick={() => downloadFile(editor)}>下载原文件</button>}
             <button className="primary-action" type="button" onClick={saveEditor}>
