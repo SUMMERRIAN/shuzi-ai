@@ -47,9 +47,22 @@ button:disabled {
   height: 100vh;
   flex-direction: column;
   gap: 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 24px 18px;
   background: #111820;
   color: #f8fafc;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(203, 213, 225, 0.45) transparent;
+}
+
+.sidebar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(203, 213, 225, 0.35);
 }
 
 .brand {
@@ -180,6 +193,16 @@ button:disabled {
 
 .calendar-day:hover {
   background: #f8fbff;
+}
+
+.calendar-day.is-selected {
+  background: #eff7ff;
+  box-shadow: inset 0 0 0 2px #2563eb;
+}
+
+.calendar-day.is-selected .calendar-date {
+  background: #2563eb;
+  color: #fff;
 }
 
 .calendar-day.is-muted {
@@ -322,6 +345,105 @@ button:disabled {
   background: transparent;
   color: #0b7a53;
   font-weight: 800;
+}
+
+.calendar-inline-preview {
+  display: grid;
+  gap: 12px;
+  margin: 12px 0 18px;
+  padding: 14px;
+  border: 1px solid #dce6e1;
+  border-radius: 8px;
+  background: #fbfdfc;
+}
+
+.calendar-inline-preview h4 {
+  margin: 4px 0 0;
+}
+
+.calendar-preview-body {
+  display: grid;
+  min-height: 220px;
+  max-height: 520px;
+  place-items: center;
+  overflow: auto;
+  border: 1px solid #d6e0da;
+  border-radius: 8px;
+  background: #f8faf9;
+}
+
+.calendar-preview-body img {
+  max-width: 100%;
+  max-height: 480px;
+  cursor: zoom-in;
+  object-fit: contain;
+}
+
+.calendar-preview-body iframe {
+  width: 100%;
+  min-height: 500px;
+  border: 0;
+  background: #fff;
+}
+
+.calendar-preview-body pre,
+.library-preview-body pre {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+  padding: 18px;
+  white-space: pre-wrap;
+  line-height: 1.8;
+  color: #1f2d28;
+}
+
+.calendar-preview-body audio,
+.calendar-preview-body video {
+  width: min(860px, 96%);
+  max-height: 460px;
+}
+
+.calendar-preview-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.calendar-preview-lightbox-body {
+  position: relative;
+  width: min(1180px, 96vw);
+  max-height: 92vh;
+  overflow: auto;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.24);
+}
+
+.calendar-preview-lightbox-body .icon-button {
+  position: sticky;
+  top: 12px;
+  left: calc(100% - 48px);
+  z-index: 1;
+  margin: 12px;
+  background: #fff;
+}
+
+.calendar-preview-lightbox-body img {
+  display: block;
+  max-width: 100%;
+  max-height: 86vh;
+  margin: 0 auto;
+  object-fit: contain;
+}
+
+.calendar-preview-lightbox-body iframe {
+  width: 100%;
+  height: 86vh;
+  border: 0;
 }
 
 .drive-page {
@@ -521,21 +643,56 @@ button:disabled {
 }
 
 .library-editor,
+.library-workspace,
 .library-preview-modal {
   grid-column: 2;
 }
 
-.library-editor .panel-heading-row input {
+.library-editor .panel-heading-row input,
+.library-workspace .panel-heading-row input {
   min-width: min(480px, 100%);
   margin-top: 8px;
   font-size: 20px;
   font-weight: 800;
 }
 
-.library-editor textarea {
+.library-editor textarea,
+.library-notes-pane textarea {
   min-height: 300px;
   margin-top: 16px;
   line-height: 1.8;
+}
+
+.library-workspace {
+  align-self: start;
+  padding: 20px;
+  background: #fff;
+  border: 1px solid #dbe4df;
+  border-radius: 8px;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.05);
+}
+
+.library-workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.library-preview-pane,
+.library-notes-pane {
+  min-width: 0;
+}
+
+.library-notes-pane textarea {
+  width: 100%;
+  min-height: 420px;
+  margin-top: 0;
+  border: 1px solid #d6e0da;
+  border-radius: 8px;
+  padding: 14px;
+  font: inherit;
+  resize: vertical;
 }
 
 .library-editor.is-word-layout {
@@ -609,6 +766,24 @@ button:disabled {
   max-height: 560px;
 }
 
+.office-no-preview {
+  display: grid;
+  min-height: 380px;
+  place-items: center;
+  gap: 10px;
+  padding: 28px;
+  border: 1px dashed #cfdcd6;
+  border-radius: 8px;
+  background: #fbfdfc;
+  color: #52615b;
+  text-align: center;
+}
+
+.office-no-preview strong {
+  color: #10231d;
+  font-size: 18px;
+}
+
 .empty-state {
   padding: 36px;
   color: #64726d;
@@ -622,12 +797,14 @@ button:disabled {
 
   .drive-sidebar,
   .library-editor,
+  .library-workspace,
   .library-preview-modal {
     grid-column: 1;
   }
 
   .calendar-editor-grid,
-  .word-review-grid {
+  .word-review-grid,
+  .library-workspace-grid {
     grid-template-columns: 1fr;
   }
 
@@ -672,7 +849,7 @@ button:disabled {
 .nav-list {
   display: grid;
   gap: 8px;
-  margin-bottom: auto;
+  margin-bottom: 0;
 }
 
 .nav-item {
@@ -697,7 +874,7 @@ button:disabled {
 }
 
 .sidebar-card {
-  margin-top: auto;
+  margin-top: 0;
   padding: 16px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 8px;

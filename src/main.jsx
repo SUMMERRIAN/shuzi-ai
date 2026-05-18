@@ -140,11 +140,12 @@ function fileIconFor(item) {
 
 function previewKindFor(item) {
   const mime = item?.mimeType || "";
-  const name = (item?.name || "").toLowerCase();
+  const name = (item?.name || item?.originalName || "").toLowerCase();
   if (mime.startsWith("image/")) return "image";
   if (mime === "application/pdf" || name.endsWith(".pdf")) return "pdf";
   if (mime.startsWith("audio/")) return "audio";
   if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("text/") || name.endsWith(".txt")) return "text";
   return "";
 }
 
@@ -1773,6 +1774,13 @@ function App() {
     if (activePage === "library" && member.isLoggedIn) loadLibraryItems();
   }, [activePage, member.isLoggedIn, libraryView, libraryFolderId, librarySort, librarySortDir]);
 
+  useEffect(() => {
+    if (activePage !== "library" || libraryView !== "drive" || libraryFolderId) {
+      closeLibraryPreview();
+      setLibraryEditor(null);
+    }
+  }, [activePage, libraryView, libraryFolderId]);
+
   async function loadCalendarEvents() {
     try {
       setCalendarStatus("loading");
@@ -1786,6 +1794,7 @@ function App() {
   }
 
   function openCalendarEditor(dateKey, event = null) {
+    if (calendarEditor?.attachmentPreview?.url) URL.revokeObjectURL(calendarEditor.attachmentPreview.url);
     setCalendarEditor({
       id: event?.id || "",
       eventDate: dateKey,
@@ -1793,11 +1802,17 @@ function App() {
       content: event?.content || "",
       files: event?.files || [],
       newFiles: [],
+      attachmentPreview: null,
     });
   }
 
   function updateCalendarEditor(patch) {
     setCalendarEditor((prev) => (prev ? { ...prev, ...patch } : prev));
+  }
+
+  function closeCalendarEditor() {
+    if (calendarEditor?.attachmentPreview?.url) URL.revokeObjectURL(calendarEditor.attachmentPreview.url);
+    setCalendarEditor(null);
   }
 
   function pickCalendarFiles(files) {
@@ -1870,7 +1885,7 @@ function App() {
         const data = await apiRequest("/calendar/events", { method: "POST", body: form });
         setCalendarEvents((prev) => [...prev, data.event]);
       }
-      setCalendarEditor(null);
+      closeCalendarEditor();
       setCalendarStatus("idle");
     } catch (error) {
       setCalendarStatus("error");
@@ -1883,7 +1898,7 @@ function App() {
     try {
       await apiRequest(`/calendar/events/${id}`, { method: "DELETE" });
       setCalendarEvents((prev) => prev.filter((item) => item.id !== id));
-      setCalendarEditor(null);
+      closeCalendarEditor();
     } catch (error) {
       showAiError(error, "日历记录删除失败。");
     }
@@ -1904,8 +1919,10 @@ function App() {
       const blob = await fetchFileSummaryBlob(file);
       if (!blob) return;
       const url = URL.createObjectURL(blob);
-      window.open(url, "_blank", "noopener,noreferrer");
-      setTimeout(() => URL.revokeObjectURL(url), 60 * 1000);
+      if (calendarEditor?.attachmentPreview?.url) URL.revokeObjectURL(calendarEditor.attachmentPreview.url);
+      const kind = previewKindFor(file);
+      const text = kind === "text" ? await blob.text() : "";
+      updateCalendarEditor({ attachmentPreview: { file, kind, url, text } });
     } catch (error) {
       showAiError(error, "文件预览失败，可以先下载查看。");
     }
@@ -2004,6 +2021,7 @@ function App() {
       });
       setLibraryItems((prev) => prev.map((row) => (row.id === item.id ? data.item : row)));
       if (libraryEditor?.id === item.id) setLibraryEditor(data.item);
+      if (libraryPreview?.item?.id === item.id) setLibraryPreview((prev) => (prev ? { ...prev, item: data.item } : prev));
       return data.item;
     } catch (error) {
       showAiError(error, "资料库更新失败。");
@@ -2013,6 +2031,8 @@ function App() {
 
   async function openLibraryItem(item) {
     if (item.type === "folder") {
+      closeLibraryPreview();
+      setLibraryEditor(null);
       setLibraryFolderId(item.id);
       setLibraryView("drive");
       return;
@@ -2025,7 +2045,7 @@ function App() {
       return;
     }
     setLibraryEditor(target);
-    setLibraryPreview(null);
+    closeLibraryPreview();
   }
 
   async function fetchLibraryFileBlob(item) {
@@ -2044,8 +2064,9 @@ function App() {
       const blob = await fetchLibraryFileBlob(item);
       const url = URL.createObjectURL(blob);
       if (libraryPreview?.url) URL.revokeObjectURL(libraryPreview.url);
-      setLibraryPreview({ item, kind, url });
-      setLibraryEditor(null);
+      const text = kind === "text" ? await blob.text() : "";
+      setLibraryPreview({ item, kind, url, text });
+      setLibraryEditor(item);
     } catch (error) {
       showAiError(error, "文件预览失败，可以先下载原文件查看。");
     }
@@ -3408,7 +3429,7 @@ function App() {
             quickCreateEvent={quickCreateCalendarEvent}
             saveEvent={saveCalendarEvent}
             removeEvent={removeCalendarEvent}
-            closeEditor={() => setCalendarEditor(null)}
+            closeEditor={closeCalendarEditor}
             fileInputRef={calendarFileInputRef}
             pickFiles={pickCalendarFiles}
             previewFile={previewCalendarFile}
@@ -3423,6 +3444,8 @@ function App() {
             items={libraryItems}
             view={libraryView}
             setView={(view) => {
+              closeLibraryPreview();
+              setLibraryEditor(null);
               setLibraryView(view);
               if (view !== "drive") setLibraryFolderId(null);
             }}
@@ -3619,6 +3642,8 @@ function LearningCalendarPage({
   member,
 }) {
   const [quickDraft, setQuickDraft] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(toDateKey(new Date()));
+  const [expandedPreview, setExpandedPreview] = useState(null);
   const quickDraftSavingRef = useRef(false);
   const monthDays = useMemo(() => buildMonthDays(cursor), [cursor]);
   const eventsByDate = useMemo(() => {
@@ -3638,6 +3663,7 @@ function LearningCalendarPage({
   }
 
   function beginQuickDraft(dateKey) {
+    setSelectedDate(dateKey);
     setQuickDraft({ dateKey, title: "" });
   }
 
@@ -3661,7 +3687,7 @@ function LearningCalendarPage({
         </div>
         <div className="calendar-hero-actions">
           <button className="ghost-action" type="button" onClick={() => setCursor(new Date())}>今天</button>
-          <button className="primary-action" type="button" onClick={() => openEditor(toDateKey(new Date()))}>
+          <button className="primary-action" type="button" onClick={() => openEditor(selectedDate || toDateKey(new Date()))}>
             <Plus size={18} /> 新建页面
           </button>
         </div>
@@ -3690,7 +3716,8 @@ function LearningCalendarPage({
                 key={day.key}
                 role="button"
                 tabIndex={0}
-                className={`calendar-day ${day.inMonth ? "" : "is-muted"} ${day.key === toDateKey(new Date()) ? "is-today" : ""}`}
+                className={`calendar-day ${day.inMonth ? "" : "is-muted"} ${day.key === toDateKey(new Date()) ? "is-today" : ""} ${day.key === selectedDate ? "is-selected" : ""}`}
+                onClick={() => setSelectedDate(day.key)}
                 onDoubleClick={() => beginQuickDraft(day.key)}
               >
                 <span className="calendar-date">{Number(day.key.slice(-2))}</span>
@@ -3776,6 +3803,44 @@ function LearningCalendarPage({
               ))}
               {(editor.newFiles || []).map((file) => <span key={`${file.name}-${file.size}`}>{file.name}</span>)}
             </div>
+            {editor.attachmentPreview && (
+              <div className="calendar-inline-preview">
+                <div className="panel-heading-row">
+                  <div>
+                    <span className="eyebrow">附件预览</span>
+                    <h4>{editor.attachmentPreview.file.originalName}</h4>
+                  </div>
+                  {(editor.attachmentPreview.kind === "image" || editor.attachmentPreview.kind === "pdf") && (
+                    <button className="ghost-action is-compact" type="button" onClick={() => setExpandedPreview(editor.attachmentPreview)}>
+                      放大查看
+                    </button>
+                  )}
+                </div>
+                <div className={`calendar-preview-body is-${editor.attachmentPreview.kind || "file"}`}>
+                  {editor.attachmentPreview.kind === "image" && (
+                    <img
+                      src={editor.attachmentPreview.url}
+                      alt={editor.attachmentPreview.file.originalName}
+                      onClick={() => setExpandedPreview(editor.attachmentPreview)}
+                    />
+                  )}
+                  {editor.attachmentPreview.kind === "pdf" && <iframe src={editor.attachmentPreview.url} title={editor.attachmentPreview.file.originalName} />}
+                  {editor.attachmentPreview.kind === "text" && <pre>{editor.attachmentPreview.text}</pre>}
+                  {editor.attachmentPreview.kind === "audio" && <audio controls src={editor.attachmentPreview.url} />}
+                  {editor.attachmentPreview.kind === "video" && <video controls src={editor.attachmentPreview.url} />}
+                  {!editor.attachmentPreview.kind && <p>这个文件暂不支持在线预览，可以先下载查看。</p>}
+                </div>
+              </div>
+            )}
+            {expandedPreview && (
+              <div className="calendar-preview-lightbox" onMouseDown={() => setExpandedPreview(null)}>
+                <div className={`calendar-preview-lightbox-body is-${expandedPreview.kind}`} onMouseDown={(event) => event.stopPropagation()}>
+                  <button className="icon-button" type="button" onClick={() => setExpandedPreview(null)}>×</button>
+                  {expandedPreview.kind === "image" && <img src={expandedPreview.url} alt={expandedPreview.file.originalName} />}
+                  {expandedPreview.kind === "pdf" && <iframe src={expandedPreview.url} title={expandedPreview.file.originalName} />}
+                </div>
+              </div>
+            )}
             <div className="panel-actions">
               {editor.id && (
                 <button className="ghost-danger" type="button" onClick={() => removeEvent(editor.id)}>
@@ -3958,7 +4023,19 @@ function LearningLibraryPage({
                           下载
                         </button>
                       )}
-                      <button className="icon-button" type="button" onClick={() => updateItem(item, { isTrashed: view === "trash" ? false : true })} title={view === "trash" ? "恢复" : "移入回收站"}>
+                      <button
+                        className="icon-button"
+                        type="button"
+                        onClick={async () => {
+                          const saved = await updateItem(item, { isTrashed: view === "trash" ? false : true });
+                          if (saved) {
+                            if (editor?.id === item.id) setEditor(null);
+                            if (preview?.item?.id === item.id) closePreview();
+                            reload();
+                          }
+                        }}
+                        title={view === "trash" ? "恢复" : "移入回收站"}
+                      >
                         {view === "trash" ? <Clock3 size={16} /> : <Trash2 size={16} />}
                       </button>
                     </div>
@@ -3970,68 +4047,65 @@ function LearningLibraryPage({
         )}
       </div>
 
-      {preview && (
-        <div className="library-preview-modal">
-          <div className="panel-heading-row">
-            <div>
-              <span className="eyebrow">文件预览</span>
-              <h3>{preview.item.name}</h3>
+      {(preview || editor) && (() => {
+        const activeItem = editor || preview?.item;
+        const previewKind = preview?.kind || "";
+        const canPreview = Boolean(preview && ["image", "pdf", "text", "audio", "video"].includes(previewKind));
+        return (
+          <div className={`library-workspace ${canPreview ? "has-preview" : "notes-only"}`}>
+            <div className="panel-heading-row">
+              <div>
+                <span className="eyebrow">{canPreview ? "预览与整理" : "资料整理"}</span>
+                <input value={activeItem.name} onChange={(event) => setEditor({ ...activeItem, name: event.target.value })} />
+              </div>
+              <button
+                className="icon-button"
+                type="button"
+                onClick={() => {
+                  closePreview();
+                  setEditor(null);
+                }}
+              >
+                ×
+              </button>
             </div>
-            <div className="panel-actions">
-              <button className="ghost-action" type="button" onClick={() => downloadFile(preview.item)}>下载原文件</button>
-              <button className="icon-button" type="button" onClick={closePreview}>×</button>
-            </div>
-          </div>
-          <div className={`library-preview-body is-${preview.kind}`}>
-            {preview.kind === "image" && <img src={preview.url} alt={preview.item.name} />}
-            {preview.kind === "pdf" && <iframe src={preview.url} title={preview.item.name} />}
-            {preview.kind === "audio" && <audio controls src={preview.url} />}
-            {preview.kind === "video" && <video controls src={preview.url} />}
-          </div>
-        </div>
-      )}
-
-      {editor && (
-        <div className={isWordLike(editor) ? "library-editor is-word-layout" : "library-editor"}>
-          <div className="panel-heading-row">
-            <div>
-              <span className="eyebrow">{isWordLike(editor) ? "Word 预览与整理" : "资料整理"}</span>
-              <input value={editor.name} onChange={(event) => setEditor({ ...editor, name: event.target.value })} />
-            </div>
-            <button className="icon-button" type="button" onClick={() => setEditor(null)}>×</button>
-          </div>
-          {isWordLike(editor) ? (
-            <div className="word-review-grid">
-              <section>
-                <span className="field-title">文档预览</span>
-                <div className="word-preview-text">
-                  {editor.content || "暂时没有提取到可预览文字，可以下载原文件查看。"}
-                </div>
+            <div className="library-workspace-grid">
+              <section className="library-preview-pane">
+                <span className="field-title">资料预览</span>
+                {canPreview ? (
+                  <div className={`library-preview-body is-${previewKind}`}>
+                    {previewKind === "image" && <img src={preview.url} alt={activeItem.name} />}
+                    {previewKind === "pdf" && <iframe src={preview.url} title={activeItem.name} />}
+                    {previewKind === "text" && <pre>{preview.text || activeItem.content || "这个文本文件暂时没有可显示内容。"}</pre>}
+                    {previewKind === "audio" && <audio controls src={preview.url} />}
+                    {previewKind === "video" && <video controls src={preview.url} />}
+                  </div>
+                ) : (
+                  <div className="office-no-preview">
+                    <FileText size={32} />
+                    <strong>此类文件暂不提供在线预览</strong>
+                    <p>Word、Excel、PPT 等复杂文件建议下载后查看或修改。原文件不会被改动，你可以在右侧记录摘要、重点和后续任务。</p>
+                  </div>
+                )}
               </section>
-              <section>
+              <section className="library-notes-pane">
                 <span className="field-title">学习笔记 / 备注 / 整理内容</span>
                 <textarea
-                  value={editor.notes || ""}
-                  onChange={(event) => setEditor({ ...editor, notes: event.target.value })}
-                  placeholder="这里记录你对这份 Word 文档的整理、摘要、重点或后续任务。原文件不会被改动。"
+                  value={activeItem.notes || ""}
+                  onChange={(event) => setEditor({ ...activeItem, notes: event.target.value })}
+                  placeholder="在这里记录资料摘要、重点、疑问、使用方法或后续任务。原文件不会被改动。"
                 />
               </section>
             </div>
-          ) : (
-            <textarea
-              value={editor.notes || editor.content || ""}
-              onChange={(event) => setEditor({ ...editor, notes: event.target.value })}
-              placeholder="可以在这里写资料摘要、学习笔记或备注。原文件不会被改动。"
-            />
-          )}
-          <div className="panel-actions">
-            {editor.fileId && <button className="ghost-action" type="button" onClick={() => downloadFile(editor)}>下载原文件</button>}
-            <button className="primary-action" type="button" onClick={saveEditor}>
-              <Save size={17} /> 保存修改
-            </button>
+            <div className="panel-actions">
+              {activeItem.fileId && <button className="ghost-action" type="button" onClick={() => downloadFile(activeItem)}>下载原文件</button>}
+              <button className="primary-action" type="button" onClick={saveEditor}>
+                <Save size={17} /> 保存修改
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </section>
   );
 }
