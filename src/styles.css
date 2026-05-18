@@ -3720,7 +3720,14 @@ audio {
   align-items: start;
 }
 
-.knowledge-input-row textarea {
+.knowledge-prompt-stack {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.knowledge-input-row textarea,
+.knowledge-topic-input {
   width: 100%;
   min-height: 150px;
   padding: 16px;
@@ -3728,6 +3735,59 @@ audio {
   border-radius: 8px;
   background: #ffffff;
   color: #1d2520;
+  resize: vertical;
+}
+
+.knowledge-template-panel {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #d9e4dc;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #fbfdfb, #f6faf8);
+}
+
+.knowledge-template-panel.is-active {
+  border-color: #80c7ac;
+  background: linear-gradient(180deg, #f2fff9, #f7fbff);
+  box-shadow: 0 14px 32px rgba(0, 115, 78, 0.1);
+}
+
+.knowledge-template-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.knowledge-template-header h3 {
+  margin: 5px 0 0;
+  color: #0d1b2a;
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.knowledge-template-header > span {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border: 1px solid #d7e1dc;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #50615a;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.knowledge-template-panel textarea {
+  min-height: 220px;
+  max-height: 300px;
+  padding: 14px 16px;
+  border-color: #cfdcd5;
+  background: #ffffff;
+  color: #21312a;
+  font-size: 14px;
+  line-height: 1.75;
+  overflow: auto;
   resize: vertical;
 }
 

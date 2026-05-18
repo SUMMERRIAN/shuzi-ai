@@ -795,11 +795,12 @@ app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
     await assertPaidMember(req.user.id);
     ensureOpenAIKey();
     const student = await getPrimaryStudent(req.user);
-    const { topic = "", grade = "", subject = "", useTemplate = false } = req.body || {};
+    const { topic = "", grade = "", subject = "", useTemplate = false, template = "" } = req.body || {};
     if (!topic.trim()) return res.status(400).json({ error: "TOPIC_REQUIRED" });
+    const templateSource = String(template || "").trim() || knowledgeInfographicTemplate;
     const templatePrompt =
       useTemplate === true || useTemplate === "true"
-        ? `\n\n专业知识图模板：\n${knowledgeInfographicTemplate.replace("[SUBJECT]", topic.trim())}`
+        ? `\n\n专业知识图模板：\n${templateSource.replaceAll("[SUBJECT]", topic.trim())}`
         : "";
     const prompt =
       `请为学生制作一张严谨、丰富、适合复习的中文知识图。主题：${topic}。学科：${subject || "不限"}。年级：${grade || "中学生"}。` +

@@ -1207,6 +1207,36 @@ const mistakeQuickTasks = {
   },
 };
 
+const defaultKnowledgePromptTemplate = `超精细教育信息图 [SUBJECT]，
+科学教科书插画风格，
+干净的学术学习版式，
+高度整理的学习笔记美学，
+带有虚线引导的结构注释图，
+物体周围带有多个教育说明标签，
+适合学生阅读的清晰视觉层级，
+教材风格，
+科学课堂海报设计，
+教育用途的结构注释与组件标注，
+手写笔记感与现代信息图设计结合，
+适合学生理解的可视化讲解，
+分步骤结构拆解，
+悬浮式标签与指示箭头，
+点状连接虚线，
+精准的科学可视化表现，
+居中构图，
+纯白干净背景，
+柔和粉彩配色，
+高可读性，
+现代教育出版物风格，
+干净留白边距，
+3D 科学渲染，
+Octane Render 渲染风格，
+次表面散射（Subsurface Scattering），
+超高细节纹理，
+电影级灯光，
+视觉化学习设计，
+教育海报美学。`;
+
 const defaultMistakes = [
   {
     id: "mistake-1",
@@ -1563,6 +1593,7 @@ function App() {
   const [knowledgeNote, setKnowledgeNote] = useState(() => buildKnowledgeNote("细胞结构"));
   const [knowledgeAiStatus, setKnowledgeAiStatus] = useState("idle");
   const [knowledgeUseTemplate, setKnowledgeUseTemplate] = useState(false);
+  const [knowledgePromptTemplate, setKnowledgePromptTemplate] = useState(defaultKnowledgePromptTemplate);
   const [forumPosts, setForumPosts] = useState(defaultForumPosts);
   const [activeForumPostId, setActiveForumPostId] = useState(defaultForumPosts[0].id);
   const [forumDraft, setForumDraft] = useState({
@@ -2481,6 +2512,7 @@ function App() {
           grade: answers.grade,
           subject: "",
           useTemplate: knowledgeUseTemplate,
+          template: knowledgePromptTemplate,
         }),
       });
       if (data.imageBase64) {
@@ -2937,6 +2969,8 @@ function App() {
             status={knowledgeAiStatus}
             useTemplate={knowledgeUseTemplate}
             setUseTemplate={setKnowledgeUseTemplate}
+            promptTemplate={knowledgePromptTemplate}
+            setPromptTemplate={setKnowledgePromptTemplate}
           />
         )}
 
@@ -5239,7 +5273,18 @@ function downloadNoteSvg(note) {
   URL.revokeObjectURL(url);
 }
 
-function ModernKnowledgeNotePage({ knowledgeQuestion, setKnowledgeQuestion, knowledgeNote, generateKnowledgeNote, downloadKnowledgeImage, status, useTemplate, setUseTemplate }) {
+function ModernKnowledgeNotePage({
+  knowledgeQuestion,
+  setKnowledgeQuestion,
+  knowledgeNote,
+  generateKnowledgeNote,
+  downloadKnowledgeImage,
+  status,
+  useTemplate,
+  setUseTemplate,
+  promptTemplate,
+  setPromptTemplate,
+}) {
   const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(knowledgeNote.svg)}`;
   return (
     <section className="stack knowledge-page">
@@ -5252,12 +5297,38 @@ function ModernKnowledgeNotePage({ knowledgeQuestion, setKnowledgeQuestion, know
           <ImageIcon size={24} />
         </div>
         <div className="knowledge-input-row">
-          <textarea value={knowledgeQuestion} onChange={(event) => setKnowledgeQuestion(event.target.value)} placeholder="例如：动物细胞结构、光合作用、二次函数图像、牛顿第一定律……" />
+          <div className="knowledge-prompt-stack">
+            <textarea
+              className="knowledge-topic-input"
+              value={knowledgeQuestion}
+              onChange={(event) => setKnowledgeQuestion(event.target.value)}
+              placeholder="例如：动物细胞结构、光合作用、二次函数图像、牛顿第一定律……"
+            />
+            <div className={useTemplate ? "knowledge-template-panel is-active" : "knowledge-template-panel"}>
+              <div className="knowledge-template-header">
+                <div>
+                  <span className="eyebrow">提示词模板</span>
+                  <h3>专业知识图提示词模板</h3>
+                </div>
+                <span>{useTemplate ? "已套用到本次生成" : "可查看，也可修改"}</span>
+              </div>
+              <textarea
+                value={promptTemplate}
+                onChange={(event) => setPromptTemplate(event.target.value)}
+                placeholder="这里可以放入知识图提示词模板，点击套用后会和上方主题一起用于生成。"
+              />
+            </div>
+          </div>
           <div className="knowledge-actions">
             <button
               type="button"
               className={useTemplate ? "template-action is-active" : "template-action"}
-              onClick={() => setUseTemplate((prev) => !prev)}
+              onClick={() => {
+                setUseTemplate((prev) => {
+                  if (!prev && !promptTemplate.trim()) setPromptTemplate(defaultKnowledgePromptTemplate);
+                  return !prev;
+                });
+              }}
               aria-pressed={useTemplate}
             >
               <Sparkles size={18} />
