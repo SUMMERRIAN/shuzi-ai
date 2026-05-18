@@ -1562,6 +1562,7 @@ function App() {
   const [knowledgeQuestion, setKnowledgeQuestion] = useState("细胞结构");
   const [knowledgeNote, setKnowledgeNote] = useState(() => buildKnowledgeNote("细胞结构"));
   const [knowledgeAiStatus, setKnowledgeAiStatus] = useState("idle");
+  const [knowledgeUseTemplate, setKnowledgeUseTemplate] = useState(false);
   const [forumPosts, setForumPosts] = useState(defaultForumPosts);
   const [activeForumPostId, setActiveForumPostId] = useState(defaultForumPosts[0].id);
   const [forumDraft, setForumDraft] = useState({
@@ -2479,6 +2480,7 @@ function App() {
           topic: knowledgeQuestion,
           grade: answers.grade,
           subject: "",
+          useTemplate: knowledgeUseTemplate,
         }),
       });
       if (data.imageBase64) {
@@ -2933,6 +2935,8 @@ function App() {
             generateKnowledgeNote={generateKnowledgeNote}
             downloadKnowledgeImage={downloadKnowledgeImage}
             status={knowledgeAiStatus}
+            useTemplate={knowledgeUseTemplate}
+            setUseTemplate={setKnowledgeUseTemplate}
           />
         )}
 
@@ -5235,7 +5239,7 @@ function downloadNoteSvg(note) {
   URL.revokeObjectURL(url);
 }
 
-function ModernKnowledgeNotePage({ knowledgeQuestion, setKnowledgeQuestion, knowledgeNote, generateKnowledgeNote, downloadKnowledgeImage, status }) {
+function ModernKnowledgeNotePage({ knowledgeQuestion, setKnowledgeQuestion, knowledgeNote, generateKnowledgeNote, downloadKnowledgeImage, status, useTemplate, setUseTemplate }) {
   const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(knowledgeNote.svg)}`;
   return (
     <section className="stack knowledge-page">
@@ -5250,13 +5254,18 @@ function ModernKnowledgeNotePage({ knowledgeQuestion, setKnowledgeQuestion, know
         <div className="knowledge-input-row">
           <textarea value={knowledgeQuestion} onChange={(event) => setKnowledgeQuestion(event.target.value)} placeholder="例如：动物细胞结构、光合作用、二次函数图像、牛顿第一定律……" />
           <div className="knowledge-actions">
+            <button
+              type="button"
+              className={useTemplate ? "template-action is-active" : "template-action"}
+              onClick={() => setUseTemplate((prev) => !prev)}
+              aria-pressed={useTemplate}
+            >
+              <Sparkles size={18} />
+              {useTemplate ? "已套用模板" : "套用知识图模板"}
+            </button>
             <button type="button" className="primary-action" onClick={generateKnowledgeNote} disabled={status === "loading"}>
               {status === "loading" ? <Loader2 className="spin" size={17} /> : <Sparkles size={17} />}
               {status === "loading" ? "AI正在生成" : "AI生成知识图"}
-            </button>
-            <button type="button" className="ghost-action" onClick={downloadKnowledgeImage}>
-              <Download size={17} />
-              下载图片
             </button>
           </div>
         </div>
@@ -5269,8 +5278,9 @@ function ModernKnowledgeNotePage({ knowledgeQuestion, setKnowledgeQuestion, know
               <span className="eyebrow">图片预览</span>
               <h2>{knowledgeNote.title}</h2>
             </div>
-            <button type="button" className="icon-download-button" onClick={downloadKnowledgeImage} aria-label="下载当前知识图片">
-              <Download size={20} />
+            <button type="button" className="preview-download-button" onClick={downloadKnowledgeImage}>
+              <Download size={17} />
+              下载图片
             </button>
           </div>
           <div className="knowledge-image-frame">

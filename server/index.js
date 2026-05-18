@@ -28,6 +28,36 @@ const geminiThinkingModel = process.env.GEMINI_MODEL_THINKING || "gemini-2.5-pro
 const imageModel = process.env.OPENAI_MODEL_IMAGE || "gpt-image-2";
 const transcriptionModel = process.env.OPENAI_MODEL_TRANSCRIBE || "gpt-4o-mini-transcribe";
 
+const knowledgeInfographicTemplate = `超精细教育信息图 [SUBJECT]，
+科学教科书插画风格，
+干净的学术学习版式，
+高度整理的学习笔记美学，
+带有虚线引导的结构注释图，
+物体周围带有多个教育说明标签，
+适合学生阅读的清晰视觉层级，
+教材风格，
+科学课堂海报设计，
+教育用途的结构注释与组件标注，
+手写笔记感与现代信息图设计结合，
+适合学生理解的可视化讲解，
+分步骤结构拆解，
+悬浮式标签与指示箭头，
+点状连接虚线，
+精准的科学可视化表现，
+居中构图，
+纯白干净背景，
+柔和粉彩配色，
+高可读性，
+现代教育出版物风格，
+干净留白边距，
+3D 科学渲染，
+Octane Render 渲染风格，
+次表面散射（Subsurface Scattering），
+超高细节纹理，
+电影级灯光，
+视觉化学习设计，
+教育海报美学。`;
+
 function normalizeAiProvider(provider = "") {
   return String(provider).toLowerCase() === "gemini" ? "gemini" : "openai";
 }
@@ -765,11 +795,16 @@ app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
     await assertPaidMember(req.user.id);
     ensureOpenAIKey();
     const student = await getPrimaryStudent(req.user);
-    const { topic = "", grade = "", subject = "" } = req.body || {};
+    const { topic = "", grade = "", subject = "", useTemplate = false } = req.body || {};
     if (!topic.trim()) return res.status(400).json({ error: "TOPIC_REQUIRED" });
+    const templatePrompt =
+      useTemplate === true || useTemplate === "true"
+        ? `\n\n专业知识图模板：\n${knowledgeInfographicTemplate.replace("[SUBJECT]", topic.trim())}`
+        : "";
     const prompt =
       `请为学生制作一张严谨、丰富、适合复习的中文知识图。主题：${topic}。学科：${subject || "不限"}。年级：${grade || "中学生"}。` +
-      "画面要求：信息量充足，包含标题、结构图、标注线、关键概念解释、底部总结，不要做简单示意图，风格专业清晰。";
+      "画面要求：信息量充足，包含标题、结构图、标注线、关键概念解释、底部总结，不要做简单示意图，风格专业清晰。" +
+      templatePrompt;
     const response = await openai.responses.create({
       model: imageModel,
       input: prompt,

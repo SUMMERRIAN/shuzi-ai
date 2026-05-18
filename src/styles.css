@@ -3736,6 +3736,28 @@ audio {
   gap: 10px;
 }
 
+.template-action {
+  display: inline-flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  border: 1px solid #a8d5c0;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #eef8ff, #f0fff7);
+  color: #0d4f7c;
+  font-size: 16px;
+  font-weight: 900;
+  box-shadow: 0 12px 30px rgba(31, 104, 160, 0.12);
+}
+
+.template-action.is-active {
+  border-color: #006f49;
+  background: linear-gradient(135deg, #0f6cbb, #008653);
+  color: #ffffff;
+}
+
 .knowledge-prompt-box {
   border: 1px solid #dfe5da;
   border-radius: 8px;
@@ -4356,6 +4378,21 @@ audio {
   border-radius: 8px;
   background: #ffffff;
   color: #008653;
+}
+
+.preview-download-button {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 14px;
+  border: 1px solid #b8d6c8;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #006f49;
+  font-weight: 900;
+  white-space: nowrap;
 }
 
 .free-ask-page {
