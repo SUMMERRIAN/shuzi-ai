@@ -69,6 +69,433 @@ button:disabled {
   background: #ffffff;
   box-shadow: 0 0 0 1px rgba(223, 229, 218, 0.8);
 }
+
+.calendar-page,
+.drive-page {
+  display: grid;
+  gap: 16px;
+}
+
+.calendar-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: center;
+  background: linear-gradient(120deg, #f7fbff, #f3fbf4);
+  border: 1px solid #d8e4dd;
+  border-radius: 8px;
+  padding: 24px;
+}
+
+.calendar-hero h2,
+.drive-title-row h2 {
+  margin: 6px 0 8px;
+  font-size: 28px;
+  letter-spacing: 0;
+}
+
+.calendar-hero p,
+.drive-storage p,
+.storage-summary-card p {
+  margin: 0;
+  color: #52615b;
+  line-height: 1.7;
+}
+
+.calendar-hero-actions,
+.drive-actions,
+.panel-actions,
+.calendar-upload-row,
+.drive-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.calendar-shell,
+.calendar-editor-panel,
+.drive-main,
+.drive-sidebar,
+.library-editor,
+.storage-summary-card {
+  background: #fff;
+  border: 1px solid #dbe4df;
+  border-radius: 8px;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.05);
+}
+
+.calendar-shell {
+  padding: 18px;
+}
+
+.calendar-toolbar,
+.drive-topbar,
+.drive-title-row,
+.panel-heading-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.calendar-toolbar {
+  justify-content: flex-start;
+  margin-bottom: 14px;
+}
+
+.calendar-weekdays,
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.calendar-weekdays span {
+  padding: 10px 8px;
+  color: #697973;
+  font-weight: 700;
+  text-align: center;
+}
+
+.calendar-grid {
+  border-top: 1px solid #e2e9e5;
+  border-left: 1px solid #e2e9e5;
+}
+
+.calendar-day {
+  min-height: 132px;
+  padding: 10px;
+  text-align: left;
+  background: #fff;
+  border: 0;
+  border-right: 1px solid #e2e9e5;
+  border-bottom: 1px solid #e2e9e5;
+  cursor: pointer;
+}
+
+.calendar-day:hover {
+  background: #f8fbff;
+}
+
+.calendar-day.is-muted {
+  background: #fafafa;
+  color: #a0aaa5;
+}
+
+.calendar-day.is-today .calendar-date {
+  background: #0b8f5a;
+  color: #fff;
+}
+
+.calendar-date {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  font-weight: 800;
+}
+
+.calendar-event-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.calendar-event-pill {
+  display: block;
+  min-height: 30px;
+  padding: 7px 9px;
+  overflow: hidden;
+  color: #18241f;
+  background: #f4f9f6;
+  border: 1px solid #dbe7df;
+  border-radius: 6px;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-more,
+.muted-inline {
+  color: #66746f;
+  font-size: 13px;
+}
+
+.calendar-editor-panel,
+.library-editor {
+  padding: 20px;
+}
+
+.calendar-editor-panel label,
+.library-editor label {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  color: #26332e;
+  font-weight: 700;
+}
+
+.calendar-editor-panel input,
+.calendar-editor-panel textarea,
+.library-editor input,
+.library-editor textarea,
+.drive-search input {
+  width: 100%;
+  border: 1px solid #d6e0da;
+  border-radius: 7px;
+  padding: 11px 12px;
+  font: inherit;
+  background: #fff;
+}
+
+.calendar-editor-panel textarea,
+.library-editor textarea {
+  resize: vertical;
+}
+
+.attached-file-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+
+.attached-file-list span {
+  padding: 6px 10px;
+  border: 1px solid #dbe5df;
+  border-radius: 999px;
+  background: #f8faf9;
+  color: #475852;
+  font-size: 13px;
+}
+
+.drive-page {
+  grid-template-columns: 240px minmax(0, 1fr);
+  align-items: start;
+}
+
+.drive-sidebar {
+  position: sticky;
+  top: 80px;
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+}
+
+.drive-new-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid #d8e3dd;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.drive-view {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #25312d;
+  text-align: left;
+  cursor: pointer;
+}
+
+.drive-view.is-active {
+  background: #e8f3ff;
+  color: #0f5fa8;
+  font-weight: 800;
+}
+
+.drive-storage {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 12px;
+  border-top: 1px solid #e1e8e4;
+}
+
+.storage-bar {
+  height: 8px;
+  overflow: hidden;
+  background: #e5ebe8;
+  border-radius: 999px;
+}
+
+.storage-bar span {
+  display: block;
+  height: 100%;
+  background: #2563eb;
+}
+
+.storage-bar.is-large {
+  height: 12px;
+}
+
+.drive-main {
+  min-width: 0;
+  padding: 18px;
+}
+
+.drive-topbar {
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.drive-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(720px, 100%);
+  padding: 0 12px;
+  border: 1px solid #d7e1db;
+  border-radius: 999px;
+  background: #f6f9fb;
+}
+
+.drive-search input {
+  border: 0;
+  background: transparent;
+  outline: none;
+}
+
+.drive-title-row {
+  margin-bottom: 16px;
+}
+
+.drive-list {
+  border: 1px solid #dce5e0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.drive-list-head,
+.drive-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.5fr) minmax(130px, 0.8fr) 110px 120px 170px;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 16px;
+}
+
+.drive-list-head {
+  background: #f8faf9;
+  color: #5b6a65;
+  font-weight: 800;
+  border-bottom: 1px solid #dce5e0;
+}
+
+.drive-list-scroll {
+  max-height: 590px;
+  overflow: auto;
+}
+
+.drive-row {
+  min-height: 58px;
+  border-bottom: 1px solid #eef2ef;
+}
+
+.drive-row:last-child {
+  border-bottom: 0;
+}
+
+.drive-name {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #17221e;
+  font: inherit;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+}
+
+.drive-name span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ghost-action.is-compact {
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.storage-summary-card {
+  display: grid;
+  gap: 12px;
+  padding: 28px;
+  max-width: 620px;
+}
+
+.library-editor {
+  grid-column: 2;
+}
+
+.library-editor .panel-heading-row input {
+  min-width: min(480px, 100%);
+  margin-top: 8px;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.library-editor textarea {
+  min-height: 300px;
+  margin-top: 16px;
+  line-height: 1.8;
+}
+
+.empty-state {
+  padding: 36px;
+  color: #64726d;
+  text-align: center;
+}
+
+@media (max-width: 980px) {
+  .drive-page {
+    grid-template-columns: 1fr;
+  }
+
+  .drive-sidebar,
+  .library-editor {
+    grid-column: 1;
+  }
+
+  .drive-list-head,
+  .drive-row {
+    grid-template-columns: minmax(180px, 1fr) 90px 90px;
+  }
+
+  .drive-list-head span:nth-child(4),
+  .drive-row > span:nth-child(4),
+  .drive-list-head span:nth-child(5),
+  .drive-row .drive-row-actions {
+    display: none;
+  }
+
+  .calendar-grid {
+    min-width: 840px;
+  }
+
+  .calendar-shell {
+    overflow-x: auto;
+  }
+}
 .brand-mark img {
   width: 100%;
   height: 100%;

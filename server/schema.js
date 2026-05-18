@@ -149,6 +149,36 @@ export async function ensureSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS learning_calendar_events (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      event_date DATE NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      file_ids UUID[] NOT NULL DEFAULT '{}',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS library_items (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      parent_id UUID REFERENCES library_items(id) ON DELETE SET NULL,
+      item_type TEXT NOT NULL CHECK (item_type IN ('folder', 'file', 'document')),
+      name TEXT NOT NULL,
+      file_id UUID REFERENCES uploaded_files(id) ON DELETE SET NULL,
+      content TEXT NOT NULL DEFAULT '',
+      mime_type TEXT,
+      size_bytes BIGINT NOT NULL DEFAULT 0,
+      is_starred BOOLEAN NOT NULL DEFAULT false,
+      is_trashed BOOLEAN NOT NULL DEFAULT false,
+      last_opened_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS paper_uploads (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
@@ -212,6 +242,9 @@ export async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_memberships_user_id ON student_memberships(user_id);
     CREATE INDEX IF NOT EXISTS idx_archive_student_type ON student_archive_events(student_id, event_type);
     CREATE INDEX IF NOT EXISTS idx_uploaded_files_user_id ON uploaded_files(user_id);
+    CREATE INDEX IF NOT EXISTS idx_calendar_events_user_date ON learning_calendar_events(user_id, event_date);
+    CREATE INDEX IF NOT EXISTS idx_library_items_user_parent ON library_items(user_id, parent_id);
+    CREATE INDEX IF NOT EXISTS idx_library_items_user_view ON library_items(user_id, is_trashed, is_starred, updated_at);
   `);
   await query(`
     ALTER TABLE users DROP CONSTRAINT IF EXISTS users_channel_check;

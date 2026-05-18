@@ -218,6 +218,49 @@ async function saveUploadedFiles(client, user, student, purpose, files) {
   return saved;
 }
 
+function toFileSummary(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    originalName: row.original_name,
+    mimeType: row.mime_type,
+    sizeBytes: Number(row.size_bytes || 0),
+    createdAt: row.created_at,
+    downloadUrl: `/api/files/${row.id}/download`,
+  };
+}
+
+function toCalendarEvent(row) {
+  return {
+    id: row.id,
+    eventDate: row.event_date,
+    title: row.title,
+    content: row.content || "",
+    files: Array.isArray(row.files) ? row.files.filter(Boolean) : [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toLibraryItem(row) {
+  return {
+    id: row.id,
+    parentId: row.parent_id,
+    type: row.item_type,
+    name: row.name,
+    fileId: row.file_id,
+    content: row.content || "",
+    mimeType: row.mime_type,
+    sizeBytes: Number(row.size_bytes || 0),
+    isStarred: Boolean(row.is_starred),
+    isTrashed: Boolean(row.is_trashed),
+    downloadUrl: row.file_id ? `/api/files/${row.file_id}/download` : "",
+    lastOpenedAt: row.last_opened_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function makeImageInputs(files) {
   return files
     .filter((file) => (file.mimetype || "").startsWith("image/"))
@@ -566,6 +609,274 @@ app.get("/api/archive", requireAuth, async (req, res) => {
     await query("SELECT * FROM student_archive_events WHERE student_id = $1 ORDER BY created_at DESC LIMIT 100", [student.id])
   ).rows;
   res.json({ events });
+});
+
+app.get("/api/files/:id/download", requireAuth, async (req, res, next) => {
+  try {
+    const file = (await query("SELECT * FROM uploaded_files WHERE id = $1 AND user_id = $2", [req.params.id, req.user.id])).rows[0];
+    if (!file) return res.status(404).json({ error: "FILE_NOT_FOUND" });
+    if (!fs.existsSync(file.path)) return res.status(404).json({ error: "FILE_MISSING" });
+    res.download(file.path, file.original_name);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/calendar/events", requireAuth, async (req, res, next) => {
+  try {
+    const student = await getPrimaryStudent(req.user);
+    const rows = (
+      await query(
+        `SELECT e.*,
+          COALESCE(
+            json_agg(
+              json_build_object(
+                'id', f.id,
+                'originalName', f.original_name,
+                'mimeType', f.mime_type,
+                'sizeBytes', f.size_bytes,
+                'createdAt', f.created_at,
+                'downloadUrl', CONCAT('/api/files/', f.id, '/download')
+              )
+            ) FILTER (WHERE f.id IS NOT NULL),
+            '[]'::json
+          ) AS files
+         FROM learning_calendar_events e
+         LEFT JOIN uploaded_files f ON f.id = ANY(e.file_ids)
+         WHERE e.student_id = $1 AND e.user_id = $2
+         GROUP BY e.id
+         ORDER BY e.event_date ASC, e.created_at ASC`,
+        [student.id, req.user.id]
+      )
+    ).rows;
+    res.json({ events: rows.map(toCalendarEvent) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/calendar/events", requireAuth, upload.array("files", 8), async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    const student = await getPrimaryStudent(req.user);
+    const { eventDate = "", title = "", content = "" } = req.body || {};
+    if (!eventDate || !title.trim()) return res.status(400).json({ error: "EVENT_REQUIRED" });
+    const saved = await withTransaction(async (client) => {
+      const fileRows = await saveUploadedFiles(client, req.user, student, "calendar", req.files || []);
+      const event = (
+        await client.query(
+          `INSERT INTO learning_calendar_events (student_id, user_id, event_date, title, content, file_ids)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING *`,
+          [student.id, req.user.id, eventDate, title.trim(), content || "", fileRows.map((file) => file.id)]
+        )
+      ).rows[0];
+      await client.query(
+        `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
+         VALUES ($1, $2, 'calendar_event', $3, $4)`,
+        [student.id, req.user.id, title.trim(), JSON.stringify({ eventDate, content, fileIds: fileRows.map((file) => file.id) })]
+      );
+      return { event, fileRows };
+    });
+    res.json({ event: toCalendarEvent({ ...saved.event, files: saved.fileRows.map(toFileSummary) }) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/calendar/events/:id", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    const { eventDate, title, content } = req.body || {};
+    const event = (
+      await query(
+        `UPDATE learning_calendar_events
+         SET event_date = COALESCE($3, event_date),
+             title = COALESCE(NULLIF($4, ''), title),
+             content = COALESCE($5, content),
+             updated_at = now()
+         WHERE id = $1 AND user_id = $2
+         RETURNING *`,
+        [req.params.id, req.user.id, eventDate || null, title || "", content ?? null]
+      )
+    ).rows[0];
+    if (!event) return res.status(404).json({ error: "EVENT_NOT_FOUND" });
+    res.json({ event: toCalendarEvent({ ...event, files: [] }) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/calendar/events/:id", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    await query("DELETE FROM learning_calendar_events WHERE id = $1 AND user_id = $2", [req.params.id, req.user.id]);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/library/items", requireAuth, async (req, res, next) => {
+  try {
+    const student = await getPrimaryStudent(req.user);
+    const view = String(req.query.view || "drive");
+    const folderId = req.query.folderId || null;
+    const search = String(req.query.search || "").trim();
+    const clauses = ["student_id = $1", "user_id = $2"];
+    const values = [student.id, req.user.id];
+    let orderBy = "item_type ASC, name ASC";
+    if (view === "trash") {
+      clauses.push("is_trashed = true");
+      orderBy = "updated_at DESC";
+    } else {
+      clauses.push("is_trashed = false");
+      if (view === "starred") {
+        clauses.push("is_starred = true");
+        orderBy = "updated_at DESC";
+      } else if (view === "recent") {
+        orderBy = "last_opened_at DESC NULLS LAST, updated_at DESC";
+      } else if (view === "home") {
+        orderBy = "updated_at DESC";
+      } else if (folderId) {
+        clauses.push(`parent_id = $${values.length + 1}`);
+        values.push(folderId);
+      } else {
+        clauses.push("parent_id IS NULL");
+      }
+    }
+    if (search) {
+      clauses.push(`name ILIKE $${values.length + 1}`);
+      values.push(`%${search}%`);
+    }
+    const rows = (
+      await query(
+        `SELECT * FROM library_items
+         WHERE ${clauses.join(" AND ")}
+         ORDER BY ${orderBy}
+         LIMIT 200`,
+        values
+      )
+    ).rows;
+    res.json({ items: rows.map(toLibraryItem), account: await buildAccountSnapshot(req.user.id) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/library/folders", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    const student = await getPrimaryStudent(req.user);
+    const { name = "新建文件夹", parentId = null } = req.body || {};
+    const row = (
+      await query(
+        `INSERT INTO library_items (student_id, user_id, parent_id, item_type, name)
+         VALUES ($1, $2, $3, 'folder', $4)
+         RETURNING *`,
+        [student.id, req.user.id, parentId || null, name.trim() || "新建文件夹"]
+      )
+    ).rows[0];
+    res.json({ item: toLibraryItem(row) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/library/documents", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    const student = await getPrimaryStudent(req.user);
+    const { name = "新建文档", parentId = null, content = "" } = req.body || {};
+    const row = (
+      await query(
+        `INSERT INTO library_items (student_id, user_id, parent_id, item_type, name, content, mime_type)
+         VALUES ($1, $2, $3, 'document', $4, $5, 'text/plain')
+         RETURNING *`,
+        [student.id, req.user.id, parentId || null, name.trim() || "新建文档", content || ""]
+      )
+    ).rows[0];
+    res.json({ item: toLibraryItem(row) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/library/files", requireAuth, upload.array("files", 8), async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    const files = req.files || [];
+    if (!files.length) return res.status(400).json({ error: "FILES_REQUIRED" });
+    const student = await getPrimaryStudent(req.user);
+    const { parentId = null } = req.body || {};
+    const items = await withTransaction(async (client) => {
+      const fileRows = await saveUploadedFiles(client, req.user, student, "library", files);
+      const rows = [];
+      for (let index = 0; index < fileRows.length; index += 1) {
+        const fileRow = fileRows[index];
+        const sourceFile = files[index];
+        const extractedText = await extractDocumentText(sourceFile);
+        const row = (
+          await client.query(
+            `INSERT INTO library_items (student_id, user_id, parent_id, item_type, name, file_id, content, mime_type, size_bytes)
+             VALUES ($1, $2, $3, 'file', $4, $5, $6, $7, $8)
+             RETURNING *`,
+            [
+              student.id,
+              req.user.id,
+              parentId || null,
+              fileRow.original_name,
+              fileRow.id,
+              extractedText,
+              fileRow.mime_type,
+              Number(fileRow.size_bytes || 0),
+            ]
+          )
+        ).rows[0];
+        rows.push(row);
+      }
+      return rows;
+    });
+    res.json({ items: items.map(toLibraryItem), account: await buildAccountSnapshot(req.user.id) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/library/items/:id", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    const existing = (await query("SELECT * FROM library_items WHERE id = $1 AND user_id = $2", [req.params.id, req.user.id])).rows[0];
+    if (!existing) return res.status(404).json({ error: "ITEM_NOT_FOUND" });
+    const patch = req.body || {};
+    const row = (
+      await query(
+        `UPDATE library_items
+         SET name = $3,
+             content = $4,
+             is_starred = $5,
+             is_trashed = $6,
+             parent_id = $7,
+             last_opened_at = CASE WHEN $8 THEN now() ELSE last_opened_at END,
+             updated_at = now()
+         WHERE id = $1 AND user_id = $2
+         RETURNING *`,
+        [
+          req.params.id,
+          req.user.id,
+          patch.name ?? existing.name,
+          patch.content ?? existing.content,
+          patch.isStarred ?? existing.is_starred,
+          patch.isTrashed ?? existing.is_trashed,
+          patch.parentId === undefined ? existing.parent_id : patch.parentId || null,
+          Boolean(patch.opened),
+        ]
+      )
+    ).rows[0];
+    res.json({ item: toLibraryItem(row) });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post("/api/ai/transcribe", requireAuth, upload.single("audio"), async (req, res, next) => {
