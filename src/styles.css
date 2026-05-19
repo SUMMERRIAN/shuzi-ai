@@ -577,15 +577,17 @@ button:disabled {
 .drive-list {
   border: 1px solid #dce5e0;
   border-radius: 8px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .drive-list-head,
 .drive-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1.15fr) 88px 96px 112px minmax(240px, 0.9fr);
-  gap: 10px;
+  grid-template-columns: minmax(360px, 1fr) 84px 96px 120px 216px;
+  gap: 14px;
   align-items: center;
+  min-width: 980px;
   padding: 12px 16px;
 }
 
@@ -598,7 +600,8 @@ button:disabled {
 
 .drive-list-scroll {
   max-height: 560px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .drive-row {
@@ -630,6 +633,23 @@ button:disabled {
   white-space: nowrap;
 }
 
+.drive-list-head span:nth-child(2),
+.drive-list-head span:nth-child(3),
+.drive-list-head span:nth-child(4),
+.drive-row > span:nth-child(2),
+.drive-row > span:nth-child(3),
+.drive-row > span:nth-child(4) {
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drive-list-head span:nth-child(5) {
+  text-align: right;
+  padding-right: 10px;
+}
+
 .drive-title-line {
   display: flex;
   align-items: flex-end;
@@ -645,6 +665,11 @@ button:disabled {
   justify-content: flex-end;
   flex-wrap: nowrap;
   gap: 8px;
+  min-width: 0;
+}
+
+.drive-row-actions > * {
+  flex: 0 0 auto;
 }
 
 .drive-list-footer,
