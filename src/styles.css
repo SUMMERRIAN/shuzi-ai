@@ -3873,6 +3873,11 @@ audio {
   background: #ffffff;
 }
 
+.focus-training-table {
+  table-layout: fixed;
+  min-width: 1080px;
+}
+
 .focus-training-table th,
 .focus-training-table td,
 .reflection-table th,
@@ -3892,11 +3897,12 @@ audio {
 
 .focus-training-table td:first-child {
   text-align: center;
+  vertical-align: middle;
 }
 
 .focus-training-table select,
 .focus-training-table textarea,
-.focus-training-table input,
+.focus-training-table input:not([type="checkbox"]),
 .reflection-table select,
 .reflection-table textarea,
 .discussion-card textarea,
@@ -3910,7 +3916,7 @@ audio {
 }
 
 .focus-training-table select,
-.focus-training-table input,
+.focus-training-table input:not([type="checkbox"]),
 .reflection-table select,
 .discussion-card select,
 .discussion-card input {
@@ -3924,6 +3930,42 @@ audio {
   min-height: 62px;
   padding: 8px;
   resize: vertical;
+}
+
+.focus-training-table th:first-child,
+.focus-training-table td:first-child {
+  width: 58px;
+}
+
+.focus-training-table th:nth-child(2),
+.focus-training-table td:nth-child(2) {
+  width: 26%;
+}
+
+.focus-training-table th:nth-child(3),
+.focus-training-table td:nth-child(3) {
+  width: 30%;
+}
+
+.focus-training-table th:nth-child(n + 4),
+.focus-training-table td:nth-child(n + 4) {
+  width: 92px;
+}
+
+.focus-training-table input[type="checkbox"] {
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: #008f5a;
+  cursor: pointer;
+}
+
+.focus-training-table .focus-custom-title {
+  margin-top: 8px;
+  min-height: 34px;
+  font-size: 14px;
 }
 
 .reflection-stack {
