@@ -5718,11 +5718,14 @@ function StudyPlanPage({
                             onEndChange={(value) => updatePlanCell(row.id, day, "end", value)}
                           />
                           <textarea
+                            className="no-print"
                             placeholder="任务"
                             value={row.cells[day].task}
                             onChange={(event) => updatePlanCell(row.id, day, "task", event.target.value)}
                           />
-                          <input placeholder="备注" value={row.cells[day].note} onChange={(event) => updatePlanCell(row.id, day, "note", event.target.value)} />
+                          <span className="print-value plan-print-task">{row.cells[day].task || "任务"}</span>
+                          <input className="no-print" placeholder="备注" value={row.cells[day].note} onChange={(event) => updatePlanCell(row.id, day, "note", event.target.value)} />
+                          <span className="print-value plan-print-note">{row.cells[day].note || "备注"}</span>
                         </td>
                       ))}
                     </tr>
@@ -5779,6 +5782,9 @@ function isCustomFocusItem(item) {
 }
 
 function FocusTrainingTable({ title, kind, rows, options, updateFocusRow, updateFocusScore }) {
+  const printableIndexById = new Map();
+  rows.filter((row) => row.enabled).forEach((row, index) => printableIndexById.set(row.id, index + 1));
+
   return (
     <div className="focus-training-block">
       <h3>{title}</h3>
@@ -5786,7 +5792,10 @@ function FocusTrainingTable({ title, kind, rows, options, updateFocusRow, update
         <table className="focus-training-table">
           <thead>
             <tr>
-              <th>启用</th>
+              <th>
+                <span className="no-print">启用</span>
+                <span className="print-only">序号</span>
+              </th>
               <th>训练项目</th>
               <th>自定义说明</th>
               {["星期一", "星期二", "星期三", "星期四", "星期五"].map((day) => (
@@ -5796,12 +5805,13 @@ function FocusTrainingTable({ title, kind, rows, options, updateFocusRow, update
           </thead>
           <tbody>
             {rows.map((row, index) => (
-              <tr key={row.id}>
+              <tr key={row.id} className={!row.enabled ? "focus-row-disabled" : ""}>
                 <td>
-                  <input type="checkbox" checked={row.enabled} onChange={(event) => updateFocusRow(kind, row.id, "enabled", event.target.checked)} />
+                  <input className="no-print" type="checkbox" checked={row.enabled} onChange={(event) => updateFocusRow(kind, row.id, "enabled", event.target.checked)} />
+                  <span className="print-row-number print-only">{printableIndexById.get(row.id) || ""}</span>
                 </td>
                 <td>
-                  <select value={row.item} onChange={(event) => updateFocusRow(kind, row.id, "item", event.target.value)}>
+                  <select className="no-print" value={row.item} onChange={(event) => updateFocusRow(kind, row.id, "item", event.target.value)}>
                     {options.map((option) => (
                       <option key={option} value={option}>
                         {option}
@@ -5810,29 +5820,33 @@ function FocusTrainingTable({ title, kind, rows, options, updateFocusRow, update
                   </select>
                   {isCustomFocusItem(row.item) && (
                     <input
-                      className="focus-custom-title"
+                      className="focus-custom-title no-print"
                       value={row.customTitle || ""}
                       onChange={(event) => updateFocusRow(kind, row.id, "customTitle", event.target.value)}
                       placeholder="写下自定义训练标题"
                     />
                   )}
+                  <span className="print-value focus-print-item">{isCustomFocusItem(row.item) && row.customTitle ? row.customTitle : row.item}</span>
                 </td>
                 <td>
                   <textarea
+                    className="no-print"
                     placeholder={index === 0 ? "写清楚这个方法或习惯具体怎么做。" : "可选：继续添加第2/3项。"}
                     value={row.custom}
                     onChange={(event) => updateFocusRow(kind, row.id, "custom", event.target.value)}
                   />
+                  <span className="print-value focus-print-note">{row.custom || " "}</span>
                 </td>
                 {["星期一", "星期二", "星期三", "星期四", "星期五"].map((day) => (
                   <td key={day}>
-                    <select value={row.scores[day]} onChange={(event) => updateFocusScore(kind, row.id, day, event.target.value)} disabled={!row.enabled}>
+                    <select className="no-print" value={row.scores[day]} onChange={(event) => updateFocusScore(kind, row.id, day, event.target.value)} disabled={!row.enabled}>
                       {scoreOptions.map((score) => (
                         <option key={score || "empty"} value={score}>
                           {score || "-"}
                         </option>
                       ))}
                     </select>
+                    <span className="print-value focus-print-score">{row.scores[day] || "-"}</span>
                   </td>
                 ))}
               </tr>
@@ -6488,8 +6502,9 @@ function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile
 function PlanCellTimeRange({ start, end, onStartChange, onEndChange }) {
   return (
     <div className="plan-cell-time-range">
-      <span>时间</span>
-      <div>
+      <span className="no-print">时间</span>
+      <strong className="print-value plan-print-time">{start} - {end}</strong>
+      <div className="no-print">
         <CompactTimePicker value={start} onChange={onStartChange} />
         <em>至</em>
         <CompactTimePicker value={end} onChange={onEndChange} />
