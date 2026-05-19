@@ -1586,7 +1586,7 @@ function App() {
     storageTotalMb: 50,
   });
   const [accountNotice, setAccountNotice] = useState("");
-  const [aiNotice, setAiNotice] = useState("");
+  const [aiNotice, setAiNotice] = useState({ page: "", message: "" });
   const [authModal, setAuthModal] = useState({
     open: false,
     actionName: "",
@@ -1706,13 +1706,7 @@ function App() {
   const [freeAskFiles, setFreeAskFiles] = useState([]);
   const [freeAskStatus, setFreeAskStatus] = useState("idle");
   const [freeAskModelChoice, setFreeAskModelChoice] = useState("openai-fast");
-  const [freeAskMessages, setFreeAskMessages] = useState([
-    {
-      id: "welcome",
-      role: "assistant",
-      content: "你好，我是树子AI自由问。你可以问学习问题、知识问题，也可以问学习之外自己想到的任何问题；还可以上传图片或文件，让我帮你阅读、解释、整理成知识图。",
-    },
-  ]);
+  const [freeAskMessages, setFreeAskMessages] = useState([]);
   const [calendarEvents, setCalendarEvents] = useState([]);
   const [calendarCursor, setCalendarCursor] = useState(() => new Date());
   const [calendarEditor, setCalendarEditor] = useState(null);
@@ -1741,12 +1735,14 @@ function App() {
   const completion = useMemo(() => calculateCompletion(answers, questionnaireSteps), [answers, questionnaireSteps]);
   const reportReady = submitted || aiInsight;
 
+  const activeAiNotice = aiNotice.page === activePage ? aiNotice.message : "";
+
   function showAiError(error, fallback = "AI服务暂时不可用，请稍后再试。") {
-    setAiNotice(error?.message || fallback);
+    setAiNotice({ page: activePage, message: error?.message || fallback });
   }
 
   function clearAiNotice() {
-    setAiNotice("");
+    setAiNotice({ page: "", message: "" });
   }
 
   useEffect(() => {
@@ -2870,7 +2866,7 @@ function App() {
     if (!requireMemberAction(taskLabel, runMistakeWorkspaceAi, "错题专项会调用AI分析材料并写入学生个人错题档案，需要登录并开通会员。")) return;
     if (mistakeAiStatus === "loading") return;
     if (!mistakePrompt.trim() && !(mistakeDraft.files || []).length) {
-      setAiNotice("请先上传材料，或者在输入框里写清楚你想让AI处理什么。");
+      setAiNotice({ page: activePage, message: "请先上传材料，或者在输入框里写清楚你想让AI处理什么。" });
       return;
     }
     setMistakeAiStatus("loading");
@@ -2916,7 +2912,7 @@ function App() {
   function downloadMistakeWordDoc() {
     if (!requireMemberAction("下载错题分析Word", downloadMistakeWordDoc, "下载AI分析文档需要登录并开通会员。")) return;
     if (!mistakeResult) {
-      setAiNotice("请先完成一次AI处理，再下载Word文档。");
+      setAiNotice({ page: activePage, message: "请先完成一次AI处理，再下载Word文档。" });
       return;
     }
     const title = mistakeResult.title || mistakeQuickTasks[mistakeTaskType]?.label || "错题专项分析";
@@ -2936,7 +2932,7 @@ function App() {
     if (!requireMemberAction("打包下载错题PDF", () => downloadSelectedMistakesPdf(visibleItems), "错题档案打包下载需要登录并开通会员。")) return;
     const selectedItems = visibleItems.filter((item) => selectedArchiveMistakeIds.includes(item.id));
     if (!selectedItems.length) {
-      setAiNotice("请先在错题档案里选择至少一道错题。");
+      setAiNotice({ page: activePage, message: "请先在错题档案里选择至少一道错题。" });
       return;
     }
     printPage("打包下载错题PDF", "系统会把你选择的错题整理为打印版；在打印窗口中选择“另存为PDF”。");
@@ -3224,12 +3220,6 @@ function App() {
             <button key={id} className={activePage === id ? "nav-item is-active" : "nav-item"} onClick={() => setActivePage(id)}>
               <Icon size={18} />
               <span>{label}</span>
-              {id === "questionnaire" && submitted && <CheckCircle2 size={16} />}
-              {id === "statement" && records.length > 0 && <CheckCircle2 size={16} />}
-              {id === "profile" && reportReady && <CheckCircle2 size={16} />}
-              {id === "strategy" && <Sparkles size={16} />}
-              {id === "plan" && <Clock3 size={16} />}
-              {id === "mistakes" && <FileText size={16} />}
             </button>
           ))}
         </nav>
@@ -3265,13 +3255,13 @@ function App() {
             )}
           </div>
         </header>
-        {aiNotice && (
+        {activeAiNotice && (
           <div className="ai-service-notice" role="status">
             <div>
               <strong>AI服务提示</strong>
-              <p>{aiNotice}</p>
+              <p>{activeAiNotice}</p>
             </div>
-            <button type="button" onClick={() => setAiNotice("")} aria-label="关闭AI服务提示">
+            <button type="button" onClick={clearAiNotice} aria-label="关闭AI服务提示">
               ×
             </button>
           </div>
@@ -3890,6 +3880,15 @@ function LearningLibraryPage({
   const storageUsed = member.storageUsedBytes || 0;
   const storageTotal = (member.storageTotalMb || 50) * 1024 * 1024;
   const storagePercent = Math.min(100, Math.round((storageUsed / Math.max(storageTotal, 1)) * 100));
+  const [drivePage, setDrivePage] = useState(1);
+  const drivePageSize = 20;
+  const totalDrivePages = Math.max(1, Math.ceil(items.length / drivePageSize));
+  const currentDrivePage = Math.min(drivePage, totalDrivePages);
+  const visibleDriveItems = items.slice((currentDrivePage - 1) * drivePageSize, currentDrivePage * drivePageSize);
+
+  useEffect(() => {
+    setDrivePage(1);
+  }, [view, folderId, search, sort, sortDir]);
 
   async function saveEditor() {
     if (!editor) return;
@@ -3931,11 +3930,6 @@ function LearningLibraryPage({
             />
           </div>
           <div className="drive-actions">
-            {folderId && (
-              <button className="ghost-action" type="button" onClick={() => setFolderId(null)}>
-                返回上一级
-              </button>
-            )}
             <button className="ghost-action" type="button" onClick={createFolder}>
               <FolderPlus size={17} /> 新建文件夹
             </button>
@@ -3951,9 +3945,16 @@ function LearningLibraryPage({
         </div>
 
         <div className="drive-title-row">
-          <div>
-            <span className="eyebrow">学习资料库</span>
-            <h2>{libraryViews.find((item) => item.id === view)?.label || "我的云端硬盘"}</h2>
+          <div className="drive-title-line">
+            <div>
+              <span className="eyebrow">学习资料库</span>
+              <h2>{libraryViews.find((item) => item.id === view)?.label || "我的云端硬盘"}</h2>
+            </div>
+            {folderId && (
+              <button className="ghost-action is-compact" type="button" onClick={() => setFolderId(null)}>
+                返回上一级
+              </button>
+            )}
           </div>
           {status === "loading" && <span className="muted-inline">正在同步...</span>}
         </div>
@@ -3999,7 +4000,7 @@ function LearningLibraryPage({
             </div>
             <div className="drive-list-scroll">
               {items.length === 0 && <div className="empty-state">这里还没有资料，可以先新建文件夹或上传学习材料。</div>}
-              {items.map((item) => {
+              {visibleDriveItems.map((item) => {
                 const Icon = fileIconFor(item);
                 return (
                   <div key={item.id} className="drive-row">
@@ -4043,6 +4044,21 @@ function LearningLibraryPage({
                 );
               })}
             </div>
+            {items.length > drivePageSize && (
+              <div className="drive-list-footer">
+                <span>
+                  第 {currentDrivePage} / {totalDrivePages} 页，共 {items.length} 个项目
+                </span>
+                <div>
+                  <button className="ghost-action is-compact" type="button" onClick={() => setDrivePage((page) => Math.max(1, page - 1))} disabled={currentDrivePage <= 1}>
+                    上一页
+                  </button>
+                  <button className="ghost-action is-compact" type="button" onClick={() => setDrivePage((page) => Math.min(totalDrivePages, page + 1))} disabled={currentDrivePage >= totalDrivePages}>
+                    下一页
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -4111,10 +4127,10 @@ function LearningLibraryPage({
 }
 
 function LearningForumPage({ posts, activePostId, setActivePostId, draft, updateDraft, createPost, addReply, member, requireMemberAction }) {
-  const totalReplies = posts.reduce((sum, post) => sum + post.replies.length, 0);
   const canInteract = member.isLoggedIn && member.isPaid;
   const [activeForumTab, setActiveForumTab] = useState("all");
   const [composeOpen, setComposeOpen] = useState(false);
+  const [forumPage, setForumPage] = useState(1);
   const viewerName = member.identifier || "";
   const forumTabs = [
     { id: "all", label: "全部留言" },
@@ -4128,6 +4144,14 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, update
     if (activeForumTab === "moderator") return post.type === "向版主提问";
     return true;
   });
+  const forumPageSize = 15;
+  const totalForumPages = Math.max(1, Math.ceil(filteredPosts.length / forumPageSize));
+  const currentForumPage = Math.min(forumPage, totalForumPages);
+  const visibleForumPosts = filteredPosts.slice((currentForumPage - 1) * forumPageSize, currentForumPage * forumPageSize);
+
+  useEffect(() => {
+    setForumPage(1);
+  }, [activeForumTab, viewerName, posts.length]);
 
   function openCompose(type = draft.type) {
     if (!canInteract) {
@@ -4147,7 +4171,7 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, update
               <span className="eyebrow">留言版块</span>
               <h2>学习问题与心得交流</h2>
             </div>
-            <button type="button" className="primary-action" onClick={() => openCompose(activeForumTab === "moderator" ? "向版主提问" : "学习问题")}>
+            <button type="button" className="primary-action forum-new-post-button" onClick={() => openCompose(activeForumTab === "moderator" ? "向版主提问" : "学习问题")}>
               <Plus size={17} />
               发帖
             </button>
@@ -4213,7 +4237,7 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, update
               </article>
             )}
 
-            {filteredPosts.map((post) => (
+            {visibleForumPosts.map((post) => (
               <article key={post.id} className={activePostId === post.id ? "panel forum-thread-card is-active" : "panel forum-thread-card"}>
                 <button type="button" className="forum-thread-main" onClick={() => setActivePostId(post.id)}>
                   <div className="forum-thread-head">
@@ -4253,30 +4277,23 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, update
                 )}
               </article>
             ))}
+            {filteredPosts.length > forumPageSize && (
+              <div className="forum-pagination">
+                <span>
+                  第 {currentForumPage} / {totalForumPages} 页，共 {filteredPosts.length} 个帖子
+                </span>
+                <div>
+                  <button className="ghost-action is-compact" type="button" onClick={() => setForumPage((page) => Math.max(1, page - 1))} disabled={currentForumPage <= 1}>
+                    上一页
+                  </button>
+                  <button className="ghost-action is-compact" type="button" onClick={() => setForumPage((page) => Math.min(totalForumPages, page + 1))} disabled={currentForumPage >= totalForumPages}>
+                    下一页
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </main>
-
-        <aside className="forum-right-rail">
-          <article className="panel forum-rail-card">
-            <span className="eyebrow">论坛概况</span>
-            <div className="forum-rail-stats">
-              <strong>{posts.length}</strong>
-              <span>主题帖</span>
-              <strong>{totalReplies}</strong>
-              <span>回复</span>
-            </div>
-          </article>
-
-          <article className="panel forum-rail-card">
-            <span className="eyebrow">会员发言</span>
-            <h3>{canInteract ? "你可以发帖和留言" : "游客只能浏览"}</h3>
-            <p>学习社区用于记录学习问题、学习心得和向版主提出的疑问。会员可以发帖和留言，其他同学可以浏览和参与讨论。</p>
-            <button type="button" className="ghost-action" onClick={() => openCompose("向版主提问")}>
-              <LockKeyhole size={17} />
-              向版主提问
-            </button>
-          </article>
-        </aside>
       </section>
     </section>
   );

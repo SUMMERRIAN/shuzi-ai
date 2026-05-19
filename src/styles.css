@@ -36,7 +36,7 @@ button:disabled {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 286px minmax(0, 1fr);
+  grid-template-columns: 268px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -583,7 +583,7 @@ button:disabled {
 .drive-list-head,
 .drive-row {
   display: grid;
-  grid-template-columns: minmax(260px, 1.5fr) minmax(130px, 0.8fr) 110px 120px 170px;
+  grid-template-columns: minmax(220px, 1.15fr) 88px 96px 112px minmax(240px, 0.9fr);
   gap: 10px;
   align-items: center;
   padding: 12px 16px;
@@ -597,7 +597,7 @@ button:disabled {
 }
 
 .drive-list-scroll {
-  max-height: 590px;
+  max-height: 560px;
   overflow: auto;
 }
 
@@ -628,6 +628,44 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.drive-title-line {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  min-width: 0;
+}
+
+.drive-title-line h2 {
+  margin-bottom: 0;
+}
+
+.drive-row-actions {
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+.drive-list-footer,
+.forum-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid #dce5e0;
+  background: #f8faf9;
+  color: #52615b;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.drive-list-footer div,
+.forum-pagination div {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .ghost-action.is-compact {
@@ -854,7 +892,7 @@ button:disabled {
 
 .nav-item {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) 18px;
+  grid-template-columns: 22px minmax(0, 1fr);
   align-items: center;
   width: 100%;
   min-height: 48px;
@@ -4878,6 +4916,9 @@ audio {
 .reply-list {
   display: grid;
   gap: 10px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .reply-card {
@@ -4914,7 +4955,7 @@ audio {
 
 .forum-feed-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   align-items: start;
 }
@@ -4934,6 +4975,14 @@ audio {
 
 .forum-board-toolbar h2 {
   margin-bottom: 0;
+}
+
+.forum-new-post-button {
+  min-width: 118px;
+  min-height: 46px;
+  padding: 0 22px;
+  font-size: 16px;
+  box-shadow: 0 10px 20px rgba(0, 137, 85, 0.18);
 }
 
 .forum-board-tabs {
@@ -4967,6 +5016,10 @@ audio {
 .forum-thread-list {
   display: grid;
   gap: 14px;
+  max-height: calc(100vh - 310px);
+  min-height: 360px;
+  overflow-y: auto;
+  padding-right: 6px;
 }
 
 .forum-thread-card {
@@ -5025,45 +5078,6 @@ audio {
   max-width: 680px;
   margin-bottom: 0;
   color: #48534d;
-}
-
-.forum-right-rail {
-  position: sticky;
-  top: 20px;
-  display: grid;
-  gap: 14px;
-}
-
-.forum-rail-card {
-  display: grid;
-  gap: 10px;
-}
-
-.forum-rail-card h3 {
-  margin-bottom: 0;
-  font-size: 20px;
-}
-
-.forum-rail-card p {
-  margin-bottom: 0;
-  color: #48534d;
-}
-
-.forum-rail-stats {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 5px 10px;
-  align-items: baseline;
-}
-
-.forum-rail-stats strong {
-  color: #008653;
-  font-size: 28px;
-}
-
-.forum-rail-stats span {
-  color: #68736b;
-  font-weight: 900;
 }
 
 .statement-focus-layout {
@@ -5258,7 +5272,7 @@ audio {
 
 .free-ask-thread {
   display: grid;
-  max-height: 420px;
+  max-height: min(52vh, 560px);
   gap: 14px;
   overflow-y: auto;
   padding: 6px 4px 18px;
@@ -5285,6 +5299,9 @@ audio {
 .free-message p {
   margin-bottom: 0;
   color: #344039;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .free-message-attachments {
@@ -5319,6 +5336,10 @@ audio {
   border-radius: 8px;
   border: 1px solid #dfe5da;
   background: #071426;
+}
+
+.free-note-preview .ghost-action {
+  width: fit-content;
 }
 
 .free-attachment-tray {
@@ -5526,9 +5547,6 @@ audio {
     position: static;
   }
 
-  .forum-right-rail {
-    position: static;
-  }
 }
 
 @media (max-width: 760px) {
