@@ -64,18 +64,56 @@ const subPages = [
   { id: "freeAsk", label: "AI自由问", icon: Sparkles },
 ];
 
-const memberPlans = [
+const defaultMemberPlans = [
   { id: "monthly", name: "月付会员", price: "¥19.9/月", priceCny: 19.9, durationDays: 31, description: `适合先体验完整学习系统，包含AI分析、错题训练、资料下载和${storagePlans.vip.storageGb}GB基础存储。` },
   { id: "season", name: "季付会员", price: "¥59/季", priceCny: 59, durationDays: 93, description: "适合跟进一个阶段的学习调整，持续保存个人档案和学习记录。" },
   { id: "halfYear", name: "半年会员", price: "¥109/半年", priceCny: 109, durationDays: 186, description: "适合稳定训练学习方法、错题复测和阶段性学习策略优化。" },
   { id: "yearly", name: "年度会员", price: "¥199/年", priceCny: 199, durationDays: 366, description: "适合长期建立学生学习数据库，持续跟踪学情变化和训练结果。" },
 ];
 
-const tokenPackages = [
+const defaultTokenPackages = [
   { id: "token-100", label: "¥100", priceCny: 100, tokens: 10000 },
   { id: "token-300", label: "¥300", priceCny: 300, tokens: 30000 },
   { id: "token-500", label: "¥500", priceCny: 500, tokens: 50000 },
 ];
+
+function formatPriceLabel(plan) {
+  const suffixMap = { monthly: "/月", season: "/季", halfYear: "/半年", yearly: "/年" };
+  return `¥${Number(plan.priceCny || 0)}${suffixMap[plan.id] || ""}`;
+}
+
+function normalizeMemberPlans(plans = []) {
+  const descriptions = Object.fromEntries(defaultMemberPlans.map((plan) => [plan.id, plan.description]));
+  return plans
+    .filter((plan) => plan.id !== "free")
+    .map((plan) => ({
+      ...plan,
+      price: plan.price || formatPriceLabel(plan),
+      description: plan.description || descriptions[plan.id] || "开通后可以使用AI分析、个人档案、错题训练、资料下载等会员能力。",
+    }));
+}
+
+function normalizeTokenPackages(packages = []) {
+  return packages.map((pack) => ({
+    ...pack,
+    label: pack.label || `¥${Number(pack.priceCny || 0)}`,
+    tokens: Number(pack.tokens ?? pack.learningTokens ?? 0),
+  }));
+}
+
+function orderStatusLabel(status) {
+  if (status === "paid") return "已确认";
+  if (status === "cancelled") return "已取消";
+  if (status === "refunded") return "已退款";
+  return "待确认";
+}
+
+function orderTypeLabel(type) {
+  if (type === "membership") return "会员开通";
+  if (type === "lt_recharge") return "Token充值";
+  if (type === "storage_expansion") return "存储扩容";
+  return "付款申请";
+}
 
 const freeAskModelOptions = [
   { value: "openai-fast", provider: "openai", mode: "fast", label: "OpenAI · 快速" },
@@ -1585,6 +1623,10 @@ function App() {
     ltBalance: 0,
     storageTotalMb: 50,
   });
+  const [billingConfig, setBillingConfig] = useState({
+    memberPlans: defaultMemberPlans,
+    tokenPackages: defaultTokenPackages,
+  });
   const [accountNotice, setAccountNotice] = useState("");
   const [aiNotice, setAiNotice] = useState({ page: "", message: "" });
   const [authModal, setAuthModal] = useState({
@@ -1614,6 +1656,8 @@ function App() {
     isLoggedIn: false,
     message: "",
     users: [],
+    orders: [],
+    orderNote: "",
     identifier: "",
     planId: "monthly",
     membershipStartDate: new Date().toISOString().slice(0, 10),
@@ -1621,7 +1665,7 @@ function App() {
     tokenAmount: "10000",
   });
   const [checkout, setCheckout] = useState({
-    planId: "monthly",
+    planId: "",
     tokenPackageId: "",
     customTokenAmount: "",
     showQr: false,
@@ -1736,6 +1780,8 @@ function App() {
   const reportReady = submitted || aiInsight;
 
   const activeAiNotice = aiNotice.page === activePage ? aiNotice.message : "";
+  const memberPlans = billingConfig.memberPlans.length ? billingConfig.memberPlans : defaultMemberPlans;
+  const tokenPackages = billingConfig.tokenPackages.length ? billingConfig.tokenPackages : defaultTokenPackages;
 
   function showAiError(error, fallback = "AI服务暂时不可用，请稍后再试。") {
     setAiNotice({ page: activePage, message: error?.message || fallback });
@@ -1750,6 +1796,21 @@ function App() {
       setCurrentStep(questionnaireSteps.length - 1);
     }
   }, [currentStep, questionnaireSteps.length]);
+
+  useEffect(() => {
+    apiRequest("/membership/plans")
+      .then((data) => {
+        const nextMemberPlans = normalizeMemberPlans(data.membershipPlans || []);
+        const nextTokenPackages = normalizeTokenPackages(data.ltPackages || []);
+        setBillingConfig({
+          memberPlans: nextMemberPlans.length ? nextMemberPlans : defaultMemberPlans,
+          tokenPackages: nextTokenPackages.length ? nextTokenPackages : defaultTokenPackages,
+        });
+      })
+      .catch(() => {
+        setBillingConfig({ memberPlans: defaultMemberPlans, tokenPackages: defaultTokenPackages });
+      });
+  }, []);
 
   useEffect(() => {
     apiRequest("/me")
@@ -2175,6 +2236,10 @@ function App() {
       setAuthModal((prev) => ({ ...prev, message: "请先注册或登录，再提交Token充值申请。" }));
       return;
     }
+    if (packageId === "custom" && Number(customAmount || 0) < 50) {
+      setAuthModal((prev) => ({ ...prev, message: "自定义充值金额最低为50元。" }));
+      return;
+    }
     try {
       const data = await apiRequest("/lt/orders", {
         method: "POST",
@@ -2189,7 +2254,7 @@ function App() {
 
   function openPaymentModal() {
     setCheckout({
-      planId: member.isPaid ? "" : "monthly",
+      planId: member.isPaid ? "" : (memberPlans[0]?.id || "monthly"),
       tokenPackageId: "",
       customTokenAmount: "",
       showQr: false,
@@ -2207,9 +2272,13 @@ function App() {
       setCheckout((prev) => ({ ...prev, message: "请先注册或登录，再提交付款确认。" }));
       return;
     }
-    const selectedPlan = memberPlans.find((item) => item.id === checkout.planId);
+    const selectedPlan = member.isPaid ? null : memberPlans.find((item) => item.id === checkout.planId);
     const selectedToken = tokenPackages.find((item) => item.id === checkout.tokenPackageId);
     const customAmount = Number(checkout.customTokenAmount || 0);
+    if (customAmount > 0 && customAmount < 50) {
+      setCheckout((prev) => ({ ...prev, message: "自定义充值金额最低为50元。" }));
+      return;
+    }
     if (!selectedPlan && !selectedToken && customAmount <= 0) {
       setCheckout((prev) => ({ ...prev, message: "请先选择会员方案或Token充值额度。" }));
       return;
@@ -2230,7 +2299,7 @@ function App() {
           }),
         });
       }
-      const message = "已记录付款提醒。请在夏雨老师群里告知夏雨老师充值完成；管理员确认后，会员和Token才会生效。";
+      const message = "已提交付款确认申请。请扫描管理员微信二维码，告知管理员支付情况；管理员确认后会员及Token额度会更新。";
       setCheckout((prev) => ({ ...prev, message }));
       setAuthModal((prev) => ({ ...prev, message }));
       setAccountNotice(message);
@@ -2318,19 +2387,49 @@ function App() {
     }
   }
 
+  async function loadAdminOrders(token = adminPanel.token.trim()) {
+    if (!token) {
+      setAdminPanel((prev) => ({ ...prev, message: "请先登录管理员账号。" }));
+      return;
+    }
+    try {
+      const data = await apiRequest("/admin/orders", { headers: { "x-admin-token": token } });
+      setAdminPanel((prev) => ({ ...prev, orders: data.orders || [], message: "付款申请已刷新。" }));
+    } catch (error) {
+      setAdminPanel((prev) => ({ ...prev, message: error.message || "付款申请加载失败。" }));
+    }
+  }
+
+  async function refreshAdminData(token = adminPanel.token.trim(), message = "管理员数据已刷新。") {
+    const [usersData, ordersData] = await Promise.all([
+      apiRequest("/admin/users", { headers: { "x-admin-token": token } }),
+      apiRequest("/admin/orders", { headers: { "x-admin-token": token } }),
+    ]);
+    setAdminPanel((prev) => ({
+      ...prev,
+      users: usersData.users || [],
+      orders: ordersData.orders || [],
+      message,
+    }));
+  }
+
   async function loginAdmin() {
     try {
       const data = await apiRequest("/admin/login", {
         method: "POST",
         body: JSON.stringify({ username: adminPanel.username, password: adminPanel.password }),
       });
-      const userData = await apiRequest("/admin/users", { headers: { "x-admin-token": data.adminToken } });
+      const [userData, orderData] = await Promise.all([
+        apiRequest("/admin/users", { headers: { "x-admin-token": data.adminToken } }),
+        apiRequest("/admin/orders", { headers: { "x-admin-token": data.adminToken } }),
+      ]);
       setAdminPanel((prev) => ({
         ...prev,
         token: data.adminToken,
         password: "",
         isLoggedIn: true,
         users: userData.users || [],
+        orders: orderData.orders || [],
         message: "管理员已登录，用户数据已刷新。",
       }));
     } catch (error) {
@@ -2351,7 +2450,7 @@ function App() {
         }),
       });
       setAdminPanel((prev) => ({ ...prev, message: "会员已开通。" }));
-      loadAdminUsers();
+      refreshAdminData(adminPanel.token.trim(), "会员已开通。");
     } catch (error) {
       setAdminPanel((prev) => ({ ...prev, message: error.message || "开通失败。" }));
     }
@@ -2370,9 +2469,40 @@ function App() {
         }),
       });
       setAdminPanel((prev) => ({ ...prev, message: "Token已入账。" }));
-      loadAdminUsers();
+      refreshAdminData(adminPanel.token.trim(), "Token已入账。");
     } catch (error) {
       setAdminPanel((prev) => ({ ...prev, message: error.message || "充值失败。" }));
+    }
+  }
+
+  async function adminConfirmOrder(orderId) {
+    try {
+      await apiRequest(`/admin/orders/${orderId}/confirm`, {
+        method: "POST",
+        headers: { "x-admin-token": adminPanel.token.trim() },
+        body: JSON.stringify({
+          note: adminPanel.orderNote,
+          startDate: adminPanel.membershipStartDate,
+        }),
+      });
+      setAdminPanel((prev) => ({ ...prev, orderNote: "", message: "付款申请已确认入账。" }));
+      refreshAdminData(adminPanel.token.trim(), "付款申请已确认入账。");
+    } catch (error) {
+      setAdminPanel((prev) => ({ ...prev, message: error.message || "确认付款失败。" }));
+    }
+  }
+
+  async function adminCancelOrder(orderId) {
+    try {
+      await apiRequest(`/admin/orders/${orderId}/cancel`, {
+        method: "POST",
+        headers: { "x-admin-token": adminPanel.token.trim() },
+        body: JSON.stringify({ note: adminPanel.orderNote }),
+      });
+      setAdminPanel((prev) => ({ ...prev, orderNote: "", message: "付款申请已取消。" }));
+      refreshAdminData(adminPanel.token.trim(), "付款申请已取消。");
+    } catch (error) {
+      setAdminPanel((prev) => ({ ...prev, message: error.message || "取消申请失败。" }));
     }
   }
 
@@ -3513,9 +3643,13 @@ function App() {
             setState={setAdminPanel}
             loginAdmin={loginAdmin}
             loadUsers={loadAdminUsers}
+            loadOrders={loadAdminOrders}
+            confirmOrder={adminConfirmOrder}
+            cancelOrder={adminCancelOrder}
             activateMembership={adminActivateMembership}
             rechargeToken={adminRechargeToken}
             plans={memberPlans}
+            tokenPackages={tokenPackages}
           />
         )}
       </main>
@@ -3531,6 +3665,8 @@ function App() {
           setCheckout={setCheckout}
           submitCheckoutPaid={submitCheckoutPaid}
           closeAuthModal={closeAuthModal}
+          memberPlans={memberPlans}
+          tokenPackages={tokenPackages}
         />
       )}
     </div>
@@ -4299,18 +4435,31 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, update
   );
 }
 
-function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, checkout, setCheckout, submitCheckoutPaid, closeAuthModal }) {
+function MemberModal({
+  member,
+  authModal,
+  authForm,
+  setAuthForm,
+  completeAuth,
+  checkout,
+  setCheckout,
+  submitCheckoutPaid,
+  closeAuthModal,
+  memberPlans = defaultMemberPlans,
+  tokenPackages = defaultTokenPackages,
+}) {
   const loggedIn = member.isLoggedIn;
   const paid = member.isPaid;
-  const selectedPlan = memberPlans.find((item) => item.id === checkout.planId);
+  const selectedPlan = paid ? null : memberPlans.find((item) => item.id === checkout.planId);
   const selectedToken = tokenPackages.find((item) => item.id === checkout.tokenPackageId);
   const customAmount = Math.max(0, Number(checkout.customTokenAmount || 0));
+  const customAmountInvalid = customAmount > 0 && customAmount < 50;
   const tokenPrice = selectedToken?.priceCny || customAmount || 0;
   const totalAmount = Number((Number(selectedPlan?.priceCny || 0) + tokenPrice).toFixed(2));
   const selectedTokenText = selectedToken
     ? `${selectedToken.tokens.toLocaleString("zh-CN")} Token`
     : customAmount > 0
-      ? `自定义 ¥${customAmount}`
+      ? `自定义 ¥${customAmount} / ${Math.round(customAmount * 100).toLocaleString("zh-CN")} Token`
       : "未选择";
   return (
     <div className="member-modal-backdrop" role="dialog" aria-modal="true" aria-label="会员登录与开通">
@@ -4456,12 +4605,12 @@ function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, c
                 <div className="custom-token-row">
                   <input
                     type="number"
-                    min="1"
+                    min="50"
                     value={checkout.customTokenAmount}
                     onChange={(event) =>
                       setCheckout((prev) => ({ ...prev, customTokenAmount: event.target.value, tokenPackageId: "", showQr: false, message: "" }))
                     }
-                    placeholder="自定义充值金额"
+                    placeholder="自定义充值金额（最低50元）"
                   />
                   <button type="button" className="ghost-action" onClick={() => setCheckout((prev) => ({ ...prev, tokenPackageId: "", showQr: false }))}>
                     自定义金额
@@ -4476,8 +4625,14 @@ function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, c
                 <button
                   type="button"
                   className="primary-action"
-                  disabled={totalAmount <= 0}
-                  onClick={() => setCheckout((prev) => ({ ...prev, showQr: true, message: "" }))}
+                  disabled={totalAmount <= 0 || customAmountInvalid}
+                  onClick={() => {
+                    if (customAmountInvalid) {
+                      setCheckout((prev) => ({ ...prev, message: "自定义充值金额最低为50元。" }));
+                      return;
+                    }
+                    setCheckout((prev) => ({ ...prev, showQr: true, message: "" }));
+                  }}
                 >
                   <CreditCard size={17} />
                   确认金额并显示收款码
@@ -4504,7 +4659,7 @@ function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, c
                 <div>
                   <span className="eyebrow">第二步</span>
                   <h3>扫码付款，付款后等待管理员确认</h3>
-                  <p>付款时请备注用户名：{member.identifier}。付款后点击下方按钮，并在夏雨老师群里告知夏雨老师充值完成。</p>
+                  <p>付款后点击下方按钮，并扫描右侧管理员二维码，告知管理员支付情况；管理员确认后会员及Token额度会更新。</p>
                 </div>
                 <div className="payment-qr-grid">
                   <article>
@@ -4512,14 +4667,23 @@ function MemberModal({ member, authModal, authForm, setAuthForm, completeAuth, c
                     <strong>支付宝</strong>
                   </article>
                   <article>
-                    <img src="/assets/payment/wechat.png" alt="微信支付收款码" />
+                    <img src="/assets/payment/wechat-pay.jpg" alt="微信支付收款码" />
                     <strong>微信支付</strong>
                   </article>
                 </div>
                 <button type="button" className="primary-action full-width" onClick={submitCheckoutPaid}>
-                  我已经充值
+                  我已付款，提交确认申请
                 </button>
-                <p className="payment-reminder">请在夏雨老师群里告知夏雨老师充值完成。管理员确认后，会员时间和Token额度才会更新。</p>
+                <p className="payment-reminder">提交后会生成待确认记录，管理员确认后才会显示为已入账。</p>
+              </section>
+
+              <section className="payment-contact-panel">
+                <div>
+                  <span className="eyebrow">第三步</span>
+                  <h3>联系管理员确认</h3>
+                  <p>请扫描二维码加管理员微信，说明支付的情况，后台会修改您的会员信息。</p>
+                </div>
+                <img src="/assets/payment/admin-wechat.jpg" alt="管理员微信二维码" />
               </section>
 
               <section className="checkout-confirm-panel">
@@ -4622,7 +4786,7 @@ function MemberCenterPage({ member, state, setState, refresh, updateProfile, upd
         <RecordList title="会员与充值申请" empty="还没有申请记录。" items={orders.map((item) => ({
           id: item.id,
           title: item.title,
-          meta: `${item.status} · ¥${item.amount_cny}`,
+          meta: `${orderStatusLabel(item.status)} · ${orderTypeLabel(item.order_type)} · ¥${Number(item.amount_cny || 0).toFixed(2)}${item.paid_at ? ` · 确认：${new Date(item.paid_at).toLocaleString("zh-CN")}` : ""}${item.meta?.adminNote ? ` · 备注：${item.meta.adminNote}` : ""}`,
           time: item.created_at,
         }))} />
       </div>
@@ -4648,7 +4812,37 @@ function RecordList({ title, items, empty }) {
   );
 }
 
-function AdminPanelPage({ state, setState, loginAdmin, loadUsers, activateMembership, rechargeToken, plans }) {
+function AdminPanelPage({
+  state,
+  setState,
+  loginAdmin,
+  loadUsers,
+  loadOrders,
+  confirmOrder,
+  cancelOrder,
+  activateMembership,
+  rechargeToken,
+  plans,
+  tokenPackages,
+}) {
+  const pendingOrders = (state.orders || []).filter((order) => order.status === "pending");
+  const recentOrders = (state.orders || []).filter((order) => order.status !== "pending").slice(0, 10);
+
+  function orderAmountText(order) {
+    return `¥${Number(order.amount_cny || 0).toFixed(2)}`;
+  }
+
+  function orderDetailText(order) {
+    const meta = order.meta || {};
+    if (order.order_type === "lt_recharge") {
+      return `${Number(meta.learningTokens || 0).toLocaleString("zh-CN")} Token`;
+    }
+    if (order.order_type === "membership") {
+      return `${meta.durationDays || ""}天会员`;
+    }
+    return orderTypeLabel(order.order_type);
+  }
+
   return (
     <section className="stack">
       <div className="hero-band compact admin-hero">
@@ -4672,6 +4866,61 @@ function AdminPanelPage({ state, setState, loginAdmin, loadUsers, activateMember
           {state.message && <p className="account-notice">{state.message}</p>}
         </article>
       )}
+      {state.isLoggedIn && (
+        <article className="panel admin-order-panel">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">待确认付款申请</span>
+              <h2>学生提交后，在这里确认入账</h2>
+            </div>
+            <button type="button" className="ghost-action" onClick={loadOrders}>刷新申请</button>
+          </div>
+          <label className="admin-note-field">
+            <span>管理员备注</span>
+            <input
+              value={state.orderNote}
+              onChange={(event) => setState((prev) => ({ ...prev, orderNote: event.target.value }))}
+              placeholder="可选：例如微信已确认、支付宝已确认"
+            />
+          </label>
+          <div className="admin-order-list">
+            {pendingOrders.length === 0 && <p className="muted-text">暂时没有待确认申请。</p>}
+            {pendingOrders.map((order) => (
+              <article className="admin-order-card" key={order.id}>
+                <div>
+                  <span className="status-pill pending">{orderStatusLabel(order.status)}</span>
+                  <h3>{order.title}</h3>
+                  <p>{order.identifier} · {order.student_name || order.display_name || "未填写姓名"}</p>
+                </div>
+                <div className="admin-order-meta">
+                  <strong>{orderAmountText(order)}</strong>
+                  <span>{orderTypeLabel(order.order_type)} · {orderDetailText(order)}</span>
+                  <small>{order.created_at ? new Date(order.created_at).toLocaleString("zh-CN") : ""}</small>
+                </div>
+                <div className="admin-order-actions">
+                  <button type="button" className="primary-action" onClick={() => confirmOrder(order.id)}>确认入账</button>
+                  <button type="button" className="ghost-action" onClick={() => cancelOrder(order.id)}>取消</button>
+                </div>
+              </article>
+            ))}
+          </div>
+          {recentOrders.length > 0 && (
+            <div className="admin-recent-orders">
+              <h3>最近已处理</h3>
+              {recentOrders.map((order) => (
+                <div className="admin-recent-row" key={order.id}>
+                  <span className={`status-pill ${order.status}`}>{orderStatusLabel(order.status)}</span>
+                  <strong>{order.title}</strong>
+                  <span>{order.identifier}</span>
+                  <span>{orderAmountText(order)}</span>
+                  <small>{order.paid_at ? new Date(order.paid_at).toLocaleString("zh-CN") : new Date(order.updated_at || order.created_at).toLocaleString("zh-CN")}</small>
+                </div>
+              ))}
+            </div>
+          )}
+        </article>
+      )}
+
       {state.isLoggedIn && (
       <article className="panel admin-control-panel">
         <label>
@@ -4699,6 +4948,29 @@ function AdminPanelPage({ state, setState, loginAdmin, loadUsers, activateMember
         <label>
           <span>增加Token</span>
           <input type="number" value={state.tokenAmount} onChange={(event) => setState((prev) => ({ ...prev, tokenAmount: event.target.value }))} />
+        </label>
+        <label>
+          <span>常用Token包</span>
+          <select
+            value=""
+            onChange={(event) => {
+              const pack = tokenPackages.find((item) => item.id === event.target.value);
+              if (pack) {
+                setState((prev) => ({
+                  ...prev,
+                  tokenAmount: String(pack.tokens || pack.learningTokens || 0),
+                  paidAmount: String(pack.priceCny || ""),
+                }));
+              }
+            }}
+          >
+            <option value="">选择后自动填入</option>
+            {tokenPackages.map((pack) => (
+              <option key={pack.id} value={pack.id}>
+                {pack.label || pack.title} · {(pack.tokens || pack.learningTokens || 0).toLocaleString("zh-CN")} Token
+              </option>
+            ))}
+          </select>
         </label>
         <div className="admin-actions">
           <button type="button" className="ghost-action" onClick={loadUsers}>刷新用户</button>

@@ -91,7 +91,8 @@ export async function ensureSchema() {
       provider TEXT NOT NULL DEFAULT 'manual',
       meta JSONB NOT NULL DEFAULT '{}'::jsonb,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      paid_at TIMESTAMPTZ
+      paid_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
     CREATE TABLE IF NOT EXISTS student_archive_events (
@@ -252,4 +253,5 @@ export async function ensureSchema() {
     ALTER TABLE users ADD CONSTRAINT users_channel_check CHECK (channel IN ('username', 'email', 'phone'));
   `);
   await query(`ALTER TABLE library_items ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''`);
+  await query(`ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`);
 }

@@ -88,6 +88,31 @@ function normalizeIdentifier(identifier = "") {
   return String(identifier).trim().toLowerCase();
 }
 
+const freeStorageMb = Number(membershipPlans.free?.storageMb || 50);
+
+function createHttpError(status, code, message) {
+  const error = new Error(message);
+  error.status = status;
+  error.code = code;
+  return error;
+}
+
+function mergeMeta(current, patch) {
+  const base = current && typeof current === "object" && !Array.isArray(current) ? current : {};
+  return JSON.stringify({ ...base, ...patch });
+}
+
+function parsePaymentMeta(meta) {
+  if (!meta) return {};
+  if (typeof meta === "object" && !Array.isArray(meta)) return meta;
+  try {
+    const parsed = JSON.parse(meta);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 function toPublicUser(row) {
   return {
     id: row.id,
@@ -170,6 +195,20 @@ async function expireOutdatedMemberships(userId = null) {
        ${scope}`,
     params
   );
+  await query(
+    `UPDATE storage_quotas q
+     SET base_mb = $${params.length + 1}, updated_at = now()
+     WHERE ${userId ? "q.user_id = $1 AND" : ""}
+       NOT EXISTS (
+         SELECT 1
+         FROM student_memberships sm
+         WHERE sm.user_id = q.user_id
+           AND sm.status = 'active'
+           AND (sm.expires_at IS NULL OR sm.expires_at > now())
+       )
+       AND q.base_mb <> $${params.length + 1}`,
+    [...params, freeStorageMb]
+  );
 }
 
 function getMembershipWindow(startDate, durationDays) {
@@ -184,10 +223,19 @@ function getMembershipWindow(startDate, durationDays) {
 async function recordTokenUsage(userId, amount, note, meta = {}) {
   const tokens = Math.max(1, Math.ceil(Number(amount || 1)));
   await withTransaction(async (client) => {
-    await client.query("UPDATE learning_token_wallets SET balance = GREATEST(balance - $2, 0), updated_at = now() WHERE user_id = $1", [
-      userId,
-      tokens,
-    ]);
+    await client.query(
+      `INSERT INTO learning_token_wallets (user_id, balance, reserved)
+       VALUES ($1, 0, 0)
+       ON CONFLICT (user_id) DO NOTHING`,
+      [userId]
+    );
+    const wallet = (
+      await client.query("SELECT balance FROM learning_token_wallets WHERE user_id = $1 FOR UPDATE", [userId])
+    ).rows[0];
+    if (Number(wallet?.balance || 0) < tokens) {
+      throw createHttpError(402, "INSUFFICIENT_TOKENS", "Token余额不足，请充值后再使用AI功能。");
+    }
+    await client.query("UPDATE learning_token_wallets SET balance = balance - $2, updated_at = now() WHERE user_id = $1", [userId, tokens]);
     await client.query(
       `INSERT INTO learning_token_transactions (user_id, amount, type, source, note, meta)
        VALUES ($1, $2, 'consume', 'ai_action', $3, $4)`,
@@ -196,8 +244,37 @@ async function recordTokenUsage(userId, amount, note, meta = {}) {
   });
 }
 
+async function assertTokenBalance(userId, amount) {
+  const tokens = Math.max(1, Math.ceil(Number(amount || 1)));
+  const wallet = (
+    await query("SELECT balance FROM learning_token_wallets WHERE user_id = $1", [userId])
+  ).rows[0];
+  if (Number(wallet?.balance || 0) < tokens) {
+    throw createHttpError(402, "INSUFFICIENT_TOKENS", "Token余额不足，请充值后再使用AI功能。");
+  }
+}
+
 async function saveUploadedFiles(client, user, student, purpose, files) {
   const saved = [];
+  const incomingBytes = files.reduce((sum, file) => sum + Number(file.size || 0), 0);
+  if (incomingBytes > 0) {
+    await expireOutdatedMemberships(user.id);
+    await client.query(
+      `INSERT INTO storage_quotas (user_id, base_mb, expansion_mb, used_bytes)
+       VALUES ($1, $2, 0, 0)
+       ON CONFLICT (user_id) DO NOTHING`,
+      [user.id, freeStorageMb]
+    );
+    const storage = (await client.query("SELECT * FROM storage_quotas WHERE user_id = $1 FOR UPDATE", [user.id])).rows[0];
+    const totalBytes = (Number(storage?.base_mb || freeStorageMb) + Number(storage?.expansion_mb || 0)) * 1024 * 1024;
+    const nextUsedBytes = Number(storage?.used_bytes || 0) + incomingBytes;
+    if (nextUsedBytes > totalBytes) {
+      for (const file of files) {
+        if (file?.path) fs.promises.unlink(file.path).catch(() => {});
+      }
+      throw createHttpError(413, "STORAGE_QUOTA_EXCEEDED", "存储空间不足，请清理资料或开通会员/扩容后再上传。");
+    }
+  }
   for (const file of files) {
     const stored = toStoredFile(file);
     const result = await client.query(
@@ -336,6 +413,8 @@ async function buildAccountSnapshot(userId) {
     (!membership.expires_at || new Date(membership.expires_at).getTime() > Date.now());
   const expiresAtMs = membership?.expires_at ? new Date(membership.expires_at).getTime() : null;
   const daysRemaining = expiresAtMs ? Math.ceil((expiresAtMs - Date.now()) / (24 * 60 * 60 * 1000)) : null;
+  const effectiveBaseMb = isPaid ? Number(storage?.base_mb || membershipPlans.monthly.storageMb || 3072) : freeStorageMb;
+  const expansionMb = Number(storage?.expansion_mb || 0);
   return {
     user: toPublicUser(user),
     student: student
@@ -362,10 +441,10 @@ async function buildAccountSnapshot(userId) {
       reserved: wallet?.reserved || 0,
     },
     storage: {
-      baseMb: storage?.base_mb || 50,
-      expansionMb: storage?.expansion_mb || 0,
+      baseMb: effectiveBaseMb,
+      expansionMb,
       usedBytes: Number(storage?.used_bytes || 0),
-      totalMb: (storage?.base_mb || 50) + (storage?.expansion_mb || 0),
+      totalMb: effectiveBaseMb + expansionMb,
     },
   };
 }
@@ -468,6 +547,9 @@ app.post("/api/membership/orders", requireAuth, async (req, res) => {
 app.post("/api/lt/orders", requireAuth, async (req, res) => {
   const { packageId, customAmount } = req.body || {};
   const amountCny = Number(customAmount || 0);
+  if (packageId === "custom" && amountCny < 50) {
+    return res.status(400).json({ error: "LT_MIN_AMOUNT", message: "自定义充值金额最低为50元。" });
+  }
   const pack = packageId === "custom"
     ? { id: "custom", title: `Token自定义充值 ¥${amountCny}`, priceCny: amountCny, learningTokens: Math.round(amountCny * tokenBillingRules.tokensPerCny) }
     : ltPackages[packageId];
@@ -507,10 +589,9 @@ app.get("/api/account/center", requireAuth, async (req, res) => {
   ).rows;
   const orders = (
     await query(
-      `SELECT id, order_type, package_id, title, amount_cny, status, created_at, paid_at
+      `SELECT id, order_type, package_id, title, amount_cny, status, provider, meta, created_at, paid_at, updated_at
        FROM payment_orders
        WHERE user_id = $1
-         AND status = 'paid'
        ORDER BY created_at DESC
        LIMIT 30`,
       [req.user.id]
@@ -906,6 +987,7 @@ app.post("/api/ai/transcribe", requireAuth, upload.single("audio"), async (req, 
   try {
     await assertPaidMember(req.user.id);
     ensureOpenAIKey();
+    await assertTokenBalance(req.user.id, 6);
     if (!req.file) return res.status(400).json({ error: "AUDIO_REQUIRED", message: "请上传音频文件。" });
     const student = await getPrimaryStudent(req.user);
     const transcript = await openai.audio.transcriptions.create({
@@ -941,6 +1023,7 @@ app.post("/api/ai/study-plan", requireAuth, async (req, res, next) => {
   try {
     await assertPaidMember(req.user.id);
     ensureOpenAIKey();
+    await assertTokenBalance(req.user.id, 8);
     const student = await getPrimaryStudent(req.user);
     const { archiveSnapshot = {}, currentPlanRows = [], methodFocusRows = [], habitFocusRows = [] } = req.body || {};
     const response = await openai.responses.create({
@@ -986,6 +1069,8 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
       source = "",
       archiveSnapshot = "{}",
     } = req.body || {};
+    const tokenCost = taskType === "generateSimilar" ? 10 : 12;
+    await assertTokenBalance(req.user.id, tokenCost);
     if (!prompt.trim() && !files.length) return res.status(400).json({ error: "PROMPT_OR_FILE_REQUIRED" });
 
     const taskMap = {
@@ -1036,7 +1121,7 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
       );
       return row;
     });
-    await recordTokenUsage(req.user.id, taskType === "generateSimilar" ? 10 : 12, taskMap[taskType] || "错题专项AI处理", {
+    await recordTokenUsage(req.user.id, tokenCost, taskMap[taskType] || "错题专项AI处理", {
       feature: "mistake-workflow",
       provider: "gemini",
       model: geminiModel,
@@ -1054,6 +1139,7 @@ app.post("/api/ai/mistakes/analyze", requireAuth, upload.array("files", 6), asyn
   try {
     await assertPaidMember(req.user.id);
     ensureGeminiKey();
+    await assertTokenBalance(req.user.id, 12);
     const files = req.files || [];
     if (!files.length) return res.status(400).json({ error: "FILES_REQUIRED" });
     const student = await getPrimaryStudent(req.user);
@@ -1098,6 +1184,7 @@ app.post("/api/ai/mistakes/practice", requireAuth, async (req, res, next) => {
   try {
     await assertPaidMember(req.user.id);
     ensureGeminiKey();
+    await assertTokenBalance(req.user.id, 10);
     const student = await getPrimaryStudent(req.user);
     const { sourceMistakeId = null, subject = "", mistake = {}, count = 3 } = req.body || {};
     const prompt = [
@@ -1128,6 +1215,7 @@ app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
   try {
     await assertPaidMember(req.user.id);
     ensureOpenAIKey();
+    await assertTokenBalance(req.user.id, 35);
     const student = await getPrimaryStudent(req.user);
     const { topic = "", grade = "", subject = "", useTemplate = false, template = "" } = req.body || {};
     if (!topic.trim()) return res.status(400).json({ error: "TOPIC_REQUIRED" });
@@ -1172,6 +1260,8 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 6), async (req, 
     await assertPaidMember(req.user.id);
     const student = await getPrimaryStudent(req.user);
     const { question = "", wantsImage = "false", provider = "openai", mode = "fast" } = req.body || {};
+    const tokenCost = wantsImage === "true" ? 12 : mode === "thinking" ? 8 : 5;
+    await assertTokenBalance(req.user.id, tokenCost);
     const files = req.files || [];
     const aiProvider = normalizeAiProvider(provider);
     const aiMode = normalizeAiMode(mode);
@@ -1246,7 +1336,7 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 6), async (req, 
         [student.id, req.user.id, "AI自由问", JSON.stringify({ question, answer, provider: aiProvider, mode: aiMode, model })]
       );
     }
-    await recordTokenUsage(req.user.id, wantsImage === "true" ? 12 : aiMode === "thinking" ? 8 : 5, "AI自由问", {
+    await recordTokenUsage(req.user.id, tokenCost, "AI自由问", {
       feature: "free-ask",
       provider: aiProvider,
       mode: aiMode,
@@ -1273,7 +1363,12 @@ app.post("/api/admin/memberships/activate", requireAdminToken, async (req, res) 
       [user.id, plan.id, plan.name, startedAt, expiresAt]
     )
   ).rows[0];
-  await query("UPDATE storage_quotas SET base_mb = $2, updated_at = now() WHERE user_id = $1", [user.id, plan.storageMb]);
+  await query(
+    `INSERT INTO storage_quotas (user_id, base_mb, expansion_mb, used_bytes)
+     VALUES ($1, $2, 0, 0)
+     ON CONFLICT (user_id) DO UPDATE SET base_mb = EXCLUDED.base_mb, updated_at = now()`,
+    [user.id, plan.storageMb]
+  );
   if (Number(paidAmountCny) > 0) {
     await query(
       `INSERT INTO payment_orders (user_id, order_type, package_id, title, amount_cny, status, provider, meta, paid_at)
@@ -1292,6 +1387,12 @@ app.post("/api/admin/lt/recharge", requireAdminToken, async (req, res) => {
   const tokens = Number(amount || pack?.learningTokens || 0);
   if (!tokens) return res.status(400).json({ error: "INVALID_AMOUNT" });
   await withTransaction(async (client) => {
+    await client.query(
+      `INSERT INTO learning_token_wallets (user_id, balance, reserved)
+       VALUES ($1, 0, 0)
+       ON CONFLICT (user_id) DO NOTHING`,
+      [user.id]
+    );
     await client.query("UPDATE learning_token_wallets SET balance = balance + $2, updated_at = now() WHERE user_id = $1", [
       user.id,
       tokens,
@@ -1310,6 +1411,131 @@ app.post("/api/admin/lt/recharge", requireAdminToken, async (req, res) => {
     }
   });
   res.json({ account: await buildAccountSnapshot(user.id) });
+});
+
+app.get("/api/admin/orders", requireAdminToken, async (req, res) => {
+  const orders = (
+    await query(
+      `SELECT
+        po.id,
+        po.user_id,
+        po.order_type,
+        po.package_id,
+        po.title,
+        po.amount_cny,
+        po.status,
+        po.provider,
+        po.meta,
+        po.created_at,
+        po.paid_at,
+        po.updated_at,
+        u.identifier,
+        u.display_name,
+        s.name AS student_name
+       FROM payment_orders po
+       JOIN users u ON u.id = po.user_id
+       LEFT JOIN students s ON s.user_id = po.user_id
+       ORDER BY
+         CASE po.status WHEN 'pending' THEN 0 WHEN 'paid' THEN 1 ELSE 2 END,
+         po.created_at DESC
+       LIMIT 100`
+    )
+  ).rows;
+  res.json({ orders });
+});
+
+app.post("/api/admin/orders/:id/confirm", requireAdminToken, async (req, res) => {
+  const { note = "", startDate = "" } = req.body || {};
+  const { id } = req.params;
+  const result = await withTransaction(async (client) => {
+    const order = (await client.query("SELECT * FROM payment_orders WHERE id = $1 FOR UPDATE", [id])).rows[0];
+    if (!order) throw createHttpError(404, "ORDER_NOT_FOUND", "没有找到这条付款申请。");
+    if (order.status !== "pending") throw createHttpError(400, "ORDER_ALREADY_PROCESSED", "这条付款申请已经处理过。");
+
+    const meta = parsePaymentMeta(order.meta);
+    const user = (await client.query("SELECT * FROM users WHERE id = $1", [order.user_id])).rows[0];
+    if (!user) throw createHttpError(404, "USER_NOT_FOUND", "没有找到对应用户。");
+
+    if (order.order_type === "membership") {
+      const plan = membershipPlans[order.package_id];
+      if (!plan || plan.id === "free") throw createHttpError(400, "INVALID_PLAN", "会员套餐不存在。");
+      const { startedAt, expiresAt, days } = getMembershipWindow(startDate || meta.startedAt, meta.durationDays || plan.durationDays || 31);
+      await client.query(
+        `INSERT INTO student_memberships (user_id, plan_id, plan_name, status, started_at, expires_at)
+         VALUES ($1, $2, $3, 'active', $4, $5)`,
+        [order.user_id, plan.id, plan.name, startedAt, expiresAt]
+      );
+      await client.query(
+        `INSERT INTO storage_quotas (user_id, base_mb, expansion_mb, used_bytes)
+         VALUES ($1, $2, 0, 0)
+         ON CONFLICT (user_id) DO UPDATE SET base_mb = EXCLUDED.base_mb, updated_at = now()`,
+        [order.user_id, plan.storageMb]
+      );
+      await client.query(
+        `UPDATE payment_orders
+         SET status = 'paid', provider = 'manual_admin', paid_at = now(), updated_at = now(), meta = $2
+         WHERE id = $1`,
+        [
+          id,
+          mergeMeta(meta, {
+            adminConfirmed: true,
+            adminNote: note,
+            startedAt,
+            expiresAt,
+            durationDays: days,
+          }),
+        ]
+      );
+    } else if (order.order_type === "lt_recharge") {
+      const pack = ltPackages[order.package_id];
+      const tokens = Math.max(1, Math.round(Number(meta.learningTokens || pack?.learningTokens || 0)));
+      if (!tokens) throw createHttpError(400, "INVALID_TOKEN_ORDER", "Token充值数量无效。");
+      await client.query(
+        `INSERT INTO learning_token_wallets (user_id, balance, reserved)
+         VALUES ($1, 0, 0)
+         ON CONFLICT (user_id) DO NOTHING`,
+        [order.user_id]
+      );
+      await client.query("UPDATE learning_token_wallets SET balance = balance + $2, updated_at = now() WHERE user_id = $1", [order.user_id, tokens]);
+      await client.query(
+        `INSERT INTO learning_token_transactions (user_id, amount, type, source, note, meta)
+         VALUES ($1, $2, 'recharge', 'manual_admin', $3, $4)`,
+        [
+          order.user_id,
+          tokens,
+          note || "管理员确认Token充值",
+          JSON.stringify({ orderId: id, packageId: order.package_id, paidAmountCny: Number(order.amount_cny) }),
+        ]
+      );
+      await client.query(
+        `UPDATE payment_orders
+         SET status = 'paid', provider = 'manual_admin', paid_at = now(), updated_at = now(), meta = $2
+         WHERE id = $1`,
+        [id, mergeMeta(meta, { adminConfirmed: true, adminNote: note, learningTokens: tokens })]
+      );
+    } else {
+      throw createHttpError(400, "UNSUPPORTED_ORDER_TYPE", "暂不支持这种付款申请。");
+    }
+
+    const updatedOrder = (await client.query("SELECT * FROM payment_orders WHERE id = $1", [id])).rows[0];
+    return { order: updatedOrder, user };
+  });
+  res.json({ order: result.order, account: await buildAccountSnapshot(result.user.id) });
+});
+
+app.post("/api/admin/orders/:id/cancel", requireAdminToken, async (req, res) => {
+  const { note = "" } = req.body || {};
+  const order = (
+    await query(
+      `UPDATE payment_orders
+       SET status = 'cancelled', provider = 'manual_admin', updated_at = now(), meta = meta || $2::jsonb
+       WHERE id = $1 AND status = 'pending'
+       RETURNING *`,
+      [req.params.id, JSON.stringify({ adminCancelled: true, adminNote: note, cancelledAt: new Date().toISOString() })]
+    )
+  ).rows[0];
+  if (!order) throw createHttpError(404, "ORDER_NOT_FOUND", "没有找到待处理的付款申请。");
+  res.json({ order });
 });
 
 app.get("/api/admin/users", requireAdminToken, async (req, res) => {
