@@ -44,7 +44,16 @@ import {
   UserRound,
   WandSparkles,
 } from "lucide-react";
-import { aiTaskPrompts, buildAgentPrompt, buildStudentArchiveSnapshot, postgresqlArchiveTables, shuziLearningCoachAgent } from "./aiAgent.js";
+import {
+  aiTaskPrompts,
+  buildAgentPrompt,
+  buildPageOnlySnapshot,
+  buildPlanArchiveSnapshot,
+  buildProfileArchiveSnapshot,
+  buildStrategyArchiveSnapshot,
+  postgresqlArchiveTables,
+  shuziLearningCoachAgent,
+} from "./aiAgent.js";
 import { apiRequest, getAuthToken, mapAccountToMember, setAuthToken } from "./apiClient.js";
 import { storagePlans } from "./membershipConfig.js";
 import "./styles.css";
@@ -2674,35 +2683,37 @@ function App() {
     ]);
   }
 
-  function generateProfileAnalysis() {
-    if (!requireMemberAction("生成学情画像统一分析", generateProfileAnalysis, "学情画像会整合问卷、陈述、错题专项和学习记录，需要会员权限。")) return;
+  async function generateProfileAnalysis() {
+    if (!requireMemberAction("AI统一分析画像", generateProfileAnalysis, "学情画像会统一分析学情问卷、学情陈述、每日反思和每周讨论，需要会员权限。")) return;
     if (aiStatus === "loading") return;
     clearAiNotice();
-    const archiveSnapshot = buildStudentArchiveSnapshot({
-      answers,
-      records,
-      mistakes,
-      strategies: strategyWorkspaces,
-      plans: { planRows, methodFocusRows, habitFocusRows },
-    });
+    const archiveSnapshot = buildProfileArchiveSnapshot({ answers, records });
     const prompt = buildAgentPrompt("profile", archiveSnapshot);
-    console.info("树子AI任务提示词", prompt);
+    console.info("学情画像AI提示词", prompt);
     setAiStatus("loading");
-    window.setTimeout(() => {
-      const weakSubjects = Array.isArray(answers.weakSubjects) && answers.weakSubjects.length ? answers.weakSubjects.join("、") : "数学、英语等薄弱科目";
+    try {
+      const data = await apiRequest("/ai/profile", {
+        method: "POST",
+        body: JSON.stringify({ archiveSnapshot }),
+      });
+      const profile = data.profile || {};
       setAiInsight({
-        summary: `AI已整合学情问卷、${records.length}条学情陈述和错题专项记录，形成当前学生学习档案快照。`,
-        core: `当前核心判断：学生需要先把${weakSubjects}中的基础漏洞、错题复测和计划执行连接起来，避免只靠临时努力。`,
-        reasons: ["学情问卷反映学习链和方法习惯需要继续稳定", "学情陈述显示学生能说出困扰，但需要把问题落到科目和场景", "错题专项提示知识调用、审题步骤和错题复测需要重点跟进", "学习计划需要从少量、明确、可检查的任务开始"],
-        evidence: ["问卷数据：基础信息、学习链、作业错题、复习巩固和科目专项", "陈述数据：文字/语音陈述、发生场景、影响程度", "错题数据：错题类型、知识漏洞、方法缺口", "执行数据：计划、方法习惯训练、反思讨论会持续更新画像"],
-        tags: ["动态学情画像", "知识漏洞", "方法习惯", "计划执行"],
-        questions: ["最近一周最影响学习效率的固定场景是什么？", "哪一类错题已经重复出现三次以上？", "学生最愿意先训练的一个方法或习惯是什么？", "家长能提供的稳定支持是什么？"],
-        next: "下一步进入“策略与任务”，先为薄弱科目制定1-3个可执行任务，再进入“学习计划”安排到具体空闲时间。",
-        archiveConclusion: "该画像不是一次性结论，会随着问卷补充、错题训练、每日反思和每周讨论持续更新。",
+        summary: profile.summary || "AI已完成学情综合分析。",
+        core: profile.core || profile.core_problem || "当前需要继续区分问题主要来自基础、方法、习惯、动力还是情绪压力。",
+        reasons: Array.isArray(profile.reasons) ? profile.reasons : [],
+        evidence: Array.isArray(profile.evidence) ? profile.evidence : [],
+        tags: Array.isArray(profile.tags) ? profile.tags : [],
+        questions: Array.isArray(profile.questions) ? profile.questions : [],
+        next: profile.next || "建议先补充关键证据，再进入策略与任务制定。",
+        archiveConclusion: profile.archiveConclusion || profile.archive_conclusion || "已根据当前档案形成阶段性学情判断。",
+        scores: profile.scores || {},
         source: JSON.stringify(prompt),
       });
       setAiStatus("done");
-    }, 800);
+    } catch (error) {
+      showAiError(error, "AI暂时没有完成学情画像分析，请稍后再试。");
+      setAiStatus("idle");
+    }
   }
 
   function updateStatementIssueDetail(issue, field, value) {
@@ -2841,18 +2852,18 @@ function App() {
   }
 
   async function runPlanAi() {
-    if (!requireMemberAction("AI辅助制定学习计划", runPlanAi, "AI会根据已经形成的学情画像、策略任务和方法习惯目标生成可修改的周计划，需要会员权限。")) return;
+    if (!requireMemberAction("AI生成学习计划", runPlanAi, "AI会根据学情画像、策略与任务生成学习计划和方法习惯训练表，需要会员权限。")) return;
     if (planAiStatus === "loading") return;
     setPlanAiStatus("loading");
     clearAiNotice();
-    const archiveSnapshot = buildStudentArchiveSnapshot({
+    const archiveSnapshot = buildPlanArchiveSnapshot({
       answers,
       records,
-      mistakes,
+      aiInsight,
       strategies: strategyWorkspaces,
       plans: { planRows, methodFocusRows, habitFocusRows },
     });
-    console.info("树子AI任务提示词", buildAgentPrompt("plan", archiveSnapshot));
+    console.info("学习计划AI提示词", buildAgentPrompt("plan", archiveSnapshot));
     try {
       const data = await apiRequest("/ai/study-plan", {
         method: "POST",
@@ -2878,17 +2889,36 @@ function App() {
       setPlanAiStatus("done");
       return;
     } catch (error) {
-      showAiError(error, "AI学习计划暂时没有响应，已先生成一份可修改的基础计划。");
+      showAiError(error, "AI暂时没有生成有效学习计划，已先保留可手动修改的示范安排。");
     }
-    const weakSubject = Array.isArray(answers.weakSubjects) && answers.weakSubjects[0] ? answers.weakSubjects[0] : "数学";
+    const weakSubject = Array.isArray(answers.weakSubjects) && answers.weakSubjects[0] ? answers.weakSubjects[0] : "\u6570\u5b66";
+    const makeCells = (entries) => Object.fromEntries(weekDays.map((day) => [day, entries[day] || { start: "", end: "", task: "", note: "" }]));
     setPlanRows(
       normalizePlanRows([
-        { id: `ai-plan-row-${Date.now()}-1`, cells: { 星期一: { start: "19:30", end: "20:10", task: `${weakSubject}基础回补`, note: "先做课本例题和基础题" }, 星期三: { start: "19:30", end: "20:10", task: `${weakSubject}错题复测`, note: "重做1-2道典型错题" } } },
-        { id: `ai-plan-row-${Date.now()}-2`, cells: { 星期二: { start: "19:30", end: "20:00", task: "方法训练", note: "使用本周选定学习方法" }, 星期四: { start: "19:30", end: "20:00", task: "同类题训练", note: "控制题量，写清步骤" } } },
-        { id: `ai-plan-row-${Date.now()}-3`, cells: { 星期五: { start: "20:30", end: "20:50", task: "本周复盘", note: "记录完成情况和下周调整点" }, 星期日: { start: "19:30", end: "20:00", task: "整理错题", note: "更新错题库和复测安排" } } },
+        {
+          id: "ai-plan-row-" + Date.now() + "-1",
+          cells: makeCells({
+            [weekDays[0]]: { start: "19:30", end: "20:10", task: weakSubject + "\u57fa\u7840\u590d\u4e60", note: "\u5148\u590d\u76d8\u77e5\u8bc6\u70b9\uff0c\u518d\u505a\u4f8b\u9898" },
+            [weekDays[2]]: { start: "19:30", end: "20:10", task: weakSubject + "\u9519\u9898\u590d\u76d8", note: "\u9009\u62e91-2\u9053\u5178\u578b\u9519\u9898\u91cd\u505a" },
+          }),
+        },
+        {
+          id: "ai-plan-row-" + Date.now() + "-2",
+          cells: makeCells({
+            [weekDays[1]]: { start: "19:30", end: "20:00", task: "\u9650\u65f6\u8bad\u7ec3", note: "\u63a7\u5236\u65f6\u95f4\uff0c\u8bb0\u5f55\u5361\u70b9" },
+            [weekDays[4]]: { start: "19:30", end: "20:00", task: "\u65b9\u6cd5\u590d\u76d8", note: "\u603b\u7ed3\u672c\u5468\u6709\u6548\u505a\u6cd5" },
+          }),
+        },
+        {
+          id: "ai-plan-row-" + Date.now() + "-3",
+          cells: makeCells({
+            [weekDays[5]]: { start: "20:30", end: "20:50", task: "\u6bcf\u5468\u8ba8\u8bba", note: "\u628a\u95ee\u9898\u548c\u8c03\u6574\u60f3\u6e05\u695a" },
+            [weekDays[6]]: { start: "19:30", end: "20:00", task: "\u4e0b\u5468\u9884\u5b89\u6392", note: "\u628a\u91cd\u70b9\u4efb\u52a1\u5148\u653e\u8fdb\u65e5\u7a0b" },
+          }),
+        },
       ])
     );
-    setPlanNote("AI建议先把任务安排得少而清楚：每次只处理一个明确问题，并在备注里写完成标准。");
+    setPlanNote("AI\u6682\u65f6\u6ca1\u6709\u8fd4\u56de\u6709\u6548\u8ba1\u5212\uff0c\u5df2\u5148\u751f\u6210\u4e00\u4efd\u53ef\u7ee7\u7eed\u4fee\u6539\u7684\u793a\u8303\u5b89\u6392\u3002");
     setPlanAiStatus("done");
   }
 
@@ -3008,7 +3038,23 @@ function App() {
       formData.append("subject", mistakeDraft.subject);
       formData.append("title", mistakeDraft.title);
       formData.append("source", mistakeDraft.source);
-      formData.append("archiveSnapshot", JSON.stringify(buildStudentArchiveSnapshot({ answers, records, mistakes })));
+      formData.append(
+        "archiveSnapshot",
+        JSON.stringify(
+          buildPageOnlySnapshot({
+            page: "mistake-workspace",
+            answers,
+            payload: {
+              taskType: mistakeTaskType,
+              prompt: mistakePrompt,
+              subject: mistakeDraft.subject,
+              title: mistakeDraft.title,
+              source: mistakeDraft.source,
+              fileNames: (mistakeDraft.files || []).map((item) => item.name),
+            },
+          })
+        )
+      );
       (mistakeDraft.files || []).forEach((item) => formData.append("files", item.file));
       const data = await apiRequest("/ai/mistakes/workflow", {
         method: "POST",
@@ -3072,7 +3118,17 @@ function App() {
     if (!requireMemberAction("AI生成知识图", generateKnowledgeNote, "知识图生成会调用AI图片与讲解能力，需要会员权限。")) return;
     if (knowledgeAiStatus === "loading") return;
     setKnowledgeAiStatus("loading");
-    console.info("树子AI任务提示词", buildAgentPrompt("knowledgeNote", buildStudentArchiveSnapshot({ answers, records, mistakes })));
+    console.info(
+      "知识笔记AI提示词",
+      buildAgentPrompt(
+        "knowledgeNote",
+        buildPageOnlySnapshot({
+          page: "knowledge-note",
+          answers,
+          payload: { topic: knowledgeQuestion, useTemplate: knowledgeUseTemplate },
+        })
+      )
+    );
     try {
       clearAiNotice();
       const data = await apiRequest("/ai/knowledge-note", {
@@ -3117,62 +3173,78 @@ function App() {
     recordDownload("下载知识图", `${knowledgeNote.title}.svg`, "AI知识图");
   }
 
-  function runStrategyAi(section, mode, targetId = "") {
-    if (!requireMemberAction("AI生成或优化学习策略", () => runStrategyAi(section, mode, targetId), "科目策略、任务建议和AI修改都需要结合学生画像调用AI能力，需要会员权限。")) return;
-    console.info("树子AI任务提示词", buildAgentPrompt("strategy", buildStudentArchiveSnapshot({ answers, records, mistakes, strategies: strategyWorkspaces })));
+  async function runStrategyAi(section, mode, targetId = "") {
+    if (!requireMemberAction("AI优化策略与任务", () => runStrategyAi(section, mode, targetId), "策略与任务会根据学情画像生成科目策略、学习任务或资料使用建议，需要会员权限。")) return;
+    if (typeof strategyAiStatus === "string" && strategyAiStatus.startsWith("AI正在")) return;
     const subject = activeSubject;
-    const data = subjectStrategyData[subject];
-    const studentName = answers.name || "这位同学";
-    const weakSubjects = Array.isArray(answers.weakSubjects) ? answers.weakSubjects.join("、") : "暂未填写";
-    const problemText = answers.coreProblemText || aiInsight?.core || "目前主要表现为学习链不完整，需要把策略拆成可执行任务。";
-    const actionLabel = mode === "revise" ? "AI已帮你修改" : mode === "generate" ? "AI已生成" : "AI已提出建议";
-
-    setStrategyAiStatus(`${actionLabel}：${subject} · ${section}`);
-
-    if (section === "strategy") {
-      updateStrategyWorkspace(subject, (workspace) => ({
-        ...workspace,
-        strategySuggestion: `${studentName}当前弱项集中在${weakSubjects}。针对${subject}，建议先围绕“${problemText}”建立学习策略：${data.strategy} 本周不要追求任务数量，而要先保证每天有一个能完成、能记录、能复盘的小闭环。`,
-        aiNote: `已结合学情画像为${subject}生成策略建议。接受后，它才会作为本学科正式策略继续使用。`,
-      }));
-      return;
-    }
-
-    if (section === "task") {
-      if (!targetId) {
-        updateStrategyWorkspace(subject, (workspace) => ({
-          ...workspace,
-          tasks: [
-            ...workspace.tasks,
-            {
-              id: `${subject}-ai-task-${Date.now()}`,
-              title: `${subject}AI建议任务`,
-              problem: problemText,
-              time: "本周选择 2-3 次，每次 25-40 分钟",
-              material: workspace.materials?.[0]?.name || "课本、课堂笔记、错题本",
-              detail: `围绕当前学情画像中的主要问题，先完成一个小任务：准备资料，完成基础练习，记录错因或收获，再让AI继续帮忙优化。`,
-              standard: "能说清楚这个任务解决了什么问题，完成后留下记录，并知道下一次如何复测。",
-              studentNote: "",
-            },
-          ],
+    const workspace = strategyWorkspaces[subject];
+    const targetTask = workspace?.tasks?.find((task) => task.id === targetId) || null;
+    const archiveSnapshot = buildStrategyArchiveSnapshot({ answers, records, aiInsight, strategies: strategyWorkspaces, activeSubject: subject });
+    console.info("策略任务AI提示词", buildAgentPrompt("strategy", archiveSnapshot));
+    setStrategyAiStatus("AI正在生成建议...");
+    try {
+      const data = await apiRequest("/ai/strategy", {
+        method: "POST",
+        body: JSON.stringify({ subject, section, mode, targetId, task: targetTask, archiveSnapshot }),
+      });
+      const result = data.result || {};
+      if (section === "strategy") {
+        updateStrategyWorkspace(subject, (current) => ({
+          ...current,
+          strategySuggestion: result.strategy_suggestion || current.strategySuggestion,
+          aiNote: result.ai_note || "AI已根据当前学情画像生成本学科策略建议。",
         }));
-        return;
+      } else if (section === "task") {
+        const nextTask = result.task || {};
+        if (!targetId) {
+          updateStrategyWorkspace(subject, (current) => ({
+            ...current,
+            tasks: [
+              ...current.tasks,
+              {
+                id: `${subject}-ai-task-${Date.now()}`,
+                title: nextTask.title || `${subject}AI建议任务`,
+                problem: nextTask.problem || result.strategy_suggestion || "请明确这个任务要解决的学科问题。",
+                time: nextTask.time || "每周2-3次，每次25-40分钟",
+                material: nextTask.material || current.materials?.[0]?.name || "课本、错题本或专项资料",
+                detail: nextTask.detail || "写清楚任务步骤、资料使用方式和完成顺序。",
+                standard: nextTask.standard || "写清楚完成标准和检查方式。",
+                studentNote: nextTask.studentNote || "",
+              },
+            ],
+            aiNote: result.ai_note || "AI已新增一条可继续修改的学习任务。",
+          }));
+        } else {
+          updateStrategyWorkspace(subject, (current) => ({
+            ...current,
+            tasks: current.tasks.map((task) =>
+              task.id === targetId
+                ? {
+                    ...task,
+                    title: nextTask.title || task.title,
+                    problem: nextTask.problem || task.problem,
+                    time: nextTask.time || task.time,
+                    material: nextTask.material || task.material,
+                    detail: nextTask.detail || task.detail,
+                    standard: nextTask.standard || task.standard,
+                    studentNote: nextTask.studentNote || task.studentNote,
+                  }
+                : task
+            ),
+            aiNote: result.ai_note || "AI已优化当前学习任务。",
+          }));
+        }
+      } else if (section === "material") {
+        updateStrategyWorkspace(subject, (current) => ({
+          ...current,
+          aiNote: result.ai_note || result.strategy_suggestion || "AI已给出资料使用建议。",
+        }));
       }
-      updateStrategyWorkspace(subject, (workspace) => ({
-        ...workspace,
-        tasks: workspace.tasks.map((task) =>
-          task.id === targetId
-            ? {
-                ...task,
-                detail: `${task.detail} AI建议：先把任务控制在一个明确时间段内，开始前准备好${task.material}，完成后立刻记录一个收获和一个问题。`,
-                standard: `${task.standard} 同时要求学生能用一句话说明：我今天这个任务解决了什么问题。`,
-              }
-            : task
-        ),
-      }));
-      return;
+      setStrategyAiStatus("AI建议已生成");
+    } catch (error) {
+      showAiError(error, "AI暂时没有完成策略建议，请稍后再试。");
+      setStrategyAiStatus("AI建议暂不可用");
     }
-
   }
 
   function printPage(actionName = "下载或打印PDF", message = "PDF下载和打印属于会员资料导出能力，需要登录并开通会员。") {
@@ -3256,7 +3328,7 @@ function App() {
   }
 
   async function sendFreeAsk() {
-    if (!requireMemberAction("使用AI自由问", sendFreeAsk, "AI自由问可以回答问题、识别上传材料、生成学习解释或知识图片，需要登录并开通会员后使用。")) return;
+    if (!requireMemberAction("向AI提问", sendFreeAsk, "AI自由问会回答当前问题或当前上传文件，需要会员权限。")) return;
     if (freeAskSendingRef.current || freeAskStatus === "loading") return;
     const content = freeAskInput.trim();
     if (!content && !freeAskFiles.length) return;
@@ -3268,10 +3340,26 @@ function App() {
     freeAskLastSubmitRef.current = { signature: submitSignature, time: now };
     setFreeAskStatus("loading");
     clearAiNotice();
-    console.info("树子AI任务提示词", buildAgentPrompt("freeAsk", buildStudentArchiveSnapshot({ answers, records, mistakes })));
-    const wantsImage = /图|图片|结构图|画|生成图片|知识卡片/.test(content);
     const selectedModel = freeAskModelOptions.find((option) => option.value === freeAskModelChoice) || freeAskModelOptions[0];
-    const attachmentText = freeAskFiles.length ? `我上传了 ${freeAskFiles.length} 个附件，请结合附件一起看。` : "";
+    const wantsImage = /(图片|画图|生成图|知识图|示意图|结构图|图解|可视化|海报)/.test(content);
+    console.info(
+      "AI自由问提示词",
+      buildAgentPrompt(
+        "freeAsk",
+        buildPageOnlySnapshot({
+          page: "free-ask",
+          answers,
+          payload: {
+            question: content,
+            wantsImage,
+            provider: selectedModel.provider,
+            mode: selectedModel.mode,
+            fileNames: freeAskFiles.map((file) => file.name),
+          },
+        })
+      )
+    );
+    const attachmentText = freeAskFiles.length ? `已上传 ${freeAskFiles.length} 个文件，请AI根据文件回答。` : "";
     const assistantId = `ask-ai-${Date.now()}`;
     const userMessage = {
       id: `ask-user-${Date.now()}`,
@@ -3282,8 +3370,9 @@ function App() {
     const assistantMessage = {
       id: assistantId,
       role: "assistant",
-      content: "我正在阅读你的问题和附件，请稍等。",
+      content: "AI正在阅读你的问题...",
       note: null,
+      imageBase64: "",
     };
     setFreeAskMessages((prev) => [...prev, userMessage, assistantMessage]);
     setFreeAskInput("");
@@ -3301,27 +3390,28 @@ function App() {
         method: "POST",
         body: formData,
       });
-      const note = wantsImage ? buildKnowledgeNote(content.replace(/生成|图片|结构图|画|知识卡片/g, "").trim() || content) : null;
       setFreeAskMessages((prev) =>
         prev.map((message) =>
           message.id === assistantId
             ? {
                 ...message,
-                content: data.answer || "AI已完成回答，但返回内容为空，请换一种问法再试。",
-                note,
+                content: data.answer || "AI已经收到问题，但暂时没有生成有效回答，请换一种问法再试。",
+                imageBase64: data.imageBase64 || "",
+                note: null,
               }
             : message
         )
       );
     } catch (error) {
-      showAiError(error, "AI自由问暂时没有响应，请稍后再试。");
+      showAiError(error, "AI自由问暂时不可用，请稍后再试。");
       setFreeAskMessages((prev) =>
         prev.map((message) =>
           message.id === assistantId
             ? {
                 ...message,
-                content: "AI自由问暂时没有响应。你可以稍后再试，或者把问题拆短一点重新发送。",
-                note: wantsImage ? buildKnowledgeNote(content.replace(/生成|图片|结构图|画|知识卡片/g, "").trim() || content) : null,
+                content: "AI暂时没有完成回答，请稍后再试，或减少文件数量后重新提问。",
+                imageBase64: "",
+                note: null,
               }
             : message
         )
@@ -6565,6 +6655,15 @@ function downloadNoteSvg(note) {
   URL.revokeObjectURL(url);
 }
 
+function downloadBase64Image(imageBase64, filename = "AI-image.png") {
+  const link = document.createElement("a");
+  link.href = `data:image/png;base64,${imageBase64}`;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
 function ModernKnowledgeNotePage({
   knowledgeQuestion,
   setKnowledgeQuestion,
@@ -6678,17 +6777,38 @@ function ModernKnowledgeNotePage({
 }
 
 function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile, sendFreeAsk, status, modelChoice, setModelChoice }) {
-  const quickPrompts = ["帮我分析一道数学题", "把细胞结构做成知识图", "黑洞为什么会形成", "我总是拖延怎么办"];
-  const formatSize = (size) => (size > 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(size / 1024))} KB`);
+  const text = {
+    title: "\u4f60\u4eca\u5929\u5728\u60f3\u4e9b\u4ec0\u4e48\uff1f",
+    intro:
+      "\u53ef\u4ee5\u95ee\u4f5c\u4e1a\u3001\u77e5\u8bc6\u70b9\u3001\u5b66\u4e60\u65b9\u6cd5\uff0c\u4e5f\u53ef\u4ee5\u95ee\u79d1\u5b66\u3001\u751f\u6d3b\u3001\u5174\u8da3\u548c\u4efb\u4f55\u7a81\u7136\u60f3\u5230\u7684\u95ee\u9898\u3002\u4e0a\u4f20\u56fe\u7247\u6216\u6587\u4ef6\u540e\uff0cAI\u53ef\u4ee5\u7ed3\u5408\u6750\u6599\u4e00\u8d77\u56de\u7b54\u3002",
+    user: "\u6211",
+    assistant: "\u6811\u5b50AI",
+    upload: "\u4e0a\u4f20\u6587\u4ef6\u6216\u56fe\u7247",
+    placeholder: "\u8f93\u5165\u95ee\u9898\uff0c\u4e5f\u53ef\u4ee5\u5148\u70b9\u5de6\u4fa7 + \u4e0a\u4f20\u56fe\u7247\u6216\u6587\u4ef6",
+    modelLabel: "\u9009\u62e9AI\u6a21\u578b",
+    send: "\u53d1\u9001\u95ee\u9898",
+    remove: "\u79fb\u9664",
+    downloadImage: "\u4e0b\u8f7d\u56fe\u7247",
+    generatedImage: "AI\u751f\u6210\u56fe\u7247",
+  };
+  const quickPrompts = [
+    "\u5e2e\u6211\u5206\u6790\u4e00\u9053\u6570\u5b66\u9898",
+    "\u628a\u7ec6\u80de\u7ed3\u6784\u505a\u6210\u77e5\u8bc6\u56fe",
+    "\u9ed1\u6d1e\u4e3a\u4ec0\u4e48\u4f1a\u5f62\u6210",
+    "\u6211\u603b\u662f\u62d6\u5ef6\u600e\u4e48\u529e",
+  ];
+  const formatSize = (size) => (size > 1024 * 1024 ? (size / 1024 / 1024).toFixed(1) + " MB" : Math.max(1, Math.round(size / 1024)) + " KB");
+  const canSend = status !== "loading" && (input.trim() || files.length > 0);
+
   return (
     <section className="free-ask-page">
       <div className="free-ask-center">
-        <h2>你今天在想些什么？</h2>
-        <p className="free-ask-intro">可以问作业、知识点、学习方法，也可以问科学、生活、兴趣和任何突然想到的问题。上传图片或文件后，AI可以结合材料一起回答。</p>
+        <h2>{text.title}</h2>
+        <p className="free-ask-intro">{text.intro}</p>
         <div className="free-ask-thread">
           {messages.map((message) => (
             <article key={message.id} className={message.role === "user" ? "free-message is-user" : "free-message"}>
-              <strong>{message.role === "user" ? "我" : "树子AI"}</strong>
+              <strong>{message.role === "user" ? text.user : text.assistant}</strong>
               <p>{message.content}</p>
               {message.attachments?.length > 0 && (
                 <div className="free-message-attachments">
@@ -6700,12 +6820,21 @@ function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile
                   ))}
                 </div>
               )}
+              {message.imageBase64 && (
+                <div className="free-note-preview">
+                  <img src={"data:image/png;base64," + message.imageBase64} alt={text.generatedImage} />
+                  <button type="button" className="ghost-action" onClick={() => downloadBase64Image(message.imageBase64, "AI-free-ask-image.png")}>
+                    <Download size={17} />
+                    {text.downloadImage}
+                  </button>
+                </div>
+              )}
               {message.note && (
                 <div className="free-note-preview">
-                  <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(message.note.svg)}`} alt={message.note.title} />
+                  <img src={"data:image/svg+xml;charset=utf-8," + encodeURIComponent(message.note.svg)} alt={message.note.title} />
                   <button type="button" className="ghost-action" onClick={() => downloadNoteSvg(message.note)}>
                     <Download size={17} />
-                    下载图片
+                    {text.downloadImage}
                   </button>
                 </div>
               )}
@@ -6719,7 +6848,7 @@ function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile
                 {file.previewUrl ? <img src={file.previewUrl} alt="" /> : <FileText size={16} />}
                 <span>{file.name}</span>
                 <em>{formatSize(file.size)}</em>
-                <button type="button" onClick={() => removeFile(file.id)} aria-label={`移除${file.name}`}>
+                <button type="button" onClick={() => removeFile(file.id)} aria-label={text.remove + file.name}>
                   <Trash2 size={14} />
                 </button>
               </div>
@@ -6727,7 +6856,7 @@ function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile
           </div>
         )}
         <div className="free-ask-input">
-          <label className="free-attach-button" aria-label="上传文件或图片" title="上传文件或图片">
+          <label className="free-attach-button" aria-label={text.upload} title={text.upload}>
             <Plus size={20} />
             <input type="file" accept="image/*,.pdf,.doc,.docx,.txt" multiple onChange={handleFiles} />
           </label>
@@ -6738,24 +6867,19 @@ function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
                 event.stopPropagation();
-                if (status !== "loading") sendFreeAsk();
+                if (canSend) sendFreeAsk();
               }
             }}
-            placeholder="输入问题，也可以先点左侧 + 上传图片或文件"
+            placeholder={text.placeholder}
           />
-          <select
-            className="free-model-select"
-            value={modelChoice}
-            onChange={(event) => setModelChoice(event.target.value)}
-            aria-label="选择AI模型"
-          >
+          <select className="free-model-select" value={modelChoice} onChange={(event) => setModelChoice(event.target.value)} aria-label={text.modelLabel}>
             {freeAskModelOptions.map((option) => (
               <option value={option.value} key={option.value}>
                 {option.label}
               </option>
             ))}
           </select>
-          <button type="button" className="free-send" onClick={sendFreeAsk} aria-label="发送问题" disabled={status === "loading"} aria-busy={status === "loading"}>
+          <button type="button" className="free-send" onClick={sendFreeAsk} aria-label={text.send} disabled={!canSend} aria-busy={status === "loading"}>
             {status === "loading" ? <Loader2 className="spin" size={20} /> : <Send size={20} />}
           </button>
         </div>

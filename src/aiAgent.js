@@ -1,24 +1,26 @@
 export const shuziLearningCoachAgent = {
   name: "树子AI学习教练智能体",
-  version: "0.2.0",
+  version: "0.4.0",
   mission:
-    "围绕学生长期学习档案，先了解学生，再形成学情画像，再辅助制定科目策略、学习任务、学习计划、方法习惯训练和错题训练。",
+    "先通过学生档案理解学生，再形成学情画像，并把画像转化为科目策略、学习任务、学习计划和方法习惯训练。",
   coreLogic: [
-    "学情问卷和学情陈述是学生档案的第一层数据来源，用于了解学生基本情况、学习流程、问题表现和主观感受。",
-    "错题专项、每日反思、每周讨论和计划执行记录会持续更新学生档案，使画像不是一次性报告，而是动态数据库。",
-    "学情画像页是统一分析入口，AI必须整合问卷、陈述、错题、计划执行和反思数据，形成对学生学习状态的整体认知。",
-    "策略与任务页只负责根据画像生成科目学习策略、学习任务、资料使用建议和执行标准，不替代画像分析。",
-    "学习计划页只负责把已确定的策略和任务安排进学生空闲时间，并选择本周方法训练和习惯培养。",
-    "错题专项只负责错题入库、错因归类、相似题训练和错题集整理。",
-    "知识笔记只负责把学生提出的知识问题整理成严谨、丰富、可下载的知识图或知识讲解。",
+    "学情画像只整合学情问卷、学情陈述、每日反思和每周讨论；最近1-2个月的信息优先作为动态记忆。",
+    "策略与任务只根据最新学情画像和当前科目生成可执行建议，不重新诊断，也不处理错题图片。",
+    "学习计划只把已确认的策略、任务、空闲时间、方法习惯目标安排进周计划。",
+    "错题专项、知识笔记、学习日历、学习资料库、学习社区、AI自由问不参与学情画像和学习计划判断。",
+    "错题专项独立使用 Gemini，负责当前错题或试卷材料分析、相似题和错题档案。",
+    "知识笔记独立使用 OpenAI 图像模型，把当前知识问题生成知识图。",
+    "AI自由问只回答当前问题，可由学生选择 OpenAI 或 Gemini，不把回答自动写成学情判断。",
+    "学习日历、学习资料库和学习社区只做记录、资料和交流管理，不调用 AI。",
   ],
   dataMemory:
-    "每个学生必须拥有独立 student_id。所有问卷、陈述、错题、策略、任务、计划、反思、讨论、AI报告都写入PostgreSQL，并按时间版本持续更新。",
+    "每个学生必须拥有独立 student_id。问卷、陈述、反思、讨论、AI画像、策略任务、计划、错题、知识图、资料和社区记录都写入 PostgreSQL；但只有问卷、陈述、每日反思和每周讨论进入学情画像分析。",
   guardrails: [
     "不能把一次陈述当成全部结论，必须区分已确认事实、AI推断和需要继续追问的问题。",
     "所有建议必须具体、可执行、可检查，避免空泛鼓励。",
-    "不同页面的AI只回答本页面任务，不跨页面乱生成。",
+    "不同页面的 AI 只回答本页面任务，不跨页面混用数据。",
     "面向学生和家长时语言要专业、温和、可理解，不给学生贴负面标签。",
+    "所有 AI 调用只在用户明确点击按钮或提交问题时执行一次，不自动重复生成。",
   ],
 };
 
@@ -29,91 +31,174 @@ export const postgresqlArchiveTables = [
   "learning_token_wallets",
   "learning_token_transactions",
   "storage_quotas",
-  "storage_expansion_orders",
   "payment_orders",
   "student_intake_questionnaires",
   "student_statements",
   "statement_audio_files",
   "student_learning_profiles",
-  "subject_strategies",
-  "learning_tasks",
-  "weekly_study_plans",
-  "method_habit_training",
-  "daily_reflections",
-  "weekly_discussions",
+  "student_archive_events",
   "mistake_files",
-  "mistake_questions",
   "generated_practice",
   "knowledge_notes",
-  "ai_run_logs",
+  "learning_calendar_events",
+  "library_items",
 ];
+
+export const profileSourcePolicy = {
+  include: ["学情问卷", "学情陈述", "每日反思", "每周讨论"],
+  exclude: ["错题专项", "知识笔记", "学习日历", "学习资料库", "学习社区", "AI自由问"],
+  memoryWindow: "优先参考最近1-2个月记录；旧记录只作为背景。",
+};
 
 export const aiTaskPrompts = {
   profile: {
     name: "学情画像统一分析",
-    scope: "只整合学生档案，形成学情画像、核心判断、维度评分、证据、追问问题和下一步优先级。",
-    mustUse: ["学情问卷", "学情陈述", "错题记录", "学习计划执行", "每日反思", "每周讨论"],
-    mustNot: ["直接替学生制定完整周计划", "生成相似题", "输出知识图片"],
-    output:
-      "JSON: summary, core_problem, evidence, profile_scores, causes, priority_order, student_message, parent_message, follow_up_questions, next_data_to_collect",
+    scope:
+      "只整合学情问卷、学情陈述、每日反思和每周讨论，形成学情画像、核心判断、维度评分、证据、追问问题和下一步优先级。",
+    mustUse: [...profileSourcePolicy.include, profileSourcePolicy.memoryWindow],
+    mustNot: [...profileSourcePolicy.exclude, "直接制定完整周计划", "生成相似题", "输出知识图片"],
+    output: "JSON: summary, core, reasons, evidence, tags, questions, next, archiveConclusion, scores",
   },
   strategy: {
     name: "策略与任务建议",
-    scope: "只根据学情画像为某一科目制定学习策略、学习任务、资料使用方式和完成标准。",
-    mustUse: ["最新学情画像", "当前科目", "学生薄弱点", "错题证据"],
-    mustNot: ["重新做整体画像", "安排具体周历时间", "生成每日反思表"],
-    output: "JSON: subject, strategy, tasks[], materials[], method_training, ai_revision_notes",
+    scope:
+      "只根据最新学情画像和当前科目，为学生制定科目学习策略、学习任务、资料使用方式和完成标准。",
+    mustUse: ["最新学情画像", "当前科目", "学生自己填写的策略和任务", "已确认的学习目标"],
+    mustNot: ["重新做整体画像", "安排具体周历时间", "分析错题图片", "生成每日反思表"],
+    output: "JSON: strategy_suggestion, ai_note, task, revision_notes",
   },
   plan: {
     name: "学习计划制定",
-    scope: "只根据已确认策略任务和学生空闲时间生成周计划，并选择1-3个方法/习惯训练目标。",
-    mustUse: ["学生空闲时间", "策略与任务", "方法习惯目标", "计划执行记录"],
-    mustNot: ["重新诊断学情", "生成科目策略长报告", "分析具体错题图片"],
-    output: "JSON: weekly_plan, method_habit_table, execution_notes, printable_pdf_payload",
+    scope:
+      "只根据已确认策略任务、学生空闲时间、方法训练和习惯培养目标，生成可修改的周学习计划。",
+    mustUse: ["学情画像", "策略与任务", "空闲时间", "方法习惯目标"],
+    mustNot: ["重新诊断学情", "生成科目策略长报告", "分析错题图片", "生成相似题"],
+    output: "JSON: note, rows, method_focus_suggestions, habit_focus_suggestions, execution_notes",
   },
   mistakePractice: {
-    name: "错题专项训练",
-    scope: "只围绕已入库错题生成同类题、错因复盘、答案解析和训练记录。",
-    mustUse: ["选中的错题", "错因", "解题方法", "学生作答结果"],
-    mustNot: ["做全局画像", "制定长期计划"],
-    output: "JSON: similar_questions, answers, solution_steps, review_schedule",
+    name: "错题专项",
+    scope:
+      "只围绕当前上传或选中的错题、作业、试卷材料，进行错题分析、同类题生成、试卷分析和错题档案整理。",
+    mustUse: ["当前错题材料", "当前学生提示词", "当前科目"],
+    mustNot: ["学情画像总分析", "学习计划制定", "知识图生成", "学习社区内容"],
+    output:
+      "JSON: title, summary, sections, extracted_questions, similar_questions, training_suggestions, archive_note",
   },
   knowledgeNote: {
-    name: "知识笔记制图",
-    scope: "只把学生提出的知识问题整理成严谨的知识讲解和可下载知识图。",
-    mustUse: ["知识主题", "年级水平", "学科"],
-    mustNot: ["诊断学生人格或动机", "制定学习计划"],
-    output: "JSON/SVG: title, subtitle, labeled_diagram_prompt, key_points, summary",
+    name: "知识笔记与知识图",
+    scope:
+      "只把学生当前提出的知识问题整理成严谨、丰富、可下载的知识图或知识讲解。",
+    mustUse: ["当前知识主题", "年级水平", "学生可编辑的提示词模板"],
+    mustNot: ["诊断学生学习画像", "制定学习计划", "分析错题档案"],
+    output: "图片与简短知识说明",
   },
   freeAsk: {
     name: "AI自由问",
-    scope: "回答学生即时学习问题；如果涉及画像、策略、计划、错题或知识图，必须引导到对应模块或调用对应任务规则。",
-    mustUse: ["学生提问", "可用学生档案摘要"],
-    mustNot: ["绕过会员权限", "把自由问结果直接写成最终画像"],
-    output: "Markdown or JSON depending on intent",
+    scope:
+      "回答学生当前提出的任意问题，可以结合当前上传的图片或文件。模型可在 OpenAI 和 Gemini 之间切换。",
+    mustUse: ["当前提问", "当前上传附件", "当前选择的模型和模式"],
+    mustNot: ["自动写入学情画像", "自动制定学习计划", "重复提交同一问题"],
+    output: "Markdown 文本；如果明确要求图片，可返回图片结果",
   },
 };
 
-export function buildStudentArchiveSnapshot({ answers, records, mistakes, strategies, plans }) {
+function studentBase(answers = {}) {
   return {
-    student: {
-      name: answers?.name || "",
-      grade: answers?.grade || "",
+    name: answers?.name || "",
+    grade: answers?.grade || "",
+    weakSubjects: answers?.weakSubjects || [],
+    coreProblemText: answers?.coreProblemText || "",
+  };
+}
+
+export function buildProfileArchiveSnapshot({
+  answers = {},
+  records = [],
+  dailyReflections = [],
+  weeklyDiscussions = [],
+} = {}) {
+  return {
+    policy: profileSourcePolicy,
+    student: studentBase(answers),
+    questionnaire: answers || {},
+    statements: records || [],
+    dailyReflections,
+    weeklyDiscussions,
+  };
+}
+
+export function buildStrategyArchiveSnapshot({
+  answers = {},
+  records = [],
+  aiInsight = null,
+  strategies = null,
+  activeSubject = "",
+  dailyReflections = [],
+  weeklyDiscussions = [],
+} = {}) {
+  return {
+    policy: {
+      basis: "只使用学情画像和当前科目策略任务上下文，不重新分析错题或生成计划。",
+      excluded: profileSourcePolicy.exclude,
+    },
+    student: studentBase(answers),
+    profile: aiInsight,
+    subject: activeSubject,
+    questionnaireSummary: {
       weakSubjects: answers?.weakSubjects || [],
       coreProblemText: answers?.coreProblemText || "",
     },
-    questionnaire: answers || {},
-    statements: records || [],
-    mistakes: mistakes || null,
-    strategies: strategies || null,
-    plans: plans || null,
+    recentStatements: records || [],
+    dailyReflections,
+    weeklyDiscussions,
+    strategies,
   };
+}
+
+export function buildPlanArchiveSnapshot({
+  answers = {},
+  records = [],
+  aiInsight = null,
+  strategies = null,
+  plans = null,
+  dailyReflections = [],
+  weeklyDiscussions = [],
+} = {}) {
+  return {
+    policy: {
+      basis: "根据已确认学情画像、策略任务、空闲时间和方法习惯目标制定计划。",
+      excluded: ["错题图片分析", "知识图生成", "学习社区内容", "资料库文件内容"],
+    },
+    student: studentBase(answers),
+    profile: aiInsight,
+    recentStatements: records || [],
+    dailyReflections,
+    weeklyDiscussions,
+    strategies,
+    plans,
+  };
+}
+
+export function buildPageOnlySnapshot({ page = "", answers = {}, payload = {} } = {}) {
+  return {
+    policy: "只处理当前页面当前请求，不调用或更新学情画像。",
+    page,
+    student: {
+      grade: answers?.grade || "",
+    },
+    payload,
+  };
+}
+
+export function buildStudentArchiveSnapshot(input = {}) {
+  return buildProfileArchiveSnapshot(input);
 }
 
 export function buildAgentPrompt(taskKey, archiveSnapshot) {
   const task = aiTaskPrompts[taskKey];
   return {
     agent: shuziLearningCoachAgent.name,
+    version: shuziLearningCoachAgent.version,
     mission: shuziLearningCoachAgent.mission,
     task: task?.name || taskKey,
     taskScope: task?.scope || "",

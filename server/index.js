@@ -1019,6 +1019,95 @@ app.post("/api/ai/transcribe", requireAuth, upload.single("audio"), async (req, 
   }
 });
 
+app.post("/api/ai/profile", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    ensureOpenAIKey();
+    await assertTokenBalance(req.user.id, 12);
+    const student = await getPrimaryStudent(req.user);
+    const { archiveSnapshot = {} } = req.body || {};
+    const response = await openai.responses.create({
+      model: textModel,
+      input: [
+        {
+          role: "system",
+          content:
+            "You are the Shuzi AI learning profile agent. Only integrate questionnaire, student statements, daily reflections, and weekly discussions, with recent one to two months as priority. Do not use mistake practice, knowledge notes, calendar, library, community, or free-chat content as profile evidence. Separate confirmed facts, AI inference, and follow-up questions. Return strict JSON in Chinese.",
+        },
+        {
+          role: "user",
+          content: jsonInstruction(
+            "{summary, core, reasons:[string], evidence:[string], tags:[string], questions:[string], next, archiveConclusion, scores:{motivation:number, method:number, habit:number, execution:number, subject_strategy:number, emotion:number}}"
+          ) + "\nStudent profile archive snapshot:\n" + JSON.stringify(archiveSnapshot),
+        },
+      ],
+    });
+    const profile = parseJsonText(getResponseText(response), {
+      summary: "",
+      core: "",
+      reasons: [],
+      evidence: [],
+      tags: [],
+      questions: [],
+      next: "",
+      archiveConclusion: "",
+      scores: {},
+    });
+    const saved = await withTransaction(async (client) => {
+      const row = (
+        await client.query(
+          "INSERT INTO student_learning_profiles (student_id, user_id, report) VALUES ($1, $2, $3) RETURNING *",
+          [student.id, req.user.id, JSON.stringify({ profile, sourcePolicy: archiveSnapshot?.policy || null })]
+        )
+      ).rows[0];
+      await client.query(
+        "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'learning_profile_ai', $3, $4)",
+        [student.id, req.user.id, "AI learning profile analysis", JSON.stringify({ profile, sourcePolicy: archiveSnapshot?.policy || null })]
+      );
+      return row;
+    });
+    await recordTokenUsage(req.user.id, 12, "AI learning profile analysis", { feature: "profile", model: textModel, profileId: saved.id });
+    res.json({ profile, saved });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/ai/strategy", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    ensureOpenAIKey();
+    await assertTokenBalance(req.user.id, 8);
+    const student = await getPrimaryStudent(req.user);
+    const { subject = "", section = "strategy", mode = "generate", targetId = "", task = null, archiveSnapshot = {} } = req.body || {};
+    const response = await openai.responses.create({
+      model: textModel,
+      input: [
+        {
+          role: "system",
+          content:
+            "You are the Shuzi AI subject strategy agent. Only work on the current subject strategy, study task, material-use advice, and completion standards based on the latest learning profile and current subject context. Do not rediagnose the whole student, do not create a weekly timetable, do not analyze mistake images. Return strict JSON in Chinese.",
+        },
+        {
+          role: "user",
+          content: jsonInstruction(
+            "{strategy_suggestion, ai_note, task:{title, problem, time, material, detail, standard, studentNote}, revision_notes:[string]}"
+          ) + "\nSubject: " + subject + "\nSection: " + section + "\nMode: " + mode + "\nTarget ID: " + targetId + "\nCurrent task JSON:\n" + JSON.stringify(task || {}) + "\nStrategy archive snapshot:\n" + JSON.stringify(archiveSnapshot),
+        },
+      ],
+    });
+    const result = parseJsonText(getResponseText(response), { strategy_suggestion: "", ai_note: "", task: null, revision_notes: [] });
+    await query(
+      "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'subject_strategy_ai', $3, $4)",
+      [student.id, req.user.id, "AI subject strategy", JSON.stringify({ subject, section, mode, targetId, result })]
+    );
+    await recordTokenUsage(req.user.id, 8, "AI subject strategy", { feature: "strategy", model: textModel, subject, section, mode });
+    res.json({ result });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/ai/study-plan", requireAuth, async (req, res, next) => {
   try {
     await assertPaidMember(req.user.id);
@@ -1032,29 +1121,27 @@ app.post("/api/ai/study-plan", requireAuth, async (req, res, next) => {
         {
           role: "system",
           content:
-            "你是树子AI学习计划制定智能体。只根据已确认的学情画像、科目策略、学习任务、空闲时间和方法习惯目标，生成可以由学生继续修改的周学习计划。不要重新诊断学情，不要分析图片，不要生成相似题。输出必须具体、可执行、时间不过量。",
+            "You are the Shuzi AI study plan agent. Only arrange confirmed strategies, tasks, available time, method training, and habit goals into an editable weekly plan. Do not rediagnose the learning profile, do not analyze images, and do not generate similar questions. Keep the plan concrete, executable, and not overloaded. Return strict JSON in Chinese.",
         },
         {
           role: "user",
-          content: `${jsonInstruction(
-            "{note, rows:[{cells:{星期一:{start,end,task,note},星期二:{start,end,task,note},星期三:{start,end,task,note},星期四:{start,end,task,note},星期五:{start,end,task,note},星期六:{start,end,task,note},星期日:{start,end,task,note}}}], method_focus_suggestions, habit_focus_suggestions, execution_notes}"
-          )}\n学生档案摘要：${JSON.stringify(archiveSnapshot)}\n当前计划表：${JSON.stringify(currentPlanRows)}\n方法训练目标：${JSON.stringify(methodFocusRows)}\n习惯培养目标：${JSON.stringify(habitFocusRows)}`,
+          content: jsonInstruction(
+            "{note, rows:[{cells:{\u661f\u671f\u4e00:{start,end,task,note},\u661f\u671f\u4e8c:{start,end,task,note},\u661f\u671f\u4e09:{start,end,task,note},\u661f\u671f\u56db:{start,end,task,note},\u661f\u671f\u4e94:{start,end,task,note},\u661f\u671f\u516d:{start,end,task,note},\u661f\u671f\u65e5:{start,end,task,note}}}], method_focus_suggestions, habit_focus_suggestions, execution_notes}"
+          ) + "\nPlan archive snapshot:\n" + JSON.stringify(archiveSnapshot) + "\nCurrent weekly plan rows:\n" + JSON.stringify(currentPlanRows) + "\nMethod focus rows:\n" + JSON.stringify(methodFocusRows) + "\nHabit focus rows:\n" + JSON.stringify(habitFocusRows),
         },
       ],
     });
     const plan = parseJsonText(getResponseText(response), { rows: [], note: "" });
     await query(
-      `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
-       VALUES ($1, $2, 'study_plan_ai', 'AI辅助制定学习计划', $3)`,
-      [student.id, req.user.id, JSON.stringify({ plan })]
+      "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'study_plan_ai', $3, $4)",
+      [student.id, req.user.id, "AI study plan", JSON.stringify({ plan })]
     );
-    await recordTokenUsage(req.user.id, 8, "AI辅助制定学习计划", { feature: "study-plan" });
+    await recordTokenUsage(req.user.id, 8, "AI study plan", { feature: "study-plan", model: textModel });
     res.json({ plan });
   } catch (error) {
     next(error);
   }
 });
-
 app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), async (req, res, next) => {
   try {
     await assertPaidMember(req.user.id);
@@ -1260,33 +1347,36 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 6), async (req, 
     await assertPaidMember(req.user.id);
     const student = await getPrimaryStudent(req.user);
     const { question = "", wantsImage = "false", provider = "openai", mode = "fast" } = req.body || {};
-    const tokenCost = wantsImage === "true" ? 12 : mode === "thinking" ? 8 : 5;
-    await assertTokenBalance(req.user.id, tokenCost);
     const files = req.files || [];
     const aiProvider = normalizeAiProvider(provider);
     const aiMode = normalizeAiMode(mode);
+    const shouldGenerateImage = wantsImage === "true";
+    const tokenCost = shouldGenerateImage ? 35 : aiMode === "thinking" ? 8 : 5;
+    await assertTokenBalance(req.user.id, tokenCost);
     if (!String(question).trim() && !files.length) {
-      return res.status(400).json({ error: "QUESTION_REQUIRED", message: "请输入问题，或上传图片/文件。" });
+      return res.status(400).json({ error: "QUESTION_REQUIRED", message: "Please enter a question or upload a file." });
     }
     const fileSummary = files.length
-      ? files.map((file) => `${file.originalname}（${file.mimetype || "未知类型"}）`).join("、")
-      : "无附件";
+      ? files.map((file) => file.originalname + " (" + (file.mimetype || "unknown") + ")").join(", ")
+      : "no attachment";
     const documentText = await makeDocumentTextSummary(files);
     const promptText = [
-      `学生问题：${question || "请结合附件回答。"}`,
-      `是否希望生成知识图方向：${wantsImage === "true" ? "是" : "否"}`,
-      `附件：${fileSummary}`,
-      documentText ? `附件文字摘录：\n${documentText}` : "",
+      "Student question: " + (question || "Please answer based on the attachments."),
+      "User wants an image: " + (shouldGenerateImage ? "yes" : "no"),
+      "Attachments: " + fileSummary,
+      documentText ? "Extracted attachment text:\n" + documentText : "",
     ].filter(Boolean).join("\n");
 
     let answer = "";
     let model = "";
+    let imageBase64 = "";
     if (aiProvider === "gemini") {
+      ensureGeminiKey();
       model = getGeminiModel(aiMode);
       answer = await generateGeminiText({
         model,
         prompt: [
-          "你是树子AI自由问助手。可以回答学习问题、知识问题、作业问题，也可以回答学生对科学、生活、兴趣和开放想法的提问。回答要清晰、友好、适合中学生理解；如果问题涉及学习，要给出可执行的下一步。",
+          "You are Shuzi AI free-question assistant. Answer only the current question and current attachments. You may answer study, knowledge, homework, science, life, interest, or open-ended questions. Be clear, warm, and suitable for middle/high-school students. If it is a learning question, give a concrete next step. Answer in Chinese.",
           promptText,
         ].join("\n"),
         files,
@@ -1302,52 +1392,62 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 6), async (req, 
           {
             role: "system",
             content:
-              "你是树子AI自由问助手。可以回答学习问题、知识问题、作业问题，也可以回答学生对科学、生活、兴趣和开放想法的提问。回答要清晰、友好、适合中学生理解；如果问题涉及学习，要给出可执行的下一步；如果用户要求做知识图，先用文字说明结构和重点。",
+              "You are Shuzi AI free-question assistant. Answer only the current question and current attachments. You may answer study, knowledge, homework, science, life, interest, or open-ended questions. Be clear, warm, and suitable for middle/high-school students. If it is a learning question, give a concrete next step. If the user asks for a knowledge image, first explain the structure and key points. Answer in Chinese.",
           },
           {
             role: "user",
-            content: [
-              {
-                type: "input_text",
-                text: promptText,
-              },
-              ...imageInputs,
-            ],
+            content: [{ type: "input_text", text: promptText }, ...imageInputs],
           },
         ],
       });
       answer = getResponseText(response);
     }
 
-    answer = answer || "AI已阅读你的问题，但暂时没有生成有效回答，请换一种问法再试。";
+    if (shouldGenerateImage) {
+      ensureOpenAIKey();
+      const imagePrompt = [
+        "Create a professional Chinese educational infographic image.",
+        "Use clear labels, structured annotations, readable hierarchy, and a clean study-note layout. The image must be useful for student learning.",
+        "Topic or request: " + (question || "knowledge explanation"),
+        answer ? "Text answer context: " + answer : "",
+      ].filter(Boolean).join("\n");
+      const imageResponse = await openai.responses.create({
+        model: imageModel,
+        input: imagePrompt,
+        tools: [{ type: "image_generation" }],
+      });
+      imageBase64 = getGeneratedImageBase64(imageResponse) || "";
+    }
+
+    answer = answer || "AI has read your question, but did not generate a valid answer. Please try asking in another way.";
+    const eventPayload = { question, answer, provider: aiProvider, mode: aiMode, model, imageModel: imageBase64 ? imageModel : null, hasImage: Boolean(imageBase64) };
     if (files.length) {
       await withTransaction(async (client) => {
         const fileRows = await saveUploadedFiles(client, req.user, student, "free_ask", files);
         await client.query(
-          `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
-           VALUES ($1, $2, 'free_ask', $3, $4)`,
-          [student.id, req.user.id, "AI自由问", JSON.stringify({ question, answer, provider: aiProvider, mode: aiMode, model, fileIds: fileRows.map((item) => item.id) })]
+          "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'free_ask', $3, $4)",
+          [student.id, req.user.id, "AI free ask", JSON.stringify({ ...eventPayload, fileIds: fileRows.map((item) => item.id) })]
         );
       });
     } else {
       await query(
-        `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
-         VALUES ($1, $2, 'free_ask', $3, $4)`,
-        [student.id, req.user.id, "AI自由问", JSON.stringify({ question, answer, provider: aiProvider, mode: aiMode, model })]
+        "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'free_ask', $3, $4)",
+        [student.id, req.user.id, "AI free ask", JSON.stringify(eventPayload)]
       );
     }
-    await recordTokenUsage(req.user.id, tokenCost, "AI自由问", {
+    await recordTokenUsage(req.user.id, tokenCost, "AI free ask", {
       feature: "free-ask",
       provider: aiProvider,
       mode: aiMode,
       model,
+      imageModel: imageBase64 ? imageModel : null,
+      hasImage: Boolean(imageBase64),
     });
-    res.json({ answer, provider: aiProvider, mode: aiMode, model });
+    res.json({ answer, provider: aiProvider, mode: aiMode, model, imageBase64, imageModel: imageBase64 ? imageModel : null });
   } catch (error) {
     next(error);
   }
 });
-
 app.post("/api/admin/memberships/activate", requireAdminToken, async (req, res) => {
   const { identifier, planId = "monthly", durationDays, paidAmountCny = 0, startDate } = req.body || {};
   const plan = membershipPlans[planId];
