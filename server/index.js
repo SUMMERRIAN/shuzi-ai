@@ -990,11 +990,6 @@ app.post("/api/ai/transcribe", requireAuth, upload.single("audio"), async (req, 
     await assertTokenBalance(req.user.id, 6);
     if (!req.file) return res.status(400).json({ error: "AUDIO_REQUIRED", message: "请上传音频文件。" });
     const student = await getPrimaryStudent(req.user);
-    const transcript = await openai.audio.transcriptions.create({
-      file: fs.createReadStream(req.file.path),
-      model: transcriptionModel,
-    });
-    const text = transcript.text || "";
     const saved = await withTransaction(async (client) => {
       const files = await saveUploadedFiles(client, req.user, student, "statement_audio", [req.file]);
       const row = (
@@ -1002,18 +997,43 @@ app.post("/api/ai/transcribe", requireAuth, upload.single("audio"), async (req, 
           `INSERT INTO statement_audio_files (student_id, user_id, file_id, transcript)
            VALUES ($1, $2, $3, $4)
            RETURNING *`,
-          [student.id, req.user.id, files[0]?.id || null, text]
+          [student.id, req.user.id, files[0]?.id || null, ""]
         )
       ).rows[0];
       await client.query(
         `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
          VALUES ($1, $2, 'audio_transcript', '语音陈述转写', $3)`,
-        [student.id, req.user.id, JSON.stringify({ transcript: text })]
+        [student.id, req.user.id, JSON.stringify({ status: "saved", audioId: row.id, fileId: files[0]?.id || null })]
       );
       return row;
     });
-    await recordTokenUsage(req.user.id, 6, "语音转文字", { feature: "transcribe", audioId: saved.id });
-    res.json({ transcript: text, saved });
+    let text = "";
+    let transcribeError = "";
+    try {
+      const filePath = (
+        await query("SELECT path FROM uploaded_files WHERE id = $1 AND user_id = $2", [saved.file_id, req.user.id])
+      ).rows[0]?.path;
+      const transcript = await openai.audio.transcriptions.create({
+        file: fs.createReadStream(filePath || req.file.path),
+        model: transcriptionModel,
+      });
+      text = transcript.text || "";
+      await query("UPDATE statement_audio_files SET transcript = $2 WHERE id = $1", [saved.id, text]);
+      await query(
+        `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
+         VALUES ($1, $2, 'audio_transcript_done', '语音陈述转写完成', $3)`,
+        [student.id, req.user.id, JSON.stringify({ transcript: text, audioId: saved.id })]
+      );
+      await recordTokenUsage(req.user.id, 6, "语音转文字", { feature: "transcribe", audioId: saved.id });
+    } catch (error) {
+      transcribeError = error.message || "语音已保存，但转写暂时失败。";
+      await query(
+        `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
+         VALUES ($1, $2, 'audio_transcript_pending', '语音陈述待转写', $3)`,
+        [student.id, req.user.id, JSON.stringify({ audioId: saved.id, error: transcribeError })]
+      );
+    }
+    res.json({ transcript: text, saved, transcribeError });
   } catch (error) {
     next(error);
   }

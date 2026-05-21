@@ -1775,6 +1775,8 @@ function App() {
   const [libraryStatus, setLibraryStatus] = useState("idle");
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
+  const processedAudioKeysRef = useRef(new Set());
+  const audioRecordSeqRef = useRef(0);
   const pendingMemberActionRef = useRef(null);
   const memberActionBypassRef = useRef(false);
   const freeAskSendingRef = useRef(false);
@@ -2600,6 +2602,53 @@ function App() {
     ]);
   }
 
+  async function saveAudioStatement(file, { key, url, title, type, fallbackContent }) {
+    if (!file || !key) return;
+    if (processedAudioKeysRef.current.has(key)) {
+      setAccountNotice("这段语音已经保存过了，不会重复分析同一个录音。");
+      return;
+    }
+    processedAudioKeysRef.current.add(key);
+    setRecordingState("processing");
+    let transcriptText = "";
+    let transcribeError = "";
+    try {
+      clearAiNotice();
+      const formData = new FormData();
+      formData.append("audio", file, file.name || title || "student-statement.webm");
+      const data = await apiRequest("/ai/transcribe", {
+        method: "POST",
+        body: formData,
+      });
+      transcriptText = data.transcript || "";
+      transcribeError = data.transcribeError || "";
+      if (transcribeError) {
+        showAiError({ message: transcribeError }, "语音已保存到个人档案，但本次暂时没有完成转写。");
+      }
+    } catch (error) {
+      processedAudioKeysRef.current.delete(key);
+      showAiError(error, "语音暂时没有保存成功，请稍后重新上传。");
+      setRecordingState("idle");
+      return;
+    }
+    setRecords((prev) => [
+      {
+        id: Date.now(),
+        type,
+        title,
+        content: transcriptText || fallbackContent || "语音已保存到个人学情档案，后续会在学情画像页面统一分析。",
+        time: "刚刚",
+        subject: statementSubject,
+        scene: statementScene,
+        intensity: statementIntensity,
+        tags: [statementSubject, statementScene, transcriptText ? "语音已转写" : "语音已保存"],
+        audioUrl: url,
+      },
+      ...prev,
+    ]);
+    setRecordingState("idle");
+  }
+
   async function startRecording() {
     if (!requireMemberAction("使用麦克风保存学情陈述", startRecording, "语音陈述会保存到个人档案，后续会在学情画像页面统一分析。")) return;
     try {
@@ -2615,21 +2664,16 @@ function App() {
         const url = URL.createObjectURL(blob);
         setAudioUrl(url);
         stream.getTracks().forEach((track) => track.stop());
-        setRecords((prev) => [
-          {
-            id: Date.now(),
-            type: "麦克风录音",
-            title: "学生语音申述",
-            content: "已保存一段实时录音，后续会转写成文字并进入个人学情档案。",
-            time: "刚刚",
-            subject: statementSubject,
-            scene: statementScene,
-            intensity: statementIntensity,
-            tags: [statementSubject, statementScene, "语音待转写"],
-            audioUrl: url,
-          },
-          ...prev,
-        ]);
+        audioRecordSeqRef.current += 1;
+        const file = new File([blob], `student-statement-${Date.now()}.webm`, { type: "audio/webm" });
+        const key = `recording-${audioRecordSeqRef.current}-${blob.size}`;
+        saveAudioStatement(file, {
+          key,
+          url,
+          type: "麦克风录音",
+          title: "学生语音陈述",
+          fallbackContent: "已保存一段实时录音，后续会在学情画像页面统一分析。",
+        });
       };
       recorder.start();
       setRecordingState("recording");
@@ -2653,34 +2697,15 @@ function App() {
     const file = event.target.files?.[0];
     if (!file) return;
     const url = URL.createObjectURL(file);
-    let transcriptText = "";
-    try {
-      clearAiNotice();
-      const formData = new FormData();
-      formData.append("audio", file);
-      const data = await apiRequest("/ai/transcribe", {
-        method: "POST",
-        body: formData,
-      });
-      transcriptText = data.transcript || "";
-    } catch (error) {
-      showAiError(error, "语音已添加到页面，但暂时没有完成服务器转写。");
-    }
-    setRecords((prev) => [
-      {
-        id: Date.now(),
-        type: "上传语音",
-        title: file.name,
-        content: transcriptText || "已上传学生录制的语音，后续会转写成文字并进入个人学情档案。",
-        time: "刚刚",
-        subject: statementSubject,
-        scene: statementScene,
-        intensity: statementIntensity,
-        tags: [statementSubject, statementScene, "上传语音"],
-        audioUrl: url,
-      },
-      ...prev,
-    ]);
+    const key = `upload-${file.name}-${file.size}-${file.lastModified}`;
+    await saveAudioStatement(file, {
+      key,
+      url,
+      type: "上传语音",
+      title: file.name,
+      fallbackContent: "已上传学生录制的语音，后续会在学情画像页面统一分析。",
+    });
+    event.target.value = "";
   }
 
   async function generateProfileAnalysis() {
@@ -5484,6 +5509,11 @@ function ModernStatementPage({
                     <button className="danger-action voice-button" onClick={stopRecording}>
                       <PauseCircle size={20} />
                       结束录音
+                    </button>
+                  ) : recordingState === "processing" ? (
+                    <button className="primary-action voice-button" disabled>
+                      <Sparkles size={20} />
+                      保存并转写中
                     </button>
                   ) : (
                     <button className="primary-action voice-button" onClick={startRecording}>
