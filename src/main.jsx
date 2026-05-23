@@ -63,7 +63,7 @@ const subPages = [
   { id: "questionnaire", label: "学情问卷", icon: ClipboardList },
   { id: "statement", label: "学情陈述", icon: Mic },
   { id: "profile", label: "学情画像", icon: BarChart3 },
-  { id: "strategy", label: "策略与任务", icon: BookOpen },
+  { id: "strategy", label: "学习任务", icon: BookOpen },
   { id: "plan", label: "学习计划", icon: CalendarDays },
   { id: "mistakes", label: "错题专项", icon: Library },
   { id: "notes", label: "知识笔记", icon: ImageIcon },
@@ -122,6 +122,41 @@ function orderTypeLabel(type) {
   if (type === "lt_recharge") return "Token充值";
   if (type === "storage_expansion") return "存储扩容";
   return "付款申请";
+}
+
+const draftStoragePrefix = "shuzi_ai02_draft";
+
+function readDraftValue(key, fallback) {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(`${draftStoragePrefix}:${key}`);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeDraftValue(key, value) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(`${draftStoragePrefix}:${key}`, JSON.stringify(value));
+  } catch {
+    // localStorage can be unavailable in private modes; editing should still work.
+  }
+}
+
+function clearDraftValue(key) {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(`${draftStoragePrefix}:${key}`);
+}
+
+function escapeHtml(value = "") {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 const freeAskModelOptions = [
@@ -750,7 +785,18 @@ function buildQuestionnaireSteps(answers) {
     .map((subject) => subjectModules[subject]);
   const core = buildCoreSteps();
   const final = core.pop();
-  return [...core, ...subjectSteps, final];
+  return [
+    ...core,
+    ...subjectSteps,
+    final,
+    {
+      id: "questionnaireArchive",
+      title: "学情问卷档案",
+      description: "查看学生过往提交或保存的学情问卷档案，可以预览，也可以打印或下载为PDF。",
+      type: "archive",
+      questions: [],
+    },
+  ];
 }
 
 const profileSections = [
@@ -877,6 +923,20 @@ const profileSections = [
 ];
 
 const strategySubjects = ["语文", "数学", "英语", "物理", "化学", "生物", "历史", "政治", "体育"];
+const mistakeGradeOptions = [
+  "小学一年级",
+  "小学二年级",
+  "小学三年级",
+  "小学四年级",
+  "小学五年级",
+  "小学六年级",
+  "初中一年级",
+  "初中二年级",
+  "初中三年级",
+  "高中一年级",
+  "高中二年级",
+  "高中三年级",
+];
 
 const materialItem = (name, description) => ({ name, description, usage: "" });
 
@@ -1212,6 +1272,7 @@ function createSubjectWorkspace(subject) {
   return {
     strategy: data.strategy,
     strategySuggestion: "",
+    taskSuggestion: "",
     acceptedStrategy: "",
     studentStrategy: "",
     materials: data.materials.map((item, index) => ({ ...item, id: `${subject}-material-${index}` })),
@@ -1224,8 +1285,48 @@ function createSubjectWorkspace(subject) {
       },
     ],
     tasks: data.tasks.map((task, index) => ({ ...task, id: `${subject}-task-${index}` })),
-    aiNote: "AI学习策略建议会根据学情画像、学情陈述和当前科目内容生成。",
+    aiNote: "AI学习任务建议会根据学情画像、学情陈述和当前科目内容生成。",
   };
+}
+
+function formatTaskSuggestion(result = {}) {
+  const tasks = Array.isArray(result.tasks) ? result.tasks : result.task ? [result.task] : [];
+  if (tasks.length) {
+    return tasks
+      .map((task, index) => {
+        const title = task.title || `学习任务 ${index + 1}`;
+        const reason = task.problem || task.reason || result.strategy_suggestion || "针对当前学情中的关键薄弱点进行训练。";
+        const detail = task.detail || task.execution || task.standard || "请写清楚资料、时间、步骤和完成标准。";
+        return `任务${index + 1}：${title}\n为什么要做：${reason}\n执行细节：${detail}`;
+      })
+      .join("\n\n");
+  }
+  return result.strategy_suggestion || result.ai_note || "";
+}
+
+function buildTasksFromSuggestion(subject, suggestion) {
+  const chunks = String(suggestion || "")
+    .split(/\n(?=任务\s*\d+|任务[一二三四五六七八九十])/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const source = chunks.length ? chunks : [String(suggestion || "").trim()].filter(Boolean);
+  return source.map((chunk, index) => {
+    const lines = chunk.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+    const first = lines[0] || `${subject}学习任务 ${index + 1}`;
+    const title = first.replace(/^任务\s*\d+[：:]\s*/, "").replace(/^任务[一二三四五六七八九十][：:]\s*/, "") || `${subject}学习任务 ${index + 1}`;
+    const reasonLine = lines.find((line) => line.startsWith("为什么要做")) || "";
+    const detailLine = lines.find((line) => line.startsWith("执行细节")) || "";
+    return {
+      id: `${subject}-accepted-task-${Date.now()}-${index}`,
+      title,
+      problem: reasonLine.replace(/^为什么要做[：:]\s*/, "") || "根据AI学习任务建议整理。",
+      time: "请根据学习计划安排具体时间",
+      material: "结合课本、错题本或当前资料",
+      detail: detailLine.replace(/^执行细节[：:]\s*/, "") || lines.slice(1).join("\n") || chunk,
+      standard: "完成后能复述方法、独立完成同类题，并记录反馈。",
+      studentNote: "",
+    };
+  });
 }
 
 const defaultAnswers = {
@@ -1238,6 +1339,29 @@ const defaultAnswers = {
   passionScore: 5,
   focusScore: 6,
   coreProblemText: "我上课好像能听懂，但是自己做题经常卡住，错题改完以后过几天又不会。",
+};
+
+const emptyAnswers = { weakSubjects: [] };
+
+const defaultStatementDraft = {
+  text: "我数学上课好像能听懂，但自己做综合题就卡住。错题改完以后过几天又不会，晚上学习效率也比较低。",
+  subject: "数学",
+  scene: "作业",
+  intensity: 7,
+  guidedAnswers: {
+    "你现在最困扰的学习问题是什么？": "数学综合题自己做不出来。",
+    "它主要影响哪个科目或哪个学习环节？": "主要影响数学作业和考试。",
+  },
+  issueDetails: {},
+};
+
+const emptyStatementDraft = {
+  text: "",
+  subject: "整体学习",
+  scene: "上课",
+  intensity: 5,
+  guidedAnswers: {},
+  issueDetails: {},
 };
 
 const weekDays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"];
@@ -1680,21 +1804,19 @@ function App() {
     showQr: false,
     message: "",
   });
-  const [currentStep, setCurrentStep] = useState(0);
-  const [answers, setAnswers] = useState(defaultAnswers);
+  const [currentStep, setCurrentStep] = useState(() => readDraftValue("questionnaireStep", 0));
+  const [answers, setAnswers] = useState(() => readDraftValue("questionnaire", defaultAnswers));
   const [submitted, setSubmitted] = useState(false);
-  const [lastSaved, setLastSaved] = useState("尚未保存");
-  const [statementText, setStatementText] = useState(
-    "我数学上课好像能听懂，但自己做综合题就卡住。错题改完以后过几天又不会，晚上学习效率也比较低。"
-  );
-  const [statementSubject, setStatementSubject] = useState("数学");
-  const [statementScene, setStatementScene] = useState("作业");
-  const [statementIntensity, setStatementIntensity] = useState(7);
-  const [guidedAnswers, setGuidedAnswers] = useState({
-    "你现在最困扰的学习问题是什么？": "数学综合题自己做不出来。",
-    "它主要影响哪个科目或哪个学习环节？": "主要影响数学作业和考试。",
-  });
-  const [statementIssueDetails, setStatementIssueDetails] = useState({});
+  const [lastSaved, setLastSaved] = useState(() => (readDraftValue("questionnaire", null) ? "已恢复上次填写记录" : "尚未保存"));
+  const [questionnaireArchives, setQuestionnaireArchives] = useState([]);
+  const [questionnairePreview, setQuestionnairePreview] = useState(null);
+  const savedStatementDraft = readDraftValue("statement", defaultStatementDraft);
+  const [statementText, setStatementText] = useState(savedStatementDraft.text);
+  const [statementSubject, setStatementSubject] = useState(savedStatementDraft.subject);
+  const [statementScene, setStatementScene] = useState(savedStatementDraft.scene);
+  const [statementIntensity, setStatementIntensity] = useState(savedStatementDraft.intensity);
+  const [guidedAnswers, setGuidedAnswers] = useState(savedStatementDraft.guidedAnswers);
+  const [statementIssueDetails, setStatementIssueDetails] = useState(savedStatementDraft.issueDetails);
   const [records, setRecords] = useState([
     {
       id: 1,
@@ -1711,21 +1833,23 @@ function App() {
   const [recordingState, setRecordingState] = useState("idle");
   const [audioUrl, setAudioUrl] = useState("");
   const [aiStatus, setAiStatus] = useState("idle");
-  const [aiInsight, setAiInsight] = useState(null);
+  const [aiInsight, setAiInsight] = useState(() => readDraftValue("profile", null));
   const [activeSubject, setActiveSubject] = useState("数学");
   const [strategyWorkspaces, setStrategyWorkspaces] = useState(() =>
-    Object.fromEntries(strategySubjects.map((subject) => [subject, createSubjectWorkspace(subject)]))
+    readDraftValue("strategy", Object.fromEntries(strategySubjects.map((subject) => [subject, createSubjectWorkspace(subject)])))
   );
   const [strategyAiStatus, setStrategyAiStatus] = useState("");
-  const [planRows, setPlanRows] = useState(() => normalizePlanRows(defaultPlanRows));
-  const [planNote, setPlanNote] = useState("本周先保证每天有明确空闲时间、明确任务和每日反思，不追求任务数量。");
+  const savedPlanDraft = readDraftValue("plan", null);
+  const [planRows, setPlanRows] = useState(() => normalizePlanRows(savedPlanDraft?.planRows || defaultPlanRows));
+  const [planNote, setPlanNote] = useState(savedPlanDraft?.planNote || "本周先保证每天有明确空闲时间、明确任务和每日反思，不追求任务数量。");
   const [planAiStatus, setPlanAiStatus] = useState("idle");
-  const [methodFocusRows, setMethodFocusRows] = useState(() => createFocusRows("method", methodTrainingOptions));
-  const [habitFocusRows, setHabitFocusRows] = useState(() => createFocusRows("habit", habitTrainingOptions));
+  const [methodFocusRows, setMethodFocusRows] = useState(() => savedPlanDraft?.methodFocusRows || createFocusRows("method", methodTrainingOptions));
+  const [habitFocusRows, setHabitFocusRows] = useState(() => savedPlanDraft?.habitFocusRows || createFocusRows("habit", habitTrainingOptions));
   const [mistakes, setMistakes] = useState(defaultMistakes);
   const [mistakeDraft, setMistakeDraft] = useState({
     title: "新上传学习材料",
     subject: "数学",
+    grade: "初中三年级",
     source: "错题/作业/试卷",
     reason: "",
     method: "",
@@ -1754,6 +1878,7 @@ function App() {
     title: "",
     content: "",
     reply: "",
+    images: [],
   });
   const [freeAskInput, setFreeAskInput] = useState("");
   const [freeAskFiles, setFreeAskFiles] = useState([]);
@@ -1839,6 +1964,10 @@ function App() {
   }, [activePage, member.isLoggedIn]);
 
   useEffect(() => {
+    if (activePage === "questionnaire" && member.isLoggedIn) loadQuestionnaireArchives();
+  }, [activePage, member.isLoggedIn]);
+
+  useEffect(() => {
     if (activePage === "library" && member.isLoggedIn) loadLibraryItems();
   }, [activePage, member.isLoggedIn, libraryView, libraryFolderId, librarySort, librarySortDir]);
 
@@ -1848,6 +1977,107 @@ function App() {
       setLibraryEditor(null);
     }
   }, [activePage, libraryView, libraryFolderId]);
+
+  useEffect(() => {
+    writeDraftValue("questionnaire", answers);
+  }, [answers]);
+
+  useEffect(() => {
+    writeDraftValue("questionnaireStep", currentStep);
+  }, [currentStep]);
+
+  useEffect(() => {
+    writeDraftValue("statement", {
+      text: statementText,
+      subject: statementSubject,
+      scene: statementScene,
+      intensity: statementIntensity,
+      guidedAnswers,
+      issueDetails: statementIssueDetails,
+    });
+  }, [statementText, statementSubject, statementScene, statementIntensity, guidedAnswers, statementIssueDetails]);
+
+  useEffect(() => {
+    writeDraftValue("profile", aiInsight);
+  }, [aiInsight]);
+
+  useEffect(() => {
+    writeDraftValue("strategy", strategyWorkspaces);
+  }, [strategyWorkspaces]);
+
+  useEffect(() => {
+    writeDraftValue("plan", { planRows, planNote, methodFocusRows, habitFocusRows });
+  }, [planRows, planNote, methodFocusRows, habitFocusRows]);
+
+  async function loadQuestionnaireArchives() {
+    try {
+      const data = await apiRequest("/archive/questionnaires");
+      setQuestionnaireArchives(data.records || []);
+    } catch (error) {
+      setAccountNotice(error.message || "学情问卷档案暂时无法读取。");
+    }
+  }
+
+  function clearQuestionnaireDraft() {
+    clearDraftValue("questionnaire");
+    clearDraftValue("questionnaireStep");
+    setAnswers(emptyAnswers);
+    setCurrentStep(0);
+    setSubmitted(false);
+    setLastSaved("已清空本页填写记录");
+    setQuestionnairePreview(null);
+  }
+
+  function downloadQuestionnaireArchivePdf(record) {
+    if (!record) return;
+    if (!requireMemberAction("下载学情问卷档案PDF", () => downloadQuestionnaireArchivePdf(record), "学情问卷档案下载需要登录并开通会员。")) return;
+    const rows = summarizeQuestionnaireAnswers(record.answers)
+      .map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(Array.isArray(value) ? value.join("、") : String(value))}</td></tr>`)
+      .join("");
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>学情问卷档案</title><style>
+      body{font-family:"Microsoft YaHei",Arial,sans-serif;color:#111820;padding:28px;line-height:1.7}
+      h1{font-size:24px;margin:0 0 6px} .meta{color:#5b665f;margin-bottom:18px}
+      table{width:100%;border-collapse:collapse} th,td{border:1px solid #d9ded6;padding:10px;text-align:left;vertical-align:top}
+      th{width:180px;background:#f4f8f2}
+    </style></head><body><h1>学情问卷档案</h1><div class="meta">填写日期：${escapeHtml(formatArchiveDate(record.createdAt))} · 完成度：${record.completion || 0}%</div><table>${rows}</table></body></html>`;
+    const printWindow = window.open("", "_blank", "noopener,noreferrer");
+    if (!printWindow) return;
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  }
+
+  function clearStatementDraft() {
+    clearDraftValue("statement");
+    setStatementText(emptyStatementDraft.text);
+    setStatementSubject(emptyStatementDraft.subject);
+    setStatementScene(emptyStatementDraft.scene);
+    setStatementIntensity(emptyStatementDraft.intensity);
+    setGuidedAnswers(emptyStatementDraft.guidedAnswers);
+    setStatementIssueDetails(emptyStatementDraft.issueDetails);
+  }
+
+  function clearProfileDraft() {
+    clearDraftValue("profile");
+    setAiInsight(null);
+    setAiStatus("idle");
+  }
+
+  function clearStrategyDraft() {
+    clearDraftValue("strategy");
+    setStrategyWorkspaces(Object.fromEntries(strategySubjects.map((subject) => [subject, createSubjectWorkspace(subject)])));
+    setStrategyAiStatus("");
+  }
+
+  function clearPlanDraft() {
+    clearDraftValue("plan");
+    setPlanRows(normalizePlanRows([]));
+    setPlanNote("");
+    setMethodFocusRows(createFocusRows("method", methodTrainingOptions).map((row) => ({ ...row, enabled: false, scores: Object.fromEntries(Object.keys(row.scores).map((day) => [day, ""])) })));
+    setHabitFocusRows(createFocusRows("habit", habitTrainingOptions).map((row) => ({ ...row, enabled: false, scores: Object.fromEntries(Object.keys(row.scores).map((day) => [day, ""])) })));
+    setPlanAiStatus("idle");
+  }
 
   async function loadCalendarEvents() {
     try {
@@ -2543,6 +2773,7 @@ function App() {
         method: "POST",
         body: JSON.stringify({ answers, completion, status: "draft" }),
       });
+      loadQuestionnaireArchives();
     } catch (error) {
       setAccountNotice(error.message || "学情问卷暂时没有写入服务器。");
     }
@@ -2556,6 +2787,7 @@ function App() {
         method: "POST",
         body: JSON.stringify({ answers, completion, status: "submitted" }),
       });
+      loadQuestionnaireArchives();
     } catch (error) {
       setAccountNotice(error.message || "问卷提交暂时没有写入服务器。");
     }
@@ -2729,7 +2961,7 @@ function App() {
         evidence: Array.isArray(profile.evidence) ? profile.evidence : [],
         tags: Array.isArray(profile.tags) ? profile.tags : [],
         questions: Array.isArray(profile.questions) ? profile.questions : [],
-        next: profile.next || "建议先补充关键证据，再进入策略与任务制定。",
+        next: profile.next || "建议先补充关键证据，再进入学习任务制定。",
         archiveConclusion: profile.archiveConclusion || profile.archive_conclusion || "已根据当前档案形成阶段性学情判断。",
         scores: profile.scores || {},
         source: JSON.stringify(prompt),
@@ -2780,9 +3012,10 @@ function App() {
   function acceptStrategySuggestion() {
     updateStrategyWorkspace(activeSubject, (workspace) => ({
       ...workspace,
-      acceptedStrategy: workspace.strategySuggestion,
-      strategy: workspace.strategySuggestion,
-      aiNote: "已接受当前AI学习策略建议，这份建议会记录在当前学生的策略档案中，并作为本学科后续任务和计划设计的依据。",
+      acceptedStrategy: workspace.taskSuggestion || workspace.strategySuggestion,
+      strategy: workspace.taskSuggestion || workspace.strategySuggestion,
+      tasks: buildTasksFromSuggestion(activeSubject, workspace.taskSuggestion || workspace.strategySuggestion),
+      aiNote: "已接受当前AI学习任务建议，这份建议会记录在当前学生的任务档案中，并作为本学科后续计划设计的依据。",
     }));
   }
 
@@ -2869,7 +3102,7 @@ function App() {
   }
 
   async function runPlanAi() {
-    if (!requireMemberAction("AI生成学习计划", runPlanAi, "AI会根据学情画像、策略与任务生成学习计划和方法习惯训练表，需要会员权限。")) return;
+    if (!requireMemberAction("AI生成学习计划", runPlanAi, "AI会根据学情画像和学习任务生成学习计划和方法习惯训练表，需要会员权限。")) return;
     if (planAiStatus === "loading") return;
     setPlanAiStatus("loading");
     clearAiNotice();
@@ -3024,6 +3257,7 @@ function App() {
       id: `${savedId || "mistake"}-${Date.now()}-${index}`,
       title: question.title || `错题 ${index + 1}`,
       subject: question.subject || mistakeDraft.subject,
+      grade: mistakeDraft.grade,
       source: mistakeDraft.source || "错题专项",
       fileName: mistakeDraft.fileName || "未上传文件",
       type: mistakeQuickTasks[mistakeTaskType]?.label || "AI处理",
@@ -3053,6 +3287,7 @@ function App() {
       formData.append("taskType", mistakeTaskType);
       formData.append("prompt", mistakePrompt);
       formData.append("subject", mistakeDraft.subject);
+      formData.append("grade", mistakeDraft.grade);
       formData.append("title", mistakeDraft.title);
       formData.append("source", mistakeDraft.source);
       formData.append(
@@ -3065,6 +3300,7 @@ function App() {
               taskType: mistakeTaskType,
               prompt: mistakePrompt,
               subject: mistakeDraft.subject,
+              grade: mistakeDraft.grade,
               title: mistakeDraft.title,
               source: mistakeDraft.source,
               fileNames: (mistakeDraft.files || []).map((item) => item.name),
@@ -3191,7 +3427,7 @@ function App() {
   }
 
   async function runStrategyAi(section, mode, targetId = "") {
-    if (!requireMemberAction("AI优化策略与任务", () => runStrategyAi(section, mode, targetId), "策略与任务会根据学情画像生成科目策略、学习任务或资料使用建议，需要会员权限。")) return;
+    if (!requireMemberAction("AI优化学习任务", () => runStrategyAi(section, mode, targetId), "学习任务会根据学情画像生成科目任务、资料使用建议或完成标准，需要会员权限。")) return;
     if (typeof strategyAiStatus === "string" && strategyAiStatus.startsWith("AI正在")) return;
     const subject = activeSubject;
     const workspace = strategyWorkspaces[subject];
@@ -3206,11 +3442,13 @@ function App() {
       });
       const result = data.result || {};
       if (section === "strategy") {
+        const suggestion = formatTaskSuggestion(result) || "AI没有返回明确的学习任务建议，请点击重新生成再试一次。";
         updateStrategyWorkspace(subject, (current) => ({
           ...current,
-          strategySuggestion: result.strategy_suggestion || result.ai_note || "AI没有返回明确的策略建议，请点击重新生成再试一次。",
+          strategySuggestion: suggestion,
+          taskSuggestion: suggestion,
           acceptedStrategy: "",
-          aiNote: result.ai_note || "AI已根据当前学情画像生成本学科策略建议。",
+          aiNote: result.ai_note || "AI已根据当前学情画像生成本学科学习任务建议。",
         }));
       } else if (section === "task") {
         const nextTask = result.task || {};
@@ -3260,7 +3498,7 @@ function App() {
       }
       setStrategyAiStatus("AI建议已生成");
     } catch (error) {
-      showAiError(error, "AI暂时没有完成策略建议，请稍后再试。");
+      showAiError(error, "AI暂时没有完成学习任务建议，请稍后再试。");
       setStrategyAiStatus("AI建议暂不可用");
     }
   }
@@ -3287,6 +3525,25 @@ function App() {
     setForumDraft((prev) => ({ ...prev, [field]: value }));
   }
 
+  function handleForumImages(files) {
+    const picked = Array.from(files || []).filter((file) => file.type.startsWith("image/")).slice(0, 6);
+    if (!picked.length) return;
+    const images = picked.map((file) => ({
+      id: `${file.name}-${file.size}-${file.lastModified}-${Date.now()}`,
+      name: file.name,
+      url: URL.createObjectURL(file),
+    }));
+    setForumDraft((prev) => ({ ...prev, images: [...(prev.images || []), ...images].slice(0, 6) }));
+  }
+
+  function removeForumImage(imageId) {
+    setForumDraft((prev) => {
+      const target = (prev.images || []).find((image) => image.id === imageId);
+      if (target?.url) URL.revokeObjectURL(target.url);
+      return { ...prev, images: (prev.images || []).filter((image) => image.id !== imageId) };
+    });
+  }
+
   function createForumPost() {
     if (!requireMemberAction("在学习社区发帖", createForumPost, "社区内容可以公开浏览，但发帖、分享学习问题和向版主提问需要会员权限。")) return;
     const title = forumDraft.title.trim();
@@ -3297,6 +3554,7 @@ function App() {
       type: forumDraft.type,
       title,
       content,
+      images: forumDraft.images || [],
       author: member.identifier || "会员同学",
       time: "刚刚",
       likes: 0,
@@ -3304,7 +3562,7 @@ function App() {
     };
     setForumPosts((prev) => [next, ...prev]);
     setActiveForumPostId(next.id);
-    setForumDraft((prev) => ({ ...prev, title: "", content: "" }));
+    setForumDraft((prev) => ({ ...prev, title: "", content: "", images: [] }));
   }
 
   function addForumReply() {
@@ -3521,6 +3779,11 @@ function App() {
             toggleMulti={toggleMulti}
             saveDraft={saveDraft}
             submitQuestionnaire={submitQuestionnaire}
+            clearQuestionnaireDraft={clearQuestionnaireDraft}
+            questionnaireArchives={questionnaireArchives}
+            questionnairePreview={questionnairePreview}
+            setQuestionnairePreview={setQuestionnairePreview}
+            downloadQuestionnaireArchivePdf={downloadQuestionnaireArchivePdf}
           />
         )}
 
@@ -3548,6 +3811,7 @@ function App() {
             records={records}
             aiStatus={aiStatus}
             aiInsight={aiInsight}
+            clearStatementDraft={clearStatementDraft}
           />
         )}
 
@@ -3561,6 +3825,7 @@ function App() {
             completion={completion}
             printPage={printPage}
             generateProfileAnalysis={generateProfileAnalysis}
+            clearProfileDraft={clearProfileDraft}
           />
         )}
 
@@ -3580,6 +3845,7 @@ function App() {
             addStrategyTask={addStrategyTask}
             acceptStrategySuggestion={acceptStrategySuggestion}
             runStrategyAi={runStrategyAi}
+            clearStrategyDraft={clearStrategyDraft}
           />
         )}
 
@@ -3599,6 +3865,7 @@ function App() {
             updateFocusScore={updateFocusScore}
             printPage={printPage}
             downloadProtectedFile={downloadProtectedFile}
+            clearPlanDraft={clearPlanDraft}
           />
         )}
 
@@ -3710,6 +3977,8 @@ function App() {
             setActivePostId={setActiveForumPostId}
             draft={forumDraft}
             updateDraft={updateForumDraft}
+            handleImages={handleForumImages}
+            removeImage={removeForumImage}
             createPost={createForumPost}
             addReply={addForumReply}
             member={member}
@@ -3784,7 +4053,7 @@ function HomePage({ setActivePage }) {
   const workflow = [
     ["1", "学习问题分析", "通过学情问卷、学情陈述和学生自评，先把孩子的问题说清楚。"],
     ["2", "形成学情画像", "把问卷、陈述、AI分析和学生自我评价整合成可理解的画像报告。"],
-    ["3", "制定策略与任务", "每个科目形成学习策略、资料使用方法和具体学习任务。"],
+    ["3", "生成学习任务", "每个科目形成具体学习任务、资料使用方法和完成标准。"],
     ["4", "学习计划与训练", "把任务安排进每周计划，并通过错题专项和知识笔记持续训练。"],
   ];
   return (
@@ -3812,7 +4081,7 @@ function HomePage({ setActivePage }) {
           <article className="home-about-main">
             <strong>核心理念：让AI更了解你的学习情况，从而更精准地帮助你。</strong>
             <p>
-              树子AI会先了解学生的问卷、陈述、试卷和错题，再帮助分析学习问题、制定科目策略、安排学习计划、整理错题和知识盲点，并陪伴学生长期改进。
+              树子AI会先了解学生的问卷、陈述、试卷和错题，再帮助分析学习问题、生成学习任务、安排学习计划、整理错题和知识盲点，并陪伴学生长期改进。
             </p>
           </article>
           <article>
@@ -3832,7 +4101,7 @@ function HomePage({ setActivePage }) {
         </div>
         <div className="home-flow-intro">
           <h3>先看清孩子的学习问题，再设计真正能执行的学习通路</h3>
-          <p>先通过问卷、陈述和学习材料了解孩子，再生成学情画像，继续制定科目策略、学习计划、错题训练和知识笔记，帮助学生把问题一步步转化成可以执行的行动。</p>
+          <p>先通过问卷、陈述和学习材料了解孩子，再生成学情画像，继续生成学习任务、学习计划、错题训练和知识笔记，帮助学生把问题一步步转化成可以执行的行动。</p>
         </div>
         <div className="home-workflow">
           {workflow.map(([index, title, desc]) => (
@@ -4369,7 +4638,7 @@ function LearningLibraryPage({
   );
 }
 
-function LearningForumPage({ posts, activePostId, setActivePostId, draft, updateDraft, createPost, addReply, member, requireMemberAction }) {
+function LearningForumPage({ posts, activePostId, setActivePostId, draft, updateDraft, handleImages, removeImage, createPost, addReply, member, requireMemberAction }) {
   const canInteract = member.isLoggedIn && member.isPaid;
   const [activeForumTab, setActiveForumTab] = useState("all");
   const [composeOpen, setComposeOpen] = useState(false);
@@ -4458,7 +4727,23 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, update
                   <span>内容</span>
                   <textarea value={draft.content} onChange={(event) => updateDraft("content", event.target.value)} placeholder="写清楚你的学习问题、具体场景、已经尝试过的方法，或者想分享的心得。" />
                 </label>
+                <label className="wide-field forum-image-upload">
+                  <span>图片</span>
+                  <input type="file" accept="image/*" multiple onChange={(event) => { handleImages(event.target.files); event.target.value = ""; }} />
+                </label>
               </div>
+              {(draft.images || []).length > 0 && (
+                <div className="forum-thumbnail-grid">
+                  {draft.images.map((image) => (
+                    <figure key={image.id}>
+                      <img src={image.url} alt={image.name} />
+                      <button type="button" onClick={() => removeImage(image.id)} aria-label="移除图片">
+                        ×
+                      </button>
+                    </figure>
+                  ))}
+                </div>
+              )}
               <div className="forum-action-row">
                 <button type="button" className="primary-action" onClick={createPost}>
                   <Send size={17} />
@@ -4492,6 +4777,13 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, update
                     <UserRound size={24} />
                   </div>
                   <p className="forum-post-content">{post.content}</p>
+                  {post.images?.length > 0 && (
+                    <div className="forum-thumbnail-grid is-post">
+                      {post.images.map((image) => (
+                        <img key={image.id} src={image.url} alt={image.name} />
+                      ))}
+                    </div>
+                  )}
                 </button>
 
                 <div className="reply-list">
@@ -5126,6 +5418,11 @@ function QuestionnairePage({
   toggleMulti,
   saveDraft,
   submitQuestionnaire,
+  clearQuestionnaireDraft,
+  questionnaireArchives,
+  questionnairePreview,
+  setQuestionnairePreview,
+  downloadQuestionnaireArchivePdf,
 }) {
   const step = questionnaireSteps[currentStep];
   const isFirst = currentStep === 0;
@@ -5138,12 +5435,16 @@ function QuestionnairePage({
           <span className="eyebrow">学情问卷</span>
           <h2>先把学习情况说清楚</h2>
           <p>这份问卷用来了解学生的基础、课堂、作业、错题、复习、学习环境和科目问题。它不是评价学生好坏，而是帮助我们找到真正影响学习的环节。</p>
-          <p>建议按步骤填写：先完成核心问题，再展开薄弱科目。保存后的内容会进入个人档案，后面用于生成学情画像、学习策略和学习计划。</p>
+          <p>建议按步骤填写：先完成核心问题，再展开薄弱科目。保存后的内容会进入个人档案，后面用于生成学情画像、学习任务和学习计划。</p>
         </div>
         <div className="progress-card">
           <strong>{completion}%</strong>
           <span>整体完成度</span>
         </div>
+        <button type="button" className="ghost-action clear-page-action" onClick={clearQuestionnaireDraft}>
+          <Trash2 size={17} />
+          清空填写记录
+        </button>
       </div>
 
       <div className="wizard-layout">
@@ -5175,19 +5476,28 @@ function QuestionnairePage({
             <i style={{ "--value": `${progress}%` }} />
           </div>
 
-          <div className="question-page-grid questionnaire-single-column">
-            <div className="question-stack">
-              {step.questions.map((question) => (
-                <QuestionField
-                  key={question.id}
-                  question={question}
-                  value={answers[question.id]}
-                  updateAnswer={updateAnswer}
-                  toggleMulti={toggleMulti}
-                />
-              ))}
+          {step.type === "archive" ? (
+            <QuestionnaireArchivePanel
+              records={questionnaireArchives}
+              preview={questionnairePreview}
+              setPreview={setQuestionnairePreview}
+              downloadPdf={downloadQuestionnaireArchivePdf}
+            />
+          ) : (
+            <div className="question-page-grid questionnaire-single-column">
+              <div className="question-stack">
+                {step.questions.map((question) => (
+                  <QuestionField
+                    key={question.id}
+                    question={question}
+                    value={answers[question.id]}
+                    updateAnswer={updateAnswer}
+                    toggleMulti={toggleMulti}
+                  />
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="wizard-actions">
             <button className="secondary-action" onClick={() => setCurrentStep(Math.max(0, currentStep - 1))} disabled={isFirst}>
@@ -5199,12 +5509,16 @@ function QuestionnairePage({
               保存草稿
             </button>
             {isLast ? (
+              <button className="secondary-action" onClick={() => setCurrentStep(0)}>
+                返回问卷开头
+              </button>
+            ) : currentStep === questionnaireSteps.length - 2 ? (
               <div className="submit-with-hint">
                 <button className="primary-action" onClick={submitQuestionnaire}>
                   <Send size={18} />
                   {submitted ? "重新提交问卷" : "提交问卷"}
                 </button>
-                <span>提交后会自动保存进个人学情档案，供后续画像和学习策略使用。</span>
+                <span>提交后会自动保存进个人学情档案，供后续画像和学习任务使用。</span>
               </div>
             ) : (
               <button className="primary-action" onClick={() => setCurrentStep(Math.min(questionnaireSteps.length - 1, currentStep + 1))}>
@@ -5216,6 +5530,87 @@ function QuestionnairePage({
         </section>
       </div>
     </section>
+  );
+}
+
+function formatArchiveDate(value) {
+  if (!value) return "未记录日期";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function summarizeQuestionnaireAnswers(answers = {}) {
+  const rows = [
+    ["学生姓名", answers.name],
+    ["年级", answers.grade],
+    ["学习阶段", answers.stage],
+    ["主要薄弱科目", Array.isArray(answers.weakSubjects) ? answers.weakSubjects.join("、") : answers.weakSubjects],
+    ["核心问题", answers.coreProblemText],
+    ["最后补充", answers.finalSupplement],
+  ];
+  return rows.filter(([, value]) => {
+    if (Array.isArray(value)) return value.length;
+    return value !== undefined && value !== null && String(value).trim();
+  });
+}
+
+function QuestionnaireArchivePanel({ records, preview, setPreview, downloadPdf }) {
+  const activePreview = preview || records[0] || null;
+  return (
+    <div className="questionnaire-archive-layout">
+      <div className="questionnaire-archive-list">
+        {records.length ? (
+          records.map((record) => (
+            <article key={record.id} className={activePreview?.id === record.id ? "archive-card is-active" : "archive-card"}>
+              <div>
+                <strong>{record.status === "submitted" ? "正式提交" : "草稿保存"}</strong>
+                <span>{formatArchiveDate(record.createdAt)}</span>
+              </div>
+              <p>完成度 {record.completion || 0}%</p>
+              <div className="ai-action-row">
+                <button type="button" className="ghost-action is-compact" onClick={() => setPreview(record)}>
+                  预览
+                </button>
+                <button type="button" className="ghost-action is-compact" onClick={() => downloadPdf(record)}>
+                  <Download size={15} />
+                  下载PDF
+                </button>
+              </div>
+            </article>
+          ))
+        ) : (
+          <article className="archive-card">
+            <strong>还没有学情问卷档案</strong>
+            <p>提交或保存问卷后，这里会显示历史记录。</p>
+          </article>
+        )}
+      </div>
+
+      <div className="questionnaire-archive-preview">
+        {activePreview ? (
+          <>
+            <div className="panel-heading">
+              <div>
+                <span className="eyebrow">档案预览</span>
+                <h2>学情问卷档案 · {formatArchiveDate(activePreview.createdAt)}</h2>
+              </div>
+              <FileDown size={24} />
+            </div>
+            <div className="archive-summary-table">
+              {summarizeQuestionnaireAnswers(activePreview.answers).map(([label, value]) => (
+                <div key={label}>
+                  <strong>{label}</strong>
+                  <p>{Array.isArray(value) ? value.join("、") : String(value)}</p>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p>请选择一条历史问卷进行预览。</p>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -5377,12 +5772,9 @@ function ModernStatementPage({
   uploadAudio,
   audioUrl,
   records,
+  clearStatementDraft,
 }) {
   const [activeStatementTab, setActiveStatementTab] = useState("entry");
-
-  function updateGuide(question, value) {
-    setGuidedAnswers((prev) => ({ ...prev, [question]: value }));
-  }
 
   function appendCombination() {
     const existing = statementText.trim();
@@ -5401,7 +5793,13 @@ function ModernStatementPage({
           <h2>先让学生把问题说完整，再进入个人学习档案</h2>
           <p>学生可以选择科目和发生场景，形成“组合序号 + 文字陈述”的记录；也可以使用麦克风或上传语音，后续交给AI结合问卷做整体分析。</p>
         </div>
-        <MessageStat records={records.length} />
+        <div className="hero-action-stack">
+          <MessageStat records={records.length} />
+          <button type="button" className="ghost-action clear-page-action" onClick={clearStatementDraft}>
+            <Trash2 size={17} />
+            清空填写记录
+          </button>
+        </div>
       </div>
 
       <div className="statement-subtabs" role="tablist" aria-label="学情陈述分区">
@@ -5550,14 +5948,12 @@ function ModernStatementPage({
             </div>
             <div className="guide-accordion">
               {statementGuideQuestions.map((question, index) => (
-                <details key={question} className="guide-item" open={index === 0}>
-                  <summary>
+                <article key={question} className="guide-item guide-item-static">
+                  <div className="guide-static-title">
                     <span>{String(index + 1).padStart(2, "0")}</span>
                     <strong>{question}</strong>
-                    <em>{guidedAnswers[question] ? "已填写" : "可选"}</em>
-                  </summary>
-                  <textarea value={guidedAnswers[question] || ""} onChange={(event) => updateGuide(question, event.target.value)} placeholder="可以简单写，也可以先留空。" />
-                </details>
+                  </div>
+                </article>
               ))}
             </div>
           </section>
@@ -5612,7 +6008,7 @@ function MessageStat({ records }) {
   );
 }
 
-function ModernProfilePage({ answers, records, aiInsight, aiStatus, submitted, completion, printPage, generateProfileAnalysis }) {
+function ModernProfilePage({ answers, records, aiInsight, aiStatus, submitted, completion, printPage, generateProfileAnalysis, clearProfileDraft }) {
   const studentName = answers.name || "这位同学";
   const [selfAssessment, setSelfAssessment] = useState({});
   const [selfPortrait, setSelfPortrait] = useState("");
@@ -5635,9 +6031,15 @@ function ModernProfilePage({ answers, records, aiInsight, aiStatus, submitted, c
           <h2>先给出整体学习分析，再展开每个画像项目</h2>
           <p>报告同时面向学生和家长：先看整体判断，再查看成绩、方法、习惯、动机、情绪精力等细分维度。</p>
         </div>
-        <div className="progress-card">
-          <strong>{submitted ? "已提交" : `${completion}%`}</strong>
-          <span>问卷状态</span>
+        <div className="hero-action-stack">
+          <div className="progress-card">
+            <strong>{submitted ? "已提交" : `${completion}%`}</strong>
+            <span>问卷状态</span>
+          </div>
+          <button type="button" className="ghost-action clear-page-action" onClick={clearProfileDraft}>
+            <Trash2 size={17} />
+            清空填写记录
+          </button>
         </div>
       </div>
 
@@ -5764,25 +6166,32 @@ function StrategyDesignPage({
   addStrategyTask,
   acceptStrategySuggestion,
   runStrategyAi,
+  clearStrategyDraft,
 }) {
   const workspace = workspaces[activeSubject];
   const studentName = answers.name || "这位同学";
   const isGeneratingStrategy = strategyAiStatus === "AI正在生成建议...";
-  const hasStrategySuggestion = Boolean(workspace.strategySuggestion || isGeneratingStrategy);
+  const hasStrategySuggestion = Boolean(workspace.taskSuggestion || workspace.strategySuggestion || isGeneratingStrategy);
 
   return (
     <section className="stack strategy-page">
       <div className="hero-band compact strategy-hero">
         <div>
-          <span className="eyebrow">策略与任务</span>
-          <h2>先确定这个科目应该怎么学，再拆成资料使用和具体任务</h2>
+          <span className="eyebrow">学习任务</span>
+          <h2>先把这个科目的学习任务安排清楚</h2>
           <p>
-            这一页以学情画像为基础，由AI给出科目策略和学习任务建议。学生可以自己写资料使用细节，也可以让AI帮忙修改，最后形成可执行的科目学习方案。
+            这一页以学情画像为基础，由AI给出科目学习任务建议。学生可以补充资料使用细节，也可以让AI帮忙重新生成，最后形成可执行的科目学习任务。
           </p>
         </div>
-        <div className="strategy-status">
-          <strong>{activeSubject}</strong>
-          <span>{strategyAiStatus || "等待AI建议"}</span>
+        <div className="hero-action-stack">
+          <div className="strategy-status">
+            <strong>{activeSubject}</strong>
+            <span>{strategyAiStatus || "等待AI学习任务建议"}</span>
+          </div>
+          <button type="button" className="ghost-action clear-page-action" onClick={clearStrategyDraft}>
+            <Trash2 size={17} />
+            清空填写记录
+          </button>
         </div>
       </div>
 
@@ -5812,8 +6221,8 @@ function StrategyDesignPage({
         <article className="panel strategy-editor-panel">
           <div className="panel-heading">
             <div>
-              <span className="eyebrow">1. 科目学习策略</span>
-              <h2>{activeSubject}应该怎么学习？</h2>
+              <span className="eyebrow">1. AI学习任务建议</span>
+              <h2>{activeSubject}接下来要做哪些任务？</h2>
             </div>
             <Sparkles size={24} />
           </div>
@@ -5821,7 +6230,7 @@ function StrategyDesignPage({
           <div className="strategy-ai-entry">
             <button type="button" className="primary-action" onClick={() => runStrategyAi("strategy", "generate")} disabled={isGeneratingStrategy}>
               <Sparkles size={17} />
-              AI学习策略建议
+              AI学习任务建议
             </button>
           </div>
 
@@ -5829,18 +6238,18 @@ function StrategyDesignPage({
             <div className="strategy-advice-box">
               <div className="strategy-advice-head">
                 <div>
-                  <span className="eyebrow">AI学习策略建议</span>
+                  <span className="eyebrow">AI学习任务建议</span>
                   <strong>{workspace.acceptedStrategy ? "已接受当前建议" : "等待学生确认"}</strong>
                 </div>
               </div>
               <textarea
                 className="strategy-textarea strategy-suggestion-textarea"
-                value={isGeneratingStrategy ? "AI正在结合学情画像、学情陈述和当前科目生成学习策略建议..." : workspace.strategySuggestion}
+                value={isGeneratingStrategy ? "AI正在结合学情画像、学情陈述和当前科目生成学习任务建议..." : workspace.taskSuggestion || workspace.strategySuggestion}
                 readOnly
-                aria-label={`${activeSubject}AI学习策略建议`}
+                aria-label={`${activeSubject}AI学习任务建议`}
               />
               <div className="ai-action-row">
-                <button type="button" className="ghost-action" onClick={acceptStrategySuggestion} disabled={!workspace.strategySuggestion || isGeneratingStrategy}>
+                <button type="button" className="ghost-action" onClick={acceptStrategySuggestion} disabled={!(workspace.taskSuggestion || workspace.strategySuggestion) || isGeneratingStrategy}>
                   <CheckCircle2 size={17} />
                   接受建议
                 </button>
@@ -5853,13 +6262,13 @@ function StrategyDesignPage({
           )}
 
           <label className="strategy-student-box">
-            <span>我认为的科目学习策略</span>
+            <span>我对学习任务的补充说明</span>
             <textarea
               className="strategy-textarea"
               value={workspace.studentStrategy}
               onChange={(event) => updateStrategyText(event.target.value, "studentStrategy")}
-              placeholder="学生可以写：我觉得这个科目应该先补什么、每天怎么做、哪些方法适合我。"
-              aria-label={`${activeSubject}学生自己的学习策略`}
+              placeholder="学生可以补充：这个科目我最想先完成什么任务、每天可以做多久、哪些资料适合我。"
+              aria-label={`${activeSubject}学生自己的学习任务补充`}
             />
           </label>
         </article>
@@ -5951,7 +6360,7 @@ function StrategyDesignPage({
           <div className="ai-action-row">
             <button type="button" className="ghost-action" onClick={() => runStrategyAi("task", "suggest")}>
               <Sparkles size={17} />
-              AI学习任务建议
+              AI新增任务
             </button>
             <button type="button" className="primary-action" onClick={addStrategyTask}>
               <ClipboardList size={17} />
@@ -6027,6 +6436,7 @@ function StudyPlanPage({
   updateFocusScore,
   printPage,
   downloadProtectedFile,
+  clearPlanDraft,
 }) {
   const [activeStudySection, setActiveStudySection] = useState("plan");
   return (
@@ -6039,9 +6449,15 @@ function StudyPlanPage({
             计划表参考学习计划本的结构：横排是星期，每个格子里竖着填写时间、任务和备注。时间用选择器，减少手写混乱，也方便后面让AI读取并优化计划。
           </p>
         </div>
-        <div className="strategy-status">
-          <strong>{planRows.length}</strong>
-          <span>计划时间行</span>
+        <div className="hero-action-stack">
+          <div className="strategy-status">
+            <strong>{planRows.length}</strong>
+            <span>计划时间行</span>
+          </div>
+          <button type="button" className="ghost-action clear-page-action" onClick={clearPlanDraft}>
+            <Trash2 size={17} />
+            清空填写记录
+          </button>
         </div>
       </div>
 
@@ -6456,6 +6872,16 @@ function MistakeSpecialPage({
                 </select>
               </label>
               <label>
+                <span>题目所属年级</span>
+                <select value={mistakeDraft.grade} onChange={(event) => updateMistakeDraft("grade", event.target.value)}>
+                  {mistakeGradeOptions.map((grade) => (
+                    <option key={grade} value={grade}>
+                      {grade}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
                 <span>标题</span>
                 <input value={mistakeDraft.title} onChange={(event) => updateMistakeDraft("title", event.target.value)} />
               </label>
@@ -6571,6 +6997,7 @@ function MistakeSpecialPage({
                   <span className="eyebrow">错题详情</span>
                   <h2>{selected.title}</h2>
                   <p><strong>科目：</strong>{selected.subject}</p>
+                  <p><strong>题目所属年级：</strong>{selected.grade || "未标注"}</p>
                   <p><strong>来源：</strong>{selected.source}</p>
                   <p><strong>错因：</strong>{selected.reason}</p>
                   <p><strong>方法：</strong>{selected.method}</p>

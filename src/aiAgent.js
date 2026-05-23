@@ -2,10 +2,10 @@ export const shuziLearningCoachAgent = {
   name: "树子AI学习教练智能体",
   version: "0.4.0",
   mission:
-    "先通过学生档案理解学生，再形成学情画像，并把画像转化为科目策略、学习任务、学习计划和方法习惯训练。",
+    "先通过学生档案理解学生，再形成学情画像，并把画像转化为学习任务、学习计划和方法习惯训练。",
   coreLogic: [
     "学情画像只整合学情问卷、学情陈述、每日反思和每周讨论；最近1-2个月的信息优先作为动态记忆。",
-    "策略与任务只根据最新学情画像和当前科目生成可执行建议，不重新诊断，也不处理错题图片。",
+    "学习任务只根据最新学情画像和当前科目生成可执行建议，不重新诊断，也不处理错题图片。",
     "学习计划只把已确认的策略、任务、空闲时间、方法习惯目标安排进周计划。",
     "错题专项、知识笔记、学习日历、学习资料库、学习社区、AI自由问不参与学情画像和学习计划判断。",
     "错题专项独立使用 Gemini，负责当前错题或试卷材料分析、相似题和错题档案。",
@@ -60,9 +60,9 @@ export const aiTaskPrompts = {
     output: "JSON: summary, core, reasons, evidence, tags, questions, next, archiveConclusion, scores",
   },
   strategy: {
-    name: "策略与任务建议",
+    name: "学习任务建议",
     scope:
-      "只根据最新学情画像和当前科目，为学生制定科目学习策略、学习任务、资料使用方式和完成标准。",
+      "只根据最新学情画像和当前科目，为学生制定学习任务、资料使用方式和完成标准。",
     mustUse: ["最新学情画像", "当前科目", "学生自己填写的策略和任务", "已确认的学习目标"],
     mustNot: ["重新做整体画像", "安排具体周历时间", "分析错题图片", "生成每日反思表"],
     output: "JSON: strategy_suggestion, ai_note, task, revision_notes",
@@ -71,7 +71,7 @@ export const aiTaskPrompts = {
     name: "学习计划制定",
     scope:
       "只根据已确认策略任务、学生空闲时间、方法训练和习惯培养目标，生成可修改的周学习计划。",
-    mustUse: ["学情画像", "策略与任务", "空闲时间", "方法习惯目标"],
+    mustUse: ["学情画像", "学习任务", "空闲时间", "方法习惯目标"],
     mustNot: ["重新诊断学情", "生成科目策略长报告", "分析错题图片", "生成相似题"],
     output: "JSON: note, rows, method_focus_suggestions, habit_focus_suggestions, execution_notes",
   },
@@ -138,7 +138,7 @@ export function buildStrategyArchiveSnapshot({
 } = {}) {
   return {
     policy: {
-      basis: "只使用学情画像和当前科目策略任务上下文，不重新分析错题或生成计划。",
+      basis: "只使用学情画像和当前科目学习任务上下文，不重新分析错题或生成计划。",
       excluded: profileSourcePolicy.exclude,
     },
     student: studentBase(answers),

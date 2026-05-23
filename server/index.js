@@ -660,6 +660,34 @@ app.post("/api/archive/questionnaire", requireAuth, async (req, res) => {
   res.json({ saved });
 });
 
+app.get("/api/archive/questionnaires", requireAuth, async (req, res, next) => {
+  try {
+    const student = await getPrimaryStudent(req.user);
+    const rows = (
+      await query(
+        `SELECT id, answers, completion, status, created_at, updated_at
+         FROM student_intake_questionnaires
+         WHERE student_id = $1 AND user_id = $2
+         ORDER BY created_at DESC
+         LIMIT 50`,
+        [student.id, req.user.id]
+      )
+    ).rows;
+    res.json({
+      records: rows.map((row) => ({
+        id: row.id,
+        answers: row.answers || {},
+        completion: row.completion,
+        status: row.status,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/archive/statements", requireAuth, async (req, res) => {
   const { subject = "", scene = "", intensity = null, content = "", guidedAnswers = {} } = req.body || {};
   if (!content.trim()) return res.status(400).json({ error: "CONTENT_REQUIRED" });
@@ -1106,7 +1134,7 @@ app.post("/api/ai/strategy", requireAuth, async (req, res, next) => {
         {
           role: "system",
           content:
-            "You are the Shuzi AI subject strategy agent. Only work on the current subject strategy, study task, material-use advice, and completion standards based on the latest learning profile and current subject context. Do not rediagnose the whole student, do not create a weekly timetable, do not analyze mistake images. Return strict JSON in Chinese.",
+            "You are the Shuzi AI learning task agent. Only work on the current subject learning tasks, material-use advice, execution details, and completion standards based on the latest learning profile and current subject context. Do not rediagnose the whole student, do not create a weekly timetable, do not analyze mistake images. When section is strategy, put a well-structured multi-task recommendation into strategy_suggestion. Each task must include task name, why the student should do it, and concrete execution guidance. Return strict JSON in Chinese.",
         },
         {
           role: "user",
@@ -1119,9 +1147,9 @@ app.post("/api/ai/strategy", requireAuth, async (req, res, next) => {
     const result = parseJsonText(getResponseText(response), { strategy_suggestion: "", ai_note: "", task: null, revision_notes: [] });
     await query(
       "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'subject_strategy_ai', $3, $4)",
-      [student.id, req.user.id, "AI subject strategy", JSON.stringify({ subject, section, mode, targetId, result })]
+      [student.id, req.user.id, "AI learning task suggestion", JSON.stringify({ subject, section, mode, targetId, result })]
     );
-    await recordTokenUsage(req.user.id, 8, "AI subject strategy", { feature: "strategy", model: textModel, subject, section, mode });
+    await recordTokenUsage(req.user.id, 8, "AI learning task suggestion", { feature: "strategy", model: textModel, subject, section, mode });
     res.json({ result });
   } catch (error) {
     next(error);
@@ -1172,6 +1200,7 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
       taskType = "analyzeMistake",
       prompt = "",
       subject = "",
+      grade = "",
       title = "错题专项处理",
       source = "",
       archiveSnapshot = "{}",
@@ -1196,6 +1225,8 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
       ),
       `任务类型：${taskMap[taskType] || taskMap.analyzeMistake}`,
       `科目：${subject}`,
+      `题目所属年级：${grade || "未指定"}`,
+      `讲解约束：请优先使用“${grade || "学生当前年级"}”对应的知识范围、术语和解题方法来讲解。不要用明显超出该年级水平的高中或大学方法解释低年级题目；如果必须补充更高阶方法，需要先说明这是拓展，不作为默认解法。`,
       `标题：${title}`,
       `来源：${source}`,
       `学生提示词：${prompt}`,
@@ -1218,13 +1249,13 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
           `INSERT INTO mistake_files (student_id, user_id, subject, title, file_ids, analysis)
            VALUES ($1, $2, $3, $4, $5, $6)
            RETURNING *`,
-          [student.id, req.user.id, subject, title, fileRows.map((item) => item.id), JSON.stringify({ taskType, prompt, provider: "gemini", model: geminiModel, report })]
+          [student.id, req.user.id, subject, title, fileRows.map((item) => item.id), JSON.stringify({ taskType, prompt, grade, provider: "gemini", model: geminiModel, report })]
         )
       ).rows[0];
       await client.query(
         `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
          VALUES ($1, $2, 'mistake_workspace', $3, $4)`,
-        [student.id, req.user.id, title, JSON.stringify({ taskType, prompt, provider: "gemini", model: geminiModel, report, fileCount: files.length })]
+        [student.id, req.user.id, title, JSON.stringify({ taskType, prompt, grade, provider: "gemini", model: geminiModel, report, fileCount: files.length })]
       );
       return row;
     });
