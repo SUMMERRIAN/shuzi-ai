@@ -13,7 +13,7 @@ import { requireAdminToken, requireAuth, signToken } from "./auth.js";
 import { ltPackages, membershipPlans, storageExpansionPackages, tokenBillingRules } from "./plans.js";
 import { upload, toStoredFile } from "./uploads.js";
 import { ensureGeminiKey, generateGeminiText } from "./geminiClient.js";
-import { ensureOpenAIKey, getGeneratedImageBase64, getResponseText, openai, parseJsonText, readFileAsDataUrl } from "./openaiClient.js";
+import { ensureOpenAIKey, getResponseText, openai, parseJsonText, readFileAsDataUrl } from "./openaiClient.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -69,6 +69,16 @@ function normalizeAiMode(mode = "") {
 
 function getOpenAITextModel(mode = "fast") {
   return normalizeAiMode(mode) === "thinking" ? openaiThinkingModel : openaiFastModel;
+}
+
+async function generateOpenAIImage(prompt) {
+  const response = await openai.images.generate({
+    model: imageModel,
+    prompt,
+    size: "1024x1024",
+    quality: "high",
+  });
+  return response?.data?.[0]?.b64_json || "";
 }
 
 function getGeminiModel(mode = "fast") {
@@ -1545,16 +1555,11 @@ app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
       `请为学生制作一张严谨、丰富、适合复习的中文知识图。主题：${topic}。学科：${subject || "不限"}。年级：${grade || "中学生"}。` +
       "画面要求：信息量充足，包含标题、结构图、标注线、关键概念解释、底部总结，不要做简单示意图，风格专业清晰。" +
       templatePrompt;
-    const response = await openai.responses.create({
-      model: imageModel,
-      input: prompt,
-      tools: [{ type: "image_generation" }],
-    });
-    const imageBase64 = getGeneratedImageBase64(response);
+    const imageBase64 = await generateOpenAIImage(prompt);
     const note = {
       topic,
       prompt,
-      text: getResponseText(response),
+      text: `已根据“${topic}”生成中文知识图。`,
       imageMimeType: "image/png",
     };
     const saved = (
@@ -1641,12 +1646,7 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 6), async (req, 
         "Topic or request: " + (question || "knowledge explanation"),
         answer ? "Text answer context: " + answer : "",
       ].filter(Boolean).join("\n");
-      const imageResponse = await openai.responses.create({
-        model: imageModel,
-        input: imagePrompt,
-        tools: [{ type: "image_generation" }],
-      });
-      imageBase64 = getGeneratedImageBase64(imageResponse) || "";
+      imageBase64 = (await generateOpenAIImage(imagePrompt)) || "";
     }
 
     answer = answer || "AI has read your question, but did not generate a valid answer. Please try asking in another way.";

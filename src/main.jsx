@@ -1463,6 +1463,61 @@ const weeklyDiscussionRows = [
   "这一周的学习热情、学习动力和学习情绪状态如何？",
 ];
 
+function createDailyReflectionDraft(source = {}) {
+  return Object.fromEntries(
+    dailyReflectionRows.map((row) => [
+      row,
+      {
+        scores: Object.fromEntries(weekDays.map((day) => [day, source?.[row]?.scores?.[day] || ""])),
+        note: source?.[row]?.note || "",
+      },
+    ])
+  );
+}
+
+function createWeeklyDiscussionDraft(source = {}) {
+  return {
+    stateScores: Object.fromEntries(
+      weeklyStateRows.map((row) => [
+        row,
+        {
+          score: source?.stateScores?.[row]?.score || "",
+          note: source?.stateScores?.[row]?.note || "",
+        },
+      ])
+    ),
+    discussions: Object.fromEntries(weeklyDiscussionRows.map((row) => [row, source?.discussions?.[row] || ""])),
+    problems: Object.fromEntries(weeklyProblemRows.map((row) => [row, source?.problems?.[row] || ""])),
+  };
+}
+
+function collectDailyReflections(draft = {}) {
+  return dailyReflectionRows
+    .map((row) => ({
+      item: row,
+      scores: Object.fromEntries(weekDays.map((day) => [day, draft?.[row]?.scores?.[day] || ""])),
+      note: draft?.[row]?.note || "",
+    }))
+    .filter((entry) => entry.note.trim() || Object.values(entry.scores).some(Boolean));
+}
+
+function collectWeeklyDiscussions(draft = {}) {
+  const stateScores = weeklyStateRows
+    .map((row) => ({
+      item: row,
+      score: draft?.stateScores?.[row]?.score || "",
+      note: draft?.stateScores?.[row]?.note || "",
+    }))
+    .filter((entry) => entry.score || entry.note.trim());
+  const discussions = weeklyDiscussionRows
+    .map((row) => ({ step: row, content: draft?.discussions?.[row] || "" }))
+    .filter((entry) => entry.content.trim());
+  const problems = weeklyProblemRows
+    .map((row) => ({ item: row, content: draft?.problems?.[row] || "" }))
+    .filter((entry) => entry.content.trim());
+  return { stateScores, discussions, problems };
+}
+
 const mistakeSubjects = ["数学", "语文", "英语", "物理", "化学", "生物", "历史", "政治", "地理"];
 
 const mistakeQuickTasks = {
@@ -1847,6 +1902,10 @@ function App() {
   const [planAiStatus, setPlanAiStatus] = useState("idle");
   const [methodFocusRows, setMethodFocusRows] = useState(() => savedPlanDraft?.methodFocusRows || createFocusRows("method", methodTrainingOptions));
   const [habitFocusRows, setHabitFocusRows] = useState(() => savedPlanDraft?.habitFocusRows || createFocusRows("habit", habitTrainingOptions));
+  const [dailyReflectionDraft, setDailyReflectionDraft] = useState(() => createDailyReflectionDraft(savedPlanDraft?.dailyReflectionDraft));
+  const [weeklyDiscussionDraft, setWeeklyDiscussionDraft] = useState(() => createWeeklyDiscussionDraft(savedPlanDraft?.weeklyDiscussionDraft));
+  const dailyReflectionArchive = useMemo(() => collectDailyReflections(dailyReflectionDraft), [dailyReflectionDraft]);
+  const weeklyDiscussionArchive = useMemo(() => collectWeeklyDiscussions(weeklyDiscussionDraft), [weeklyDiscussionDraft]);
   const [mistakes, setMistakes] = useState(defaultMistakes);
   const [mistakeDraft, setMistakeDraft] = useState({
     title: "新上传学习材料",
@@ -2013,8 +2072,8 @@ function App() {
   }, [strategyWorkspaces]);
 
   useEffect(() => {
-    writeDraftValue("plan", { planRows, planNote, methodFocusRows, habitFocusRows });
-  }, [planRows, planNote, methodFocusRows, habitFocusRows]);
+    writeDraftValue("plan", { planRows, planNote, methodFocusRows, habitFocusRows, dailyReflectionDraft, weeklyDiscussionDraft });
+  }, [planRows, planNote, methodFocusRows, habitFocusRows, dailyReflectionDraft, weeklyDiscussionDraft]);
 
   async function loadQuestionnaireArchives() {
     try {
@@ -2085,6 +2144,8 @@ function App() {
     setPlanNote("");
     setMethodFocusRows(createFocusRows("method", methodTrainingOptions).map((row) => ({ ...row, enabled: false, scores: Object.fromEntries(Object.keys(row.scores).map((day) => [day, ""])) })));
     setHabitFocusRows(createFocusRows("habit", habitTrainingOptions).map((row) => ({ ...row, enabled: false, scores: Object.fromEntries(Object.keys(row.scores).map((day) => [day, ""])) })));
+    setDailyReflectionDraft(createDailyReflectionDraft());
+    setWeeklyDiscussionDraft(createWeeklyDiscussionDraft());
     setPlanAiStatus("idle");
   }
 
@@ -2949,11 +3010,57 @@ function App() {
     event.target.value = "";
   }
 
+  function updateDailyReflection(row, day, value) {
+    setDailyReflectionDraft((prev) => ({
+      ...prev,
+      [row]: {
+        ...(prev[row] || { scores: {}, note: "" }),
+        scores: {
+          ...(prev[row]?.scores || {}),
+          [day]: value,
+        },
+      },
+    }));
+  }
+
+  function updateDailyReflectionNote(row, value) {
+    setDailyReflectionDraft((prev) => ({
+      ...prev,
+      [row]: {
+        ...(prev[row] || { scores: {}, note: "" }),
+        note: value,
+      },
+    }));
+  }
+
+  function updateWeeklyState(row, field, value) {
+    setWeeklyDiscussionDraft((prev) => ({
+      ...prev,
+      stateScores: {
+        ...prev.stateScores,
+        [row]: {
+          ...(prev.stateScores?.[row] || { score: "", note: "" }),
+          [field]: value,
+        },
+      },
+    }));
+  }
+
+  function updateWeeklyDiscussion(kind, row, value) {
+    setWeeklyDiscussionDraft((prev) => ({
+      ...prev,
+      [kind]: {
+        ...prev[kind],
+        [row]: value,
+      },
+    }));
+  }
+
   async function generateProfileAnalysis() {
     if (!requireMemberAction("AI统一分析画像", generateProfileAnalysis, "学情画像会统一分析学情问卷、学情陈述、每日反思和每周讨论，需要会员权限。")) return;
     if (aiStatus === "loading") return;
     clearAiNotice();
-    const archiveSnapshot = buildProfileArchiveSnapshot({ answers, records });
+    const archiveSnapshot = buildProfileArchiveSnapshot({ answers, records, dailyReflections: dailyReflectionArchive, weeklyDiscussions: weeklyDiscussionArchive });
     const prompt = buildAgentPrompt("profile", archiveSnapshot);
     console.info("学情画像AI提示词", prompt);
     setAiStatus("loading");
@@ -3121,6 +3228,8 @@ function App() {
       aiInsight,
       strategies: strategyWorkspaces,
       plans: { planRows, methodFocusRows, habitFocusRows },
+      dailyReflections: dailyReflectionArchive,
+      weeklyDiscussions: weeklyDiscussionArchive,
     });
     console.info("学习计划AI提示词", buildAgentPrompt("plan", archiveSnapshot));
     try {
@@ -3441,7 +3550,15 @@ function App() {
     const subject = activeSubject;
     const workspace = strategyWorkspaces[subject];
     const targetTask = workspace?.tasks?.find((task) => task.id === targetId) || null;
-    const archiveSnapshot = buildStrategyArchiveSnapshot({ answers, records, aiInsight, strategies: strategyWorkspaces, activeSubject: subject });
+    const archiveSnapshot = buildStrategyArchiveSnapshot({
+      answers,
+      records,
+      aiInsight,
+      strategies: strategyWorkspaces,
+      activeSubject: subject,
+      dailyReflections: dailyReflectionArchive,
+      weeklyDiscussions: weeklyDiscussionArchive,
+    });
     console.info("策略任务AI提示词", buildAgentPrompt("strategy", archiveSnapshot));
     setStrategyAiStatus("AI正在生成建议...");
     try {
@@ -3867,6 +3984,8 @@ function App() {
             printPage={printPage}
             generateProfileAnalysis={generateProfileAnalysis}
             clearProfileDraft={clearProfileDraft}
+            dailyReflectionArchive={dailyReflectionArchive}
+            weeklyDiscussionArchive={weeklyDiscussionArchive}
           />
         )}
 
@@ -3907,6 +4026,12 @@ function App() {
             printPage={printPage}
             downloadProtectedFile={downloadProtectedFile}
             clearPlanDraft={clearPlanDraft}
+            dailyReflectionDraft={dailyReflectionDraft}
+            weeklyDiscussionDraft={weeklyDiscussionDraft}
+            updateDailyReflection={updateDailyReflection}
+            updateDailyReflectionNote={updateDailyReflectionNote}
+            updateWeeklyState={updateWeeklyState}
+            updateWeeklyDiscussion={updateWeeklyDiscussion}
           />
         )}
 
@@ -6067,7 +6192,19 @@ function MessageStat({ records }) {
   );
 }
 
-function ModernProfilePage({ answers, records, aiInsight, aiStatus, submitted, completion, printPage, generateProfileAnalysis, clearProfileDraft }) {
+function ModernProfilePage({
+  answers,
+  records,
+  aiInsight,
+  aiStatus,
+  submitted,
+  completion,
+  printPage,
+  generateProfileAnalysis,
+  clearProfileDraft,
+  dailyReflectionArchive,
+  weeklyDiscussionArchive,
+}) {
   const studentName = answers.name || "这位同学";
   const [selfAssessment, setSelfAssessment] = useState({});
   const [selfPortrait, setSelfPortrait] = useState("");
@@ -6118,7 +6255,7 @@ function ModernProfilePage({ answers, records, aiInsight, aiStatus, submitted, c
           <div className="profile-unified-head">
             <div>
               <span className="eyebrow">AI统一分析画像</span>
-              <h2>整合问卷、陈述和错题专项，形成完整学习判断</h2>
+              <h2>整合问卷、陈述、每日反思和每周讨论，形成完整学习判断</h2>
             </div>
             <button className="primary-action" onClick={generateProfileAnalysis} disabled={aiStatus === "loading"}>
               {aiStatus === "loading" ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
@@ -6127,7 +6264,7 @@ function ModernProfilePage({ answers, records, aiInsight, aiStatus, submitted, c
           </div>
           <div className="profile-unified-body">
             <h3>{aiInsight?.core || "点击“AI统一分析画像”后，这里会显示学生学习问题的整体判断。"}</h3>
-            <p>{aiInsight?.archiveConclusion || "AI会统一阅读前面的学情问卷、学情陈述和错题专项，综合判断学生的基础、方法、执行、习惯、动机和情绪精力等情况。"}</p>
+            <p>{aiInsight?.archiveConclusion || "AI会统一阅读学情问卷、学情陈述、每日反思和每周讨论，综合判断学生的基础、方法、执行、习惯、动机和情绪精力等情况。错题专项、知识笔记、学习日历和资料库保持独立，不进入画像分析。"}</p>
             {aiInsight?.summary && <p>{aiInsight.summary}</p>}
             {aiInsight?.reasons?.length > 0 && (
               <ul className="profile-unified-list">
@@ -6136,7 +6273,7 @@ function ModernProfilePage({ answers, records, aiInsight, aiStatus, submitted, c
                 ))}
               </ul>
             )}
-            <p className="profile-source-note">当前档案来源：学情陈述 {records.length} 条，问卷完成度 {completion}%，错题专项会随着上传和训练持续补充。</p>
+            <p className="profile-source-note">当前画像来源：学情陈述 {records.length} 条，问卷完成度 {completion}%，每日反思 {dailyReflectionArchive.length} 条，每周讨论 {weeklyDiscussionArchive.discussions.length + weeklyDiscussionArchive.problems.length} 条。</p>
           </div>
         </section>
 
@@ -6496,6 +6633,12 @@ function StudyPlanPage({
   printPage,
   downloadProtectedFile,
   clearPlanDraft,
+  dailyReflectionDraft,
+  weeklyDiscussionDraft,
+  updateDailyReflection,
+  updateDailyReflectionNote,
+  updateWeeklyState,
+  updateWeeklyDiscussion,
 }) {
   const [activeStudySection, setActiveStudySection] = useState("plan");
   return (
@@ -6633,7 +6776,17 @@ function StudyPlanPage({
         </div>
       )}
 
-      {activeStudySection === "reflection" && <ReflectionDiscussionSection downloadProtectedFile={downloadProtectedFile} />}
+      {activeStudySection === "reflection" && (
+        <ReflectionDiscussionSection
+          downloadProtectedFile={downloadProtectedFile}
+          dailyReflectionDraft={dailyReflectionDraft}
+          weeklyDiscussionDraft={weeklyDiscussionDraft}
+          updateDailyReflection={updateDailyReflection}
+          updateDailyReflectionNote={updateDailyReflectionNote}
+          updateWeeklyState={updateWeeklyState}
+          updateWeeklyDiscussion={updateWeeklyDiscussion}
+        />
+      )}
     </section>
   );
 }
@@ -6719,7 +6872,15 @@ function FocusTrainingTable({ title, kind, rows, options, updateFocusRow, update
   );
 }
 
-function ReflectionDiscussionSection({ downloadProtectedFile }) {
+function ReflectionDiscussionSection({
+  downloadProtectedFile,
+  dailyReflectionDraft,
+  weeklyDiscussionDraft,
+  updateDailyReflection,
+  updateDailyReflectionNote,
+  updateWeeklyState,
+  updateWeeklyDiscussion,
+}) {
   return (
     <div className="reflection-stack">
       <section className="panel">
@@ -6747,7 +6908,11 @@ function ReflectionDiscussionSection({ downloadProtectedFile }) {
                   <td>{row}</td>
                   {["星期一", "星期二", "星期三", "星期四", "星期五"].map((day) => (
                     <td key={day}>
-                      <select aria-label={`${row}${day}评分`}>
+                      <select
+                        aria-label={`${row}${day}评分`}
+                        value={dailyReflectionDraft?.[row]?.scores?.[day] || ""}
+                        onChange={(event) => updateDailyReflection(row, day, event.target.value)}
+                      >
                         {scoreOptions.map((score) => (
                           <option value={score} key={score || "empty"}>
                             {score || "-"}
@@ -6757,7 +6922,11 @@ function ReflectionDiscussionSection({ downloadProtectedFile }) {
                     </td>
                   ))}
                   <td>
-                    <textarea placeholder="写下今天的问题、改善点、解决办法或值得保留的经验。" />
+                    <textarea
+                      placeholder="写下今天的问题、改善点、解决办法或值得保留的经验。"
+                      value={dailyReflectionDraft?.[row]?.note || ""}
+                      onChange={(event) => updateDailyReflectionNote(row, event.target.value)}
+                    />
                   </td>
                 </tr>
               ))}
@@ -6779,14 +6948,14 @@ function ReflectionDiscussionSection({ downloadProtectedFile }) {
           {weeklyStateRows.map((row) => (
             <label className="score-line" key={row}>
               <span>{row}</span>
-              <select>
+              <select value={weeklyDiscussionDraft?.stateScores?.[row]?.score || ""} onChange={(event) => updateWeeklyState(row, "score", event.target.value)}>
                 {scoreOptions.map((score) => (
                   <option value={score} key={score || "empty"}>
                     {score || "-"}
                   </option>
                 ))}
               </select>
-              <input placeholder="备注" />
+              <input placeholder="备注" value={weeklyDiscussionDraft?.stateScores?.[row]?.note || ""} onChange={(event) => updateWeeklyState(row, "note", event.target.value)} />
             </label>
           ))}
         </article>
@@ -6803,7 +6972,11 @@ function ReflectionDiscussionSection({ downloadProtectedFile }) {
                 <tr key={row}>
                   <td>第{index + 1}步：{row}</td>
                   <td>
-                    <textarea placeholder="根据本周实际情况填写。" />
+                    <textarea
+                      placeholder="根据本周实际情况填写。"
+                      value={weeklyDiscussionDraft?.discussions?.[row] || ""}
+                      onChange={(event) => updateWeeklyDiscussion("discussions", row, event.target.value)}
+                    />
                   </td>
                 </tr>
               ))}
@@ -6815,7 +6988,11 @@ function ReflectionDiscussionSection({ downloadProtectedFile }) {
           {weeklyProblemRows.map((row) => (
             <label key={row}>
               <span>{row}</span>
-              <textarea placeholder="可以写课堂知识、学习行为、同学老师家庭关系、环境等问题。" />
+              <textarea
+                placeholder="可以写课堂知识、学习行为、同学老师家庭关系、环境等问题。"
+                value={weeklyDiscussionDraft?.problems?.[row] || ""}
+                onChange={(event) => updateWeeklyDiscussion("problems", row, event.target.value)}
+              />
             </label>
           ))}
         </article>

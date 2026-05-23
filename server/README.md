@@ -30,6 +30,8 @@ GEMINI_MODEL_THINKING=gemini-2.5-pro
 UPLOAD_DIR=/var/www/shuzi-ai/uploads
 ```
 
+知识图和自由问中的图片生成通过 OpenAI Image API 使用 `OPENAI_MODEL_IMAGE`，不要把 `gpt-image-2` 直接作为 Responses API 的 `model`。
+
 ## 启动
 
 ```bash
