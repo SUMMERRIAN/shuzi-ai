@@ -5374,6 +5374,13 @@ audio {
   margin-bottom: 0;
 }
 
+.forum-status-text {
+  margin: 6px 0 0;
+  color: #68736b;
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .forum-new-post-button {
   min-width: 118px;
   min-height: 46px;

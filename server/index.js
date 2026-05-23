@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import fs from "node:fs";
+import path from "node:path";
 import bcrypt from "bcryptjs";
 import mammoth from "mammoth";
 import { PDFParse } from "pdf-parse";
@@ -334,6 +335,41 @@ function toLibraryItem(row) {
     isTrashed: Boolean(row.is_trashed),
     downloadUrl: row.file_id ? `/api/files/${row.file_id}/download` : "",
     lastOpenedAt: row.last_opened_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function formatForumTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function toForumImage(file) {
+  if (!file?.id) return null;
+  return {
+    id: file.id,
+    name: file.original_name,
+    url: `/api/forum/files/${file.id}`,
+    mimeType: file.mime_type,
+    sizeBytes: Number(file.size_bytes || 0),
+  };
+}
+
+function toForumPost(row, replies = [], images = []) {
+  return {
+    id: row.id,
+    type: row.post_type,
+    title: row.title,
+    content: row.content,
+    author: row.display_name || row.identifier || "会员同学",
+    authorId: row.user_id,
+    time: formatForumTime(row.created_at),
+    likes: Number(row.likes || 0),
+    images: images.map(toForumImage).filter(Boolean),
+    replies,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -835,6 +871,149 @@ app.delete("/api/calendar/events/:id", requireAuth, async (req, res, next) => {
     await assertPaidMember(req.user.id);
     await query("DELETE FROM learning_calendar_events WHERE id = $1 AND user_id = $2", [req.params.id, req.user.id]);
     res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/forum/files/:id", async (req, res, next) => {
+  try {
+    const file = (
+      await query(
+        `SELECT f.*
+         FROM uploaded_files f
+         WHERE f.id = $1
+           AND f.purpose = 'forum_post'
+           AND EXISTS (SELECT 1 FROM forum_posts p WHERE f.id = ANY(p.file_ids))`,
+        [req.params.id]
+      )
+    ).rows[0];
+    if (!file || !fs.existsSync(file.path)) return res.status(404).json({ error: "FILE_NOT_FOUND" });
+    res.setHeader("Content-Type", file.mime_type || "application/octet-stream");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.sendFile(path.resolve(file.path));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/forum/posts", async (req, res, next) => {
+  try {
+    const posts = (
+      await query(
+        `SELECT p.*, u.identifier, u.display_name
+         FROM forum_posts p
+         JOIN users u ON u.id = p.user_id
+         ORDER BY p.created_at DESC
+         LIMIT 100`
+      )
+    ).rows;
+    if (!posts.length) return res.json({ posts: [] });
+    const postIds = posts.map((post) => post.id);
+    const replies = (
+      await query(
+        `SELECT r.*, u.identifier, u.display_name
+         FROM forum_replies r
+         JOIN users u ON u.id = r.user_id
+         WHERE r.post_id = ANY($1::uuid[])
+         ORDER BY r.created_at ASC`,
+        [postIds]
+      )
+    ).rows;
+    const fileIds = posts.flatMap((post) => post.file_ids || []);
+    const files = fileIds.length
+      ? (
+          await query("SELECT * FROM uploaded_files WHERE id = ANY($1::uuid[]) AND purpose = 'forum_post'", [fileIds])
+        ).rows
+      : [];
+    const repliesByPost = new Map();
+    for (const reply of replies) {
+      const item = {
+        id: reply.id,
+        author: reply.display_name || reply.identifier || "会员同学",
+        role: reply.role || "member",
+        time: formatForumTime(reply.created_at),
+        content: reply.content,
+        createdAt: reply.created_at,
+      };
+      repliesByPost.set(reply.post_id, [...(repliesByPost.get(reply.post_id) || []), item]);
+    }
+    const filesById = new Map(files.map((file) => [file.id, file]));
+    res.json({
+      posts: posts.map((post) =>
+        toForumPost(
+          post,
+          repliesByPost.get(post.id) || [],
+          (post.file_ids || []).map((id) => filesById.get(id)).filter(Boolean)
+        )
+      ),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/forum/posts", requireAuth, upload.array("images", 6), async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    const { type = "学习问题", title = "", content = "" } = req.body || {};
+    if (!title.trim() || !content.trim()) return res.status(400).json({ error: "POST_REQUIRED", message: "请填写标题和内容。" });
+    const student = await getPrimaryStudent(req.user);
+    const saved = await withTransaction(async (client) => {
+      const fileRows = await saveUploadedFiles(client, req.user, student, "forum_post", req.files || []);
+      const post = (
+        await client.query(
+          `INSERT INTO forum_posts (student_id, user_id, post_type, title, content, file_ids)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING *`,
+          [student.id, req.user.id, type, title.trim(), content.trim(), fileRows.map((file) => file.id)]
+        )
+      ).rows[0];
+      await client.query(
+        `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
+         VALUES ($1, $2, 'forum_post', $3, $4)`,
+        [student.id, req.user.id, title.trim(), JSON.stringify({ type, content, fileIds: fileRows.map((file) => file.id) })]
+      );
+      return { post, fileRows };
+    });
+    res.json({
+      post: toForumPost(
+        { ...saved.post, identifier: req.user.identifier, display_name: req.user.display_name },
+        [],
+        saved.fileRows
+      ),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/forum/posts/:id/replies", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    const { content = "" } = req.body || {};
+    if (!content.trim()) return res.status(400).json({ error: "REPLY_REQUIRED", message: "请填写留言内容。" });
+    const post = (await query("SELECT id FROM forum_posts WHERE id = $1", [req.params.id])).rows[0];
+    if (!post) return res.status(404).json({ error: "POST_NOT_FOUND", message: "帖子不存在。" });
+    const role = req.user.role === "admin" || req.user.role === "teacher" ? "moderator" : "member";
+    const reply = (
+      await query(
+        `INSERT INTO forum_replies (post_id, user_id, role, content)
+         VALUES ($1, $2, $3, $4)
+         RETURNING *`,
+        [req.params.id, req.user.id, role, content.trim()]
+      )
+    ).rows[0];
+    res.json({
+      reply: {
+        id: reply.id,
+        author: req.user.display_name || req.user.identifier || "会员同学",
+        role: reply.role,
+        time: formatForumTime(reply.created_at),
+        content: reply.content,
+        createdAt: reply.created_at,
+      },
+    });
   } catch (error) {
     next(error);
   }

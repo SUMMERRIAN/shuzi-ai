@@ -1875,6 +1875,7 @@ function App() {
   const [knowledgePromptTemplate, setKnowledgePromptTemplate] = useState(defaultKnowledgePromptTemplate);
   const [forumPosts, setForumPosts] = useState(defaultForumPosts);
   const [activeForumPostId, setActiveForumPostId] = useState(defaultForumPosts[0].id);
+  const [forumStatus, setForumStatus] = useState("idle");
   const [forumDraft, setForumDraft] = useState({
     type: "学习问题",
     title: "",
@@ -1964,6 +1965,10 @@ function App() {
   useEffect(() => {
     if (activePage === "calendar" && member.isLoggedIn) loadCalendarEvents();
   }, [activePage, member.isLoggedIn]);
+
+  useEffect(() => {
+    if (activePage === "forum") loadForumPosts();
+  }, [activePage]);
 
   useEffect(() => {
     if (activePage === "questionnaire" && member.isLoggedIn) loadQuestionnaireArchives();
@@ -3529,12 +3534,29 @@ function App() {
     setForumDraft((prev) => ({ ...prev, [field]: value }));
   }
 
+  async function loadForumPosts() {
+    try {
+      setForumStatus("loading");
+      const data = await apiRequest("/forum/posts");
+      const nextPosts = data.posts?.length ? data.posts : defaultForumPosts;
+      setForumPosts(nextPosts);
+      setActiveForumPostId((current) => (nextPosts.some((post) => post.id === current) ? current : nextPosts[0]?.id || ""));
+      setForumStatus("idle");
+    } catch (error) {
+      setForumStatus("error");
+      setAccountNotice(error.message || "学习社区暂时无法读取，已显示示例帖子。");
+      setForumPosts(defaultForumPosts);
+      setActiveForumPostId(defaultForumPosts[0]?.id || "");
+    }
+  }
+
   function handleForumImages(files) {
     const picked = Array.from(files || []).filter((file) => file.type.startsWith("image/")).slice(0, 6);
     if (!picked.length) return;
     const images = picked.map((file) => ({
       id: `${file.name}-${file.size}-${file.lastModified}-${Date.now()}`,
       name: file.name,
+      file,
       url: URL.createObjectURL(file),
     }));
     setForumDraft((prev) => ({ ...prev, images: [...(prev.images || []), ...images].slice(0, 6) }));
@@ -3548,40 +3570,55 @@ function App() {
     });
   }
 
-  function createForumPost() {
+  async function createForumPost() {
     if (!requireMemberAction("在学习社区发帖", createForumPost, "社区内容可以公开浏览，但发帖、分享学习问题和向版主提问需要会员权限。")) return;
     const title = forumDraft.title.trim();
     const content = forumDraft.content.trim();
     if (!title || !content) return;
-    const next = {
-      id: `post-${Date.now()}`,
-      type: forumDraft.type,
-      title,
-      content,
-      images: forumDraft.images || [],
-      author: member.identifier || "会员同学",
-      time: "刚刚",
-      likes: 0,
-      replies: [],
-    };
-    setForumPosts((prev) => [next, ...prev]);
-    setActiveForumPostId(next.id);
-    setForumDraft((prev) => ({ ...prev, title: "", content: "", images: [] }));
+    try {
+      setForumStatus("saving");
+      const formData = new FormData();
+      formData.append("type", forumDraft.type);
+      formData.append("title", title);
+      formData.append("content", content);
+      (forumDraft.images || []).forEach((image) => {
+        if (image.file) formData.append("images", image.file, image.name);
+      });
+      const data = await apiRequest("/forum/posts", { method: "POST", body: formData });
+      const next = data.post;
+      if (!next) throw new Error("帖子保存失败。");
+      (forumDraft.images || []).forEach((image) => {
+        if (image.url?.startsWith("blob:")) URL.revokeObjectURL(image.url);
+      });
+      setForumPosts((prev) => [next, ...prev.filter((post) => !String(post.id).startsWith("post-"))]);
+      setActiveForumPostId(next.id);
+      setForumDraft((prev) => ({ ...prev, title: "", content: "", images: [] }));
+      setForumStatus("idle");
+    } catch (error) {
+      setForumStatus("error");
+      setAccountNotice(error.message || "帖子没有保存成功，请稍后再试。");
+    }
   }
 
-  function addForumReply() {
+  async function addForumReply() {
     if (!requireMemberAction("在学习社区留言", addForumReply, "社区帖子可以浏览，但留言、讨论和追问版主需要会员权限。")) return;
     const content = forumDraft.reply.trim();
     if (!content) return;
-    const reply = {
-      id: `reply-${Date.now()}`,
-      author: member.identifier || "会员同学",
-      role: "member",
-      time: "刚刚",
-      content,
-    };
-    setForumPosts((prev) => prev.map((post) => (post.id === activeForumPostId ? { ...post, replies: [...post.replies, reply] } : post)));
-    setForumDraft((prev) => ({ ...prev, reply: "" }));
+    try {
+      setForumStatus("saving");
+      const data = await apiRequest(`/forum/posts/${activeForumPostId}/replies`, {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      });
+      const reply = data.reply;
+      if (!reply) throw new Error("留言保存失败。");
+      setForumPosts((prev) => prev.map((post) => (post.id === activeForumPostId ? { ...post, replies: [...post.replies, reply] } : post)));
+      setForumDraft((prev) => ({ ...prev, reply: "" }));
+      setForumStatus("idle");
+    } catch (error) {
+      setForumStatus("error");
+      setAccountNotice(error.message || "留言没有保存成功，请稍后再试。");
+    }
   }
 
   function handleFreeAskFiles(event) {
@@ -3980,6 +4017,7 @@ function App() {
             activePostId={activeForumPostId}
             setActivePostId={setActiveForumPostId}
             draft={forumDraft}
+            status={forumStatus}
             updateDraft={updateForumDraft}
             handleImages={handleForumImages}
             removeImage={removeForumImage}
@@ -4642,7 +4680,7 @@ function LearningLibraryPage({
   );
 }
 
-function LearningForumPage({ posts, activePostId, setActivePostId, draft, updateDraft, handleImages, removeImage, createPost, addReply, member, requireMemberAction }) {
+function LearningForumPage({ posts, activePostId, setActivePostId, draft, status, updateDraft, handleImages, removeImage, createPost, addReply, member, requireMemberAction }) {
   const canInteract = member.isLoggedIn && member.isPaid;
   const [activeForumTab, setActiveForumTab] = useState("all");
   const [composeOpen, setComposeOpen] = useState(false);
@@ -4687,8 +4725,9 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, update
             <div>
               <span className="eyebrow">留言版块</span>
               <h2>学习问题与心得交流</h2>
+              {status !== "idle" && <p className="forum-status-text">{status === "loading" ? "正在读取社区帖子..." : status === "saving" ? "正在保存..." : "社区数据暂时不可用"}</p>}
             </div>
-            <button type="button" className="primary-action forum-new-post-button" onClick={() => openCompose(activeForumTab === "moderator" ? "向版主提问" : "学习问题")}>
+            <button type="button" className="primary-action forum-new-post-button" onClick={() => openCompose(activeForumTab === "moderator" ? "向版主提问" : "学习问题")} disabled={status === "saving"}>
               <Plus size={17} />
               发帖
             </button>
@@ -4750,7 +4789,7 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, update
                 </div>
               )}
               <div className="forum-action-row">
-                <button type="button" className="primary-action" onClick={createPost}>
+                <button type="button" className="primary-action" onClick={createPost} disabled={status === "saving"}>
                   <Send size={17} />
                   发布帖子
                 </button>
@@ -4817,7 +4856,7 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, update
                       <span>留言回复</span>
                       <textarea value={draft.reply} onChange={(event) => updateDraft("reply", event.target.value)} placeholder="会员可以在这里留言、追问版主，或补充自己的经验。" />
                     </label>
-                    <button type="button" className="primary-action" onClick={addReply}>
+                    <button type="button" className="primary-action" onClick={addReply} disabled={status === "saving"}>
                       <Send size={17} />
                       发表留言
                     </button>

@@ -231,6 +231,28 @@ export async function ensureSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS forum_posts (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      student_id UUID REFERENCES students(id) ON DELETE SET NULL,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      post_type TEXT NOT NULL DEFAULT '学习问题',
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      file_ids UUID[] NOT NULL DEFAULT '{}',
+      likes INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS forum_replies (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      post_id UUID NOT NULL REFERENCES forum_posts(id) ON DELETE CASCADE,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role TEXT NOT NULL DEFAULT 'member',
+      content TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS statement_audio_files (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
@@ -247,6 +269,8 @@ export async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_calendar_events_user_date ON learning_calendar_events(user_id, event_date);
     CREATE INDEX IF NOT EXISTS idx_library_items_user_parent ON library_items(user_id, parent_id);
     CREATE INDEX IF NOT EXISTS idx_library_items_user_view ON library_items(user_id, is_trashed, is_starred, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_forum_posts_created_at ON forum_posts(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_forum_replies_post_id ON forum_replies(post_id, created_at);
   `);
   await query(`
     ALTER TABLE users DROP CONSTRAINT IF EXISTS users_channel_check;
