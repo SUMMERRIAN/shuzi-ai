@@ -1211,7 +1211,7 @@ function createSubjectWorkspace(subject) {
   const data = subjectStrategyData[subject];
   return {
     strategy: data.strategy,
-    strategySuggestion: "点击“生成AI策略建议”后，这里会结合学情画像、学情陈述和当前科目，生成一份可以选择接受或重新生成的学习策略。",
+    strategySuggestion: "",
     acceptedStrategy: "",
     studentStrategy: "",
     materials: data.materials.map((item, index) => ({ ...item, id: `${subject}-material-${index}` })),
@@ -1224,7 +1224,7 @@ function createSubjectWorkspace(subject) {
       },
     ],
     tasks: data.tasks.map((task, index) => ({ ...task, id: `${subject}-task-${index}` })),
-    aiNote: "AI建议会根据学情画像、申述记录和当前科目内容生成。",
+    aiNote: "AI学习策略建议会根据学情画像、学情陈述和当前科目内容生成。",
   };
 }
 
@@ -2782,15 +2782,7 @@ function App() {
       ...workspace,
       acceptedStrategy: workspace.strategySuggestion,
       strategy: workspace.strategySuggestion,
-      aiNote: "已接受当前AI策略建议，这份策略会作为本学科后续任务和计划设计的依据。",
-    }));
-  }
-
-  function rejectStrategySuggestion() {
-    updateStrategyWorkspace(activeSubject, (workspace) => ({
-      ...workspace,
-      acceptedStrategy: "",
-      aiNote: "当前AI策略建议暂未采用。可以重新生成，或以学生自己的策略为准继续设计任务。",
+      aiNote: "已接受当前AI学习策略建议，这份建议会记录在当前学生的策略档案中，并作为本学科后续任务和计划设计的依据。",
     }));
   }
 
@@ -3216,7 +3208,8 @@ function App() {
       if (section === "strategy") {
         updateStrategyWorkspace(subject, (current) => ({
           ...current,
-          strategySuggestion: result.strategy_suggestion || current.strategySuggestion,
+          strategySuggestion: result.strategy_suggestion || result.ai_note || "AI没有返回明确的策略建议，请点击重新生成再试一次。",
+          acceptedStrategy: "",
           aiNote: result.ai_note || "AI已根据当前学情画像生成本学科策略建议。",
         }));
       } else if (section === "task") {
@@ -3586,7 +3579,6 @@ function App() {
             addCustomMaterial={addCustomMaterial}
             addStrategyTask={addStrategyTask}
             acceptStrategySuggestion={acceptStrategySuggestion}
-            rejectStrategySuggestion={rejectStrategySuggestion}
             runStrategyAi={runStrategyAi}
           />
         )}
@@ -5771,12 +5763,12 @@ function StrategyDesignPage({
   addCustomMaterial,
   addStrategyTask,
   acceptStrategySuggestion,
-  rejectStrategySuggestion,
   runStrategyAi,
 }) {
   const workspace = workspaces[activeSubject];
-  const subjectData = subjectStrategyData[activeSubject];
   const studentName = answers.name || "这位同学";
+  const isGeneratingStrategy = strategyAiStatus === "AI正在生成建议...";
+  const hasStrategySuggestion = Boolean(workspace.strategySuggestion || isGeneratingStrategy);
 
   return (
     <section className="stack strategy-page">
@@ -5826,37 +5818,39 @@ function StrategyDesignPage({
             <Sparkles size={24} />
           </div>
 
-          <div className="strategy-explain">
-            <strong>策略判断</strong>
-            <p>{subjectData.diagnosis}</p>
+          <div className="strategy-ai-entry">
+            <button type="button" className="primary-action" onClick={() => runStrategyAi("strategy", "generate")} disabled={isGeneratingStrategy}>
+              <Sparkles size={17} />
+              AI学习策略建议
+            </button>
           </div>
 
-          <div className="strategy-advice-box">
-            <div className="strategy-advice-head">
-              <div>
-                <span className="eyebrow">AI策略建议</span>
-                <strong>{workspace.acceptedStrategy ? "已接受当前AI建议" : "等待确认的AI建议"}</strong>
+          {hasStrategySuggestion && (
+            <div className="strategy-advice-box">
+              <div className="strategy-advice-head">
+                <div>
+                  <span className="eyebrow">AI学习策略建议</span>
+                  <strong>{workspace.acceptedStrategy ? "已接受当前建议" : "等待学生确认"}</strong>
+                </div>
               </div>
-              <button type="button" className="primary-action" onClick={() => runStrategyAi("strategy", "generate")}>
-                <Sparkles size={17} />
-                生成AI策略建议
-              </button>
+              <textarea
+                className="strategy-textarea strategy-suggestion-textarea"
+                value={isGeneratingStrategy ? "AI正在结合学情画像、学情陈述和当前科目生成学习策略建议..." : workspace.strategySuggestion}
+                readOnly
+                aria-label={`${activeSubject}AI学习策略建议`}
+              />
+              <div className="ai-action-row">
+                <button type="button" className="ghost-action" onClick={acceptStrategySuggestion} disabled={!workspace.strategySuggestion || isGeneratingStrategy}>
+                  <CheckCircle2 size={17} />
+                  接受建议
+                </button>
+                <button type="button" className="ghost-action" onClick={() => runStrategyAi("strategy", "generate")} disabled={isGeneratingStrategy}>
+                  <WandSparkles size={17} />
+                  重新生成
+                </button>
+              </div>
             </div>
-            <p>{workspace.strategySuggestion}</p>
-            <div className="ai-action-row">
-              <button type="button" className="ghost-action" onClick={acceptStrategySuggestion}>
-                <CheckCircle2 size={17} />
-                接受建议
-              </button>
-              <button type="button" className="ghost-action" onClick={rejectStrategySuggestion}>
-                不接受建议
-              </button>
-              <button type="button" className="ghost-action" onClick={() => runStrategyAi("strategy", "generate")}>
-                <WandSparkles size={17} />
-                重新生成
-              </button>
-            </div>
-          </div>
+          )}
 
           <label className="strategy-student-box">
             <span>我认为的科目学习策略</span>

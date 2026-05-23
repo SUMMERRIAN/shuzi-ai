@@ -3328,6 +3328,11 @@ audio {
   resize: vertical;
 }
 
+.strategy-ai-entry {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .strategy-advice-box,
 .strategy-student-box {
   display: grid;
@@ -3363,6 +3368,12 @@ audio {
   margin-bottom: 0;
   color: #344039;
   line-height: 1.75;
+}
+
+.strategy-suggestion-textarea {
+  min-height: 170px;
+  background: #ffffff;
+  color: #24312a;
 }
 
 .strategy-student-box .strategy-textarea {
