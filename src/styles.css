@@ -5237,6 +5237,30 @@ audio {
   margin-top: 4px;
 }
 
+.forum-thumbnail-grid.is-post img {
+  cursor: zoom-in;
+}
+
+.forum-image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: rgba(17, 24, 32, 0.72);
+  cursor: zoom-out;
+}
+
+.forum-image-lightbox img {
+  max-width: min(92vw, 1080px);
+  max-height: 88vh;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+  cursor: default;
+}
+
 .forum-action-row,
 .reply-compose {
   display: flex;

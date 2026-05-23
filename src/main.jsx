@@ -779,7 +779,9 @@ function buildCoreSteps() {
 }
 
 function buildQuestionnaireSteps(answers) {
-  const selected = Array.isArray(answers.weakSubjects) ? answers.weakSubjects : [];
+  const selected = Array.isArray(answers.weakSubjects) && answers.weakSubjects.length
+    ? answers.weakSubjects
+    : ["语文", "数学", "英语"];
   const subjectSteps = selected
     .filter((subject) => subjectModules[subject])
     .map((subject) => subjectModules[subject]);
@@ -2040,12 +2042,14 @@ function App() {
       table{width:100%;border-collapse:collapse} th,td{border:1px solid #d9ded6;padding:10px;text-align:left;vertical-align:top}
       th{width:180px;background:#f4f8f2}
     </style></head><body><h1>学情问卷档案</h1><div class="meta">填写日期：${escapeHtml(formatArchiveDate(record.createdAt))} · 完成度：${record.completion || 0}%</div><table>${rows}</table></body></html>`;
-    const printWindow = window.open("", "_blank", "noopener,noreferrer");
+    const printWindow = window.open("", "_blank");
     if (!printWindow) return;
     printWindow.document.write(html);
     printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
+    printWindow.onload = () => {
+      printWindow.focus();
+      printWindow.print();
+    };
   }
 
   function clearStatementDraft() {
@@ -4643,6 +4647,7 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, update
   const [activeForumTab, setActiveForumTab] = useState("all");
   const [composeOpen, setComposeOpen] = useState(false);
   const [forumPage, setForumPage] = useState(1);
+  const [expandedForumImage, setExpandedForumImage] = useState(null);
   const viewerName = member.identifier || "";
   const forumTabs = [
     { id: "all", label: "全部留言" },
@@ -4780,7 +4785,15 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, update
                   {post.images?.length > 0 && (
                     <div className="forum-thumbnail-grid is-post">
                       {post.images.map((image) => (
-                        <img key={image.id} src={image.url} alt={image.name} />
+                        <img
+                          key={image.id}
+                          src={image.url}
+                          alt={image.name}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setExpandedForumImage(image);
+                          }}
+                        />
                       ))}
                     </div>
                   )}
@@ -4828,6 +4841,11 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, update
               </div>
             )}
           </div>
+          {expandedForumImage && (
+            <div className="forum-image-lightbox" role="presentation" onClick={() => setExpandedForumImage(null)}>
+              <img src={expandedForumImage.url} alt={expandedForumImage.name} onClick={(event) => event.stopPropagation()} />
+            </div>
+          )}
         </main>
       </section>
     </section>
@@ -5437,14 +5455,16 @@ function QuestionnairePage({
           <p>这份问卷用来了解学生的基础、课堂、作业、错题、复习、学习环境和科目问题。它不是评价学生好坏，而是帮助我们找到真正影响学习的环节。</p>
           <p>建议按步骤填写：先完成核心问题，再展开薄弱科目。保存后的内容会进入个人档案，后面用于生成学情画像、学习任务和学习计划。</p>
         </div>
-        <div className="progress-card">
-          <strong>{completion}%</strong>
-          <span>整体完成度</span>
+        <div className="hero-action-stack">
+          <div className="progress-card">
+            <strong>{completion}%</strong>
+            <span>整体完成度</span>
+          </div>
+          <button type="button" className="ghost-action clear-page-action" onClick={clearQuestionnaireDraft}>
+            <Trash2 size={17} />
+            清空填写记录
+          </button>
         </div>
-        <button type="button" className="ghost-action clear-page-action" onClick={clearQuestionnaireDraft}>
-          <Trash2 size={17} />
-          清空填写记录
-        </button>
       </div>
 
       <div className="wizard-layout">
