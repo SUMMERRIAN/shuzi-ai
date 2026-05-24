@@ -28,6 +28,8 @@ GEMINI_API_KEY=your-gemini-api-key
 GEMINI_MODEL_FAST=gemini-2.5-flash
 GEMINI_MODEL_THINKING=gemini-2.5-pro
 GEMINI_MODEL_MISTAKE=gemini-2.5-flash
+GEMINI_TIMEOUT_MS=120000
+GEMINI_MAX_OUTPUT_TOKENS=4096
 UPLOAD_DIR=/var/www/shuzi-ai/uploads
 ```
 

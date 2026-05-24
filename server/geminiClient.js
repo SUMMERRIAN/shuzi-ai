@@ -1,6 +1,8 @@
 import fs from "node:fs";
 
 const geminiEndpoint = "https://generativelanguage.googleapis.com/v1beta/models";
+const geminiTimeoutMs = Math.max(15000, Number(process.env.GEMINI_TIMEOUT_MS || 120000));
+const geminiMaxOutputTokens = Math.max(1024, Number(process.env.GEMINI_MAX_OUTPUT_TOKENS || 4096));
 
 export function ensureGeminiKey() {
   if (!process.env.GEMINI_API_KEY) {
@@ -41,16 +43,39 @@ export function getGeminiText(data) {
 export async function generateGeminiText({ model, prompt, files = [], temperature = 0.25 }) {
   ensureGeminiKey();
   const parts = [{ text: prompt }, ...files.map(toGeminiPart).filter(Boolean)];
-  const response = await fetch(`${geminiEndpoint}/${encodeURIComponent(model)}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts }],
-      generationConfig: {
-        temperature,
-      },
-    }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), geminiTimeoutMs);
+  let response;
+  try {
+    response = await fetch(`${geminiEndpoint}/${encodeURIComponent(model)}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        contents: [{ role: "user", parts }],
+        generationConfig: {
+          temperature,
+          candidateCount: 1,
+          maxOutputTokens: geminiMaxOutputTokens,
+        },
+      }),
+    });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      const timeoutError = new Error(`Gemini请求超过${Math.round(geminiTimeoutMs / 1000)}秒仍未返回，请稍后重试或减少上传材料。`);
+      timeoutError.status = 504;
+      timeoutError.code = "GEMINI_TIMEOUT";
+      timeoutError.provider = "gemini";
+      timeoutError.model = model;
+      timeoutError.detail = `GEMINI_TIMEOUT_MS=${geminiTimeoutMs}`;
+      throw timeoutError;
+    }
+    error.provider = "gemini";
+    error.model = model;
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
   const rawText = await response.text();
   let data = {};
   try {
