@@ -96,7 +96,7 @@ function getGeminiModel(mode = "fast") {
 }
 
 function getMistakeGeminiModel() {
-  return process.env.GEMINI_MODEL_MISTAKE || geminiThinkingModel;
+  return process.env.GEMINI_MODEL_MISTAKE || geminiFastModel;
 }
 
 async function extractPdfText(buffer) {
@@ -1408,7 +1408,7 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
       source = "",
       archiveSnapshot = "{}",
     } = req.body || {};
-    const tokenCost = taskType === "generateSimilar" ? 10 : 12;
+    const tokenCost = taskType === "generateSimilar" ? 6 : 8;
     await assertTokenBalance(req.user.id, tokenCost);
     if (!prompt.trim() && !files.length) return res.status(400).json({ error: "PROMPT_OR_FILE_REQUIRED" });
 
@@ -1418,7 +1418,7 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
       analyzePaper: "AI分析试卷：整理试卷/作业中的错题清单、薄弱知识点、错误类型、优先训练顺序和复习建议。",
     };
     const documentText = await makeDocumentTextSummary(files);
-    const geminiMode = "thinking";
+    const geminiMode = "fast";
     const geminiModel = getMistakeGeminiModel();
     const geminiPrompt = [
       "你是树子AI错题专项智能体。你的任务只围绕错题、同类题训练、作业/试卷材料分析和错题档案沉淀。",

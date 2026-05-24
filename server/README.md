@@ -27,11 +27,11 @@ OPENAI_MODEL_TRANSCRIBE=gpt-4o-mini-transcribe
 GEMINI_API_KEY=your-gemini-api-key
 GEMINI_MODEL_FAST=gemini-2.5-flash
 GEMINI_MODEL_THINKING=gemini-2.5-pro
-GEMINI_MODEL_MISTAKE=gemini-2.5-pro
+GEMINI_MODEL_MISTAKE=gemini-2.5-flash
 UPLOAD_DIR=/var/www/shuzi-ai/uploads
 ```
 
-知识图和自由问中的图片生成通过 OpenAI Image API 使用 `OPENAI_MODEL_IMAGE`。错题专项统一使用 `GEMINI_MODEL_MISTAKE`，默认 `gemini-2.5-pro`。
+知识图和自由问中的图片生成通过 OpenAI Image API 使用 `OPENAI_MODEL_IMAGE`。错题专项统一使用通用模型 `GEMINI_MODEL_MISTAKE`，默认 `gemini-2.5-flash`，避免 Pro 模型成本和等待时间过高。
 
 ## 启动
 

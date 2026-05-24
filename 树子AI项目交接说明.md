@@ -417,7 +417,7 @@ OPENAI_MODEL_IMAGE=gpt-image-1.5
 GEMINI_API_KEY=
 GEMINI_MODEL_FAST=gemini-2.5-flash
 GEMINI_MODEL_THINKING=gemini-2.5-pro
-GEMINI_MODEL_MISTAKE=gemini-2.5-pro
+GEMINI_MODEL_MISTAKE=gemini-2.5-flash
 ```
 
 ### 接口边界原则
