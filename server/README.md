@@ -22,15 +22,16 @@ OPENAI_API_KEY=sk-your-key
 OPENAI_MODEL_TEXT=gpt-5
 OPENAI_MODEL_FAST=gpt-5
 OPENAI_MODEL_THINKING=gpt-5
-OPENAI_MODEL_IMAGE=gpt-image-2
+OPENAI_MODEL_IMAGE=gpt-image-1.5
 OPENAI_MODEL_TRANSCRIBE=gpt-4o-mini-transcribe
 GEMINI_API_KEY=your-gemini-api-key
 GEMINI_MODEL_FAST=gemini-2.5-flash
 GEMINI_MODEL_THINKING=gemini-2.5-pro
+GEMINI_MODEL_MISTAKE=gemini-2.5-pro
 UPLOAD_DIR=/var/www/shuzi-ai/uploads
 ```
 
-知识图和自由问中的图片生成通过 OpenAI Image API 使用 `OPENAI_MODEL_IMAGE`，不要把 `gpt-image-2` 直接作为 Responses API 的 `model`。
+知识图和自由问中的图片生成通过 OpenAI Image API 使用 `OPENAI_MODEL_IMAGE`。错题专项统一使用 `GEMINI_MODEL_MISTAKE`，默认 `gemini-2.5-pro`。
 
 ## 启动
 

@@ -51,13 +51,31 @@ export async function generateGeminiText({ model, prompt, files = [], temperatur
       },
     }),
   });
-  const data = await response.json().catch(() => ({}));
+  const rawText = await response.text();
+  let data = {};
+  try {
+    data = rawText ? JSON.parse(rawText) : {};
+  } catch {
+    data = { rawText };
+  }
   if (!response.ok) {
     const error = new Error(data?.error?.message || "Gemini request failed.");
     error.status = response.status;
     error.code = data?.error?.status || "GEMINI_REQUEST_FAILED";
-    error.detail = data;
+    error.detail = data?.error || data;
+    error.provider = "gemini";
+    error.model = model;
     throw error;
   }
-  return getGeminiText(data);
+  const text = getGeminiText(data);
+  if (!text) {
+    const error = new Error("Gemini没有返回有效文本，请稍后重试或检查模型权限。");
+    error.status = 502;
+    error.code = "GEMINI_EMPTY_RESPONSE";
+    error.detail = data;
+    error.provider = "gemini";
+    error.model = model;
+    throw error;
+  }
+  return text;
 }

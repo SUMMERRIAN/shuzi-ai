@@ -26,7 +26,7 @@ const openaiFastModel = process.env.OPENAI_MODEL_FAST || process.env.OPENAI_MODE
 const openaiThinkingModel = process.env.OPENAI_MODEL_THINKING || process.env.OPENAI_MODEL_TEXT || textModel;
 const geminiFastModel = process.env.GEMINI_MODEL_FAST || "gemini-2.5-flash";
 const geminiThinkingModel = process.env.GEMINI_MODEL_THINKING || "gemini-2.5-pro";
-const imageModel = process.env.OPENAI_MODEL_IMAGE || "gpt-image-2";
+const imageModel = process.env.OPENAI_MODEL_IMAGE || "gpt-image-1.5";
 const transcriptionModel = process.env.OPENAI_MODEL_TRANSCRIBE || "gpt-4o-mini-transcribe";
 
 const knowledgeInfographicTemplate = `超精细教育信息图 [SUBJECT]，
@@ -72,17 +72,31 @@ function getOpenAITextModel(mode = "fast") {
 }
 
 async function generateOpenAIImage(prompt) {
-  const response = await openai.images.generate({
-    model: imageModel,
-    prompt,
-    size: "1024x1024",
-    quality: "high",
-  });
-  return response?.data?.[0]?.b64_json || "";
+  try {
+    const response = await openai.images.generate({
+      model: imageModel,
+      prompt,
+      size: "1024x1024",
+      quality: "high",
+    });
+    const imageBase64 = response?.data?.[0]?.b64_json || "";
+    if (!imageBase64) {
+      throw createHttpError(502, "OPENAI_IMAGE_EMPTY_RESPONSE", "OpenAI没有返回有效图片，请稍后重试或检查图片模型权限。");
+    }
+    return imageBase64;
+  } catch (error) {
+    error.provider = "openai";
+    error.model = imageModel;
+    throw error;
+  }
 }
 
 function getGeminiModel(mode = "fast") {
   return normalizeAiMode(mode) === "thinking" ? geminiThinkingModel : geminiFastModel;
+}
+
+function getMistakeGeminiModel() {
+  return process.env.GEMINI_MODEL_MISTAKE || geminiThinkingModel;
 }
 
 async function extractPdfText(buffer) {
@@ -1404,8 +1418,8 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
       analyzePaper: "AI分析试卷：整理试卷/作业中的错题清单、薄弱知识点、错误类型、优先训练顺序和复习建议。",
     };
     const documentText = await makeDocumentTextSummary(files);
-    const geminiMode = taskType === "analyzePaper" ? "thinking" : "fast";
-    const geminiModel = getGeminiModel(geminiMode);
+    const geminiMode = "thinking";
+    const geminiModel = getMistakeGeminiModel();
     const geminiPrompt = [
       "你是树子AI错题专项智能体。你的任务只围绕错题、同类题训练、作业/试卷材料分析和错题档案沉淀。",
       "输出要像给学生看的学习报告，干净、完整、具体、可执行。不要生成学情画像总报告，不要制定完整周计划。必须输出严格JSON。",
@@ -1481,7 +1495,8 @@ app.post("/api/ai/mistakes/analyze", requireAuth, upload.array("files", 6), asyn
       `标题：${title}`,
       `学生补充：${note}`,
     ].join("\n");
-    const analysisText = await generateGeminiText({ model: geminiFastModel, prompt, files });
+    const mistakeGeminiModel = getMistakeGeminiModel();
+    const analysisText = await generateGeminiText({ model: mistakeGeminiModel, prompt, files });
     const analysis = parseJsonText(analysisText, { mistake_title: title });
     const saved = await withTransaction(async (client) => {
       const fileRows = await saveUploadedFiles(client, req.user, student, "mistake", files);
@@ -1490,17 +1505,17 @@ app.post("/api/ai/mistakes/analyze", requireAuth, upload.array("files", 6), asyn
           `INSERT INTO mistake_files (student_id, user_id, subject, title, file_ids, analysis)
            VALUES ($1, $2, $3, $4, $5, $6)
            RETURNING *`,
-          [student.id, req.user.id, subject, title, fileRows.map((item) => item.id), JSON.stringify({ provider: "gemini", model: geminiFastModel, analysis })]
+          [student.id, req.user.id, subject, title, fileRows.map((item) => item.id), JSON.stringify({ provider: "gemini", model: mistakeGeminiModel, analysis })]
         )
       ).rows[0];
       await client.query(
         `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
          VALUES ($1, $2, 'mistake_analysis', $3, $4)`,
-        [student.id, req.user.id, title, JSON.stringify({ provider: "gemini", model: geminiFastModel, analysis })]
+        [student.id, req.user.id, title, JSON.stringify({ provider: "gemini", model: mistakeGeminiModel, analysis })]
       );
       return row;
     });
-    await recordTokenUsage(req.user.id, 12, "AI错题识别", { feature: "mistake-analyze", provider: "gemini", model: geminiFastModel, mistakeId: saved.id });
+    await recordTokenUsage(req.user.id, 12, "AI错题识别", { feature: "mistake-analyze", provider: "gemini", model: mistakeGeminiModel, mistakeId: saved.id });
     res.json({ analysis, saved });
   } catch (error) {
     next(error);
@@ -1521,7 +1536,8 @@ app.post("/api/ai/mistakes/practice", requireAuth, async (req, res, next) => {
       `数量：${Math.min(3, Math.max(1, Number(count) || 1))}`,
       `错题信息：${JSON.stringify(mistake)}`,
     ].join("\n");
-    const generatedText = await generateGeminiText({ model: geminiFastModel, prompt });
+    const mistakeGeminiModel = getMistakeGeminiModel();
+    const generatedText = await generateGeminiText({ model: mistakeGeminiModel, prompt });
     const generated = parseJsonText(generatedText, { questions: [] });
     const saved = (
       await query(
@@ -1531,7 +1547,7 @@ app.post("/api/ai/mistakes/practice", requireAuth, async (req, res, next) => {
         [student.id, req.user.id, sourceMistakeId, JSON.stringify(generated.questions || generated)]
       )
     ).rows[0];
-    await recordTokenUsage(req.user.id, 10, "AI生成相似题", { feature: "mistake-practice", provider: "gemini", model: geminiFastModel, practiceId: saved.id });
+    await recordTokenUsage(req.user.id, 10, "AI生成相似题", { feature: "mistake-practice", provider: "gemini", model: mistakeGeminiModel, practiceId: saved.id });
     res.json({ practice: generated, saved });
   } catch (error) {
     next(error);
@@ -1904,10 +1920,16 @@ app.get("/api/admin/users", requireAdminToken, async (req, res) => {
 
 app.use((error, req, res, next) => {
   console.error(error);
+  const detail =
+    typeof error.detail === "string"
+      ? error.detail
+      : error.detail?.message || error.detail?.error?.message || error.message;
   res.status(error.status || 500).json({
     error: error.code || "SERVER_ERROR",
     message: error.status ? error.message : "服务器处理失败。",
-    detail: error.message,
+    detail,
+    provider: error.provider || undefined,
+    model: error.model || undefined,
   });
 });
 

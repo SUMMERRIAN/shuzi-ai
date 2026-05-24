@@ -246,8 +246,8 @@ AI处理区：
 
 - 可问学习问题，也可以问学习之外的知识问题。
 - 知识图生成必须使用 OpenAI 图像模型。
-- 目前环境变量使用 `OPENAI_MODEL_IMAGE`，目标模型为 `gpt-image-2`。
-- 后端生成知识图时使用 OpenAI Image API；不要把 `gpt-image-2` 直接作为 Responses API 的 `model`。
+- 目前环境变量使用 `OPENAI_MODEL_IMAGE`，目标模型为 `gpt-image-1.5`。
+- 后端生成知识图时使用 OpenAI Image API；不要把图像模型直接作为 Responses API 的 `model`。
 - 学生可以查看、修改提示词模板。
 - 点击“套用知识图模板”时，将模板与学生输入主题融合。
 - 点击“AI生成知识图”后才开始生成。
@@ -401,7 +401,7 @@ Token充值：
 OPENAI_API_KEY=
 OPENAI_MODEL_TEXT=
 OPENAI_MODEL_TRANSCRIBE=
-OPENAI_MODEL_IMAGE=gpt-image-2
+OPENAI_MODEL_IMAGE=gpt-image-1.5
 ```
 
 ### Gemini
@@ -417,6 +417,7 @@ OPENAI_MODEL_IMAGE=gpt-image-2
 GEMINI_API_KEY=
 GEMINI_MODEL_FAST=gemini-2.5-flash
 GEMINI_MODEL_THINKING=gemini-2.5-pro
+GEMINI_MODEL_MISTAKE=gemini-2.5-pro
 ```
 
 ### 接口边界原则
