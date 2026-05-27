@@ -1377,7 +1377,7 @@ p {
 
 .expert-intro-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+  grid-template-columns: minmax(0, 1fr) minmax(440px, 520px);
   gap: 18px;
   align-items: start;
 }
@@ -1405,8 +1405,9 @@ p {
 
 .expert-booking-panel {
   display: grid;
-  align-content: start;
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
   padding: 18px;
   border: 1px solid #dfe5da;
   border-radius: 8px;
@@ -1474,6 +1475,12 @@ p {
   gap: 8px;
 }
 
+.expert-booking-copy {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
 .expert-booking-head p {
   margin: 0;
   color: #657069;
@@ -1481,7 +1488,7 @@ p {
 }
 
 .expert-booking-panel img {
-  width: min(210px, 100%);
+  width: 190px;
   justify-self: center;
   padding: 10px;
   border: 1px solid #edf0ea;
@@ -1510,18 +1517,18 @@ p {
 
 .expert-method-grid {
   display: grid;
-  gap: 14px;
+  gap: 10px;
 }
 
 .expert-method-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 .expert-method-card {
   display: grid;
   align-content: start;
-  gap: 8px;
-  padding: 16px;
+  gap: 6px;
+  padding: 12px;
   border: 1px solid #dfe5da;
   border-radius: 8px;
   background: #ffffff;
@@ -1529,24 +1536,29 @@ p {
 
 .expert-method-card strong {
   color: #102018;
-  font-size: 18px;
+  font-size: 16px;
 }
 
 .expert-method-card p {
   margin: 0;
   color: #48534d;
-  line-height: 1.7;
+  font-size: 14px;
+  line-height: 1.55;
 }
 
 .expert-method-card span {
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   place-items: center;
   border-radius: 50%;
   background: #e8f4e2;
   color: #008653;
   font-weight: 900;
+}
+
+.expert-method-panel {
+  padding: 18px 20px;
 }
 
 .expert-article-library {
@@ -1658,6 +1670,47 @@ p {
   margin: 0;
   color: #48534d;
   line-height: 1.75;
+}
+
+.expert-pdf-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.expert-pdf-actions a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid #cfe7d8;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #008653;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.expert-pdf-actions a:first-child {
+  background: #008653;
+  color: #ffffff;
+}
+
+.expert-pdf-reader {
+  width: 100%;
+  padding: 16px;
+  background: #f3f6f4;
+}
+
+.expert-pdf-reader iframe {
+  display: block;
+  width: 100%;
+  height: min(82vh, 920px);
+  min-height: 720px;
+  border: 1px solid #dfe5da;
+  border-radius: 8px;
+  background: #ffffff;
 }
 
 .expert-article-body {
@@ -6318,6 +6371,10 @@ audio {
     grid-template-columns: 1fr;
   }
 
+  .expert-method-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .hero-action-stack {
     justify-items: start;
   }
@@ -6403,6 +6460,27 @@ audio {
 
   .archive-summary-table div {
     grid-template-columns: 1fr;
+  }
+
+  .expert-booking-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .expert-booking-panel img {
+    width: min(240px, 100%);
+  }
+
+  .expert-method-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .expert-pdf-reader {
+    padding: 10px;
+  }
+
+  .expert-pdf-reader iframe {
+    min-height: 560px;
+    height: 72vh;
   }
 
   .forum-thumbnail-grid,

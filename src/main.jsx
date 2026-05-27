@@ -6199,31 +6199,6 @@ function ExpertDiagnosisPage() {
   const articles = expertArticles;
   const [activeArticleId, setActiveArticleId] = useState(articles[0].id);
   const activeArticle = articles.find((article) => article.id === activeArticleId) || articles[0];
-  const getArticleParagraphClass = (text) => {
-    if (
-      text.startsWith("一、") ||
-      text.startsWith("四、") ||
-      text.startsWith("第一个问题") ||
-      text.startsWith("第二个问题") ||
-      text.startsWith("第三个问题") ||
-      text.startsWith("第四个问题") ||
-      text.startsWith("第五部分") ||
-      text === "总结" ||
-      text === "案例总结" ||
-      text === "认识夏雨学习法" ||
-      text === "夏雨学习法总结" ||
-      text === "夏雨学习法与传统补课的区别" ||
-      text === "主要经历：" ||
-      text === "夏雨老师自评："
-    ) {
-      return "is-heading";
-    }
-    if (/^\d+\./.test(text) || text.startsWith("学习策略：") || text.startsWith("学习计划：") || text.startsWith("学习链：") || text.startsWith("学习方法与技巧：") || text.startsWith("学习状态管理：")) {
-      return "is-list-like";
-    }
-    return "";
-  };
-
   return (
     <section className="stack expert-page">
       <section className="expert-hero">
@@ -6262,20 +6237,22 @@ function ExpertDiagnosisPage() {
           </div>
         </article>
         <article className="expert-booking-panel">
-          <div className="expert-booking-head">
-            <span className="eyebrow">如何报名</span>
-            <h2>扫码联系助理预约</h2>
-            <p>添加微信后，说明学生年级、主要学习问题和希望预约的时间。</p>
+          <div className="expert-booking-copy">
+            <div className="expert-booking-head">
+              <span className="eyebrow">如何报名</span>
+              <h2>扫码联系助理预约</h2>
+              <p>添加微信后，说明学生年级、主要学习问题和希望预约的时间。</p>
+            </div>
+            <div className="expert-contact-line">
+              <strong>Joy Redoda</strong>
+              <span>夏雨老师助理微信</span>
+            </div>
           </div>
           <img src="/assets/xia-yu-assistant-wechat.jpg" alt="夏雨老师助理微信二维码" />
-          <div className="expert-contact-line">
-            <strong>Joy Redoda</strong>
-            <span>夏雨老师助理微信</span>
-          </div>
         </article>
       </section>
 
-      <section className="panel">
+      <section className="panel expert-method-panel">
         <div className="panel-heading">
           <div>
             <span className="eyebrow">方法体系</span>
@@ -6323,13 +6300,17 @@ function ExpertDiagnosisPage() {
               <span className="eyebrow">{activeArticle.category}</span>
               <h2>{activeArticle.title}</h2>
               <p>{activeArticle.summary}</p>
+              <div className="expert-pdf-actions">
+                <a href={activeArticle.pdfUrl} target="_blank" rel="noreferrer">
+                  新窗口打开
+                </a>
+                <a href={activeArticle.pdfUrl} download>
+                  下载PDF
+                </a>
+              </div>
             </div>
-            <div className="expert-article-body">
-              {activeArticle.content.map((paragraph, index) => (
-                <p key={`${activeArticle.id}-${index}`} className={getArticleParagraphClass(paragraph)}>
-                  {paragraph}
-                </p>
-              ))}
+            <div className="expert-pdf-reader">
+              <iframe src={`${activeArticle.pdfUrl}#view=FitH`} title={activeArticle.title} />
             </div>
           </article>
         </div>
