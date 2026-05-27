@@ -63,7 +63,6 @@ const subPages = [
   { id: "questionnaire", label: "学情问卷", icon: ClipboardList },
   { id: "statement", label: "学情陈述", icon: Mic },
   { id: "profile", label: "学情画像", icon: BarChart3 },
-  { id: "expert", label: "专家诊断", icon: ShieldCheck },
   { id: "strategy", label: "学习任务", icon: BookOpen },
   { id: "plan", label: "学习计划", icon: CalendarDays },
   { id: "mistakes", label: "错题专项", icon: Library },
@@ -72,6 +71,7 @@ const subPages = [
   { id: "library", label: "学习资料库", icon: FolderOpen },
   { id: "forum", label: "学习社区", icon: UserRound },
   { id: "freeAsk", label: "AI自由问", icon: Sparkles },
+  { id: "expert", label: "专家诊断", icon: ShieldCheck },
 ];
 
 const defaultMemberPlans = [
@@ -3990,7 +3990,7 @@ function App() {
           />
         )}
 
-        {activePage === "expert" && <ExpertDiagnosisPage setActivePage={setActivePage} />}
+        {activePage === "expert" && <ExpertDiagnosisPage />}
 
         {activePage === "strategy" && (
           <StrategyDesignPage
@@ -6186,13 +6186,7 @@ function ModernStatementPage({
   );
 }
 
-function ExpertDiagnosisPage({ setActivePage }) {
-  const issueCards = [
-    ["上课听不懂", "不是简单补课，而是重新分析课堂、预习、作业和复习的完整学习链。"],
-    ["努力但效率低", "从学习策略、时间安排、任务设计和方法细节里找真正卡住的地方。"],
-    ["错题反复错", "把错题变成知识点、方法缺口和复测安排，而不是只改一遍答案。"],
-    ["动力和状态受影响", "把学习问题与情绪、关系、精力状态一起看，制定能持续执行的方案。"],
-  ];
+function ExpertDiagnosisPage() {
   const methodCards = [
     ["学习策略", "判断什么事情该做、先做什么，避免把时间花在低效任务上。"],
     ["学习计划", "把科目任务、时间和执行标准安排清楚，让学习每天能落地。"],
@@ -6201,24 +6195,48 @@ function ExpertDiagnosisPage({ setActivePage }) {
     ["状态管理", "管理时间、情绪、精力和关系，让学习能长期保持。"],
     ["每周跟踪", "在执行过程中不断发现新问题，再做个性化调整。"],
   ];
+  const articles = [
+    {
+      id: "know-xiayu-2023",
+      title: "认识夏雨老师和他的方法（2023）",
+      category: "认识夏雨老师",
+      readTime: "约8分钟",
+      summary: "从一个高二化学学习困难案例出发，说明学习问题往往不是一道题、一个知识点的问题，而是整个学习流程需要重新设计。",
+      heroImage: "/assets/xia-yu-teacher.jpg",
+      sections: [
+        {
+          title: "从一个真实学习困难开始",
+          body:
+            "文中提到，一位高二学生因为新化学老师讲课节奏很快、内容跳跃，上课逐渐听不懂，作业开始乱做，成绩从七八十分下降到四五十分，心态也出现焦虑和逃避。夏雨老师没有简单安排补课，而是先分析课堂、笔记、作业、预习和复习之间的关系。",
+        },
+        {
+          title: "重新建立学习链",
+          body:
+            "处理方案包括周末提前预习一章、课堂上以听懂为第一目标、用辅导书辅助跟课、作业前研究经典例题、对错题进行标记和三遍做题法处理，并在周末复习总结。重点不是多做题，而是让学生把学习流程重新跑顺。",
+        },
+        {
+          title: "夏雨老师的工作方式",
+          body:
+            "夏雨老师会发现学生问题，分析成因，制定应对策略，再把策略变成具体计划和每日执行方式。学生执行过程中继续汇报，老师再根据新问题做调整。这个过程关注的是学习力、执行力和可持续的学习状态。",
+        },
+      ],
+    },
+  ];
+  const [activeArticleId, setActiveArticleId] = useState(articles[0].id);
+  const activeArticle = articles.find((article) => article.id === activeArticleId) || articles[0];
 
   return (
     <section className="stack expert-page">
       <section className="expert-hero">
         <div className="expert-hero-copy">
           <span className="eyebrow">专家诊断</span>
-          <h1>认识夏雨老师和夏雨学习法</h1>
+          <h1>夏雨老师介绍</h1>
           <p>
-            夏雨老师是一个教孩子如何学习的老师。他不只是补课，也不只是心理咨询，而是帮助学生发现问题、制定策略、安排计划、训练方法，并在长期跟踪中提升学习力。
+            夏雨老师的教学核心，是帮助孩子真正会学习。不是只补某一道题，也不是只给孩子讲道理，而是从学习策略、学习计划、学习方法、学习状态和长期执行中，帮助孩子提升领悟力、理解力和执行力。
           </p>
-          <div className="expert-hero-actions">
-            <button type="button" className="primary-action" onClick={() => setActivePage("questionnaire")}>
-              先做学情问卷
-            </button>
-            <button type="button" className="ghost-action" onClick={() => setActivePage("profile")}>
-              查看学情画像
-            </button>
-          </div>
+          <p>
+            夏雨老师曾在华西读博，专业方向涉及抑郁焦虑与双相情感障碍，是国家二级心理咨询师，也是夏雨学习法创始人。自2014年至今，他持续辅导学生和家庭，处理过大量学习困难、动力不足、偏科、效率低和学习状态失衡的案例。
+          </p>
         </div>
         <figure className="expert-photo">
           <img src="/assets/xia-yu-teacher.jpg" alt="夏雨老师" />
@@ -6228,9 +6246,9 @@ function ExpertDiagnosisPage({ setActivePage }) {
       <section className="expert-intro-grid">
         <article className="panel expert-lead-panel">
           <span className="eyebrow">核心定位</span>
-          <h2>不是替孩子多做题，而是让孩子会学习</h2>
+          <h2>让孩子会学习，提升孩子领悟力、理解力和执行力</h2>
           <p>
-            文档中的案例说明，很多学习困难并不是某一道题、某一节课的问题，而是学习系统出了问题。夏雨老师会先分析问题成因，再为学生设计学习策略、操作计划和跟踪办法。
+            很多学习困难表面上是听不懂、做不完、不会做、成绩波动，实质上往往是学习系统出了问题。夏雨老师会先帮助孩子看清问题成因，再设计学习策略、操作计划和跟踪办法，让孩子在日复一日的学习中逐渐形成自己的学习能力。
           </p>
           <div className="expert-quote">
             希望孩子会学习，能学习，爱学习，可以独立自主地学习。
@@ -6243,24 +6261,6 @@ function ExpertDiagnosisPage({ setActivePage }) {
           <strong>助理微信：Joy Redoda</strong>
           <p>扫码添加助理微信，说明学生年级、主要学习问题和希望预约的时间。</p>
         </article>
-      </section>
-
-      <section className="panel">
-        <div className="panel-heading">
-          <div>
-            <span className="eyebrow">适合什么问题</span>
-            <h2>从问题表面进入学习系统本身</h2>
-          </div>
-          <Brain size={24} />
-        </div>
-        <div className="expert-card-grid">
-          {issueCards.map(([title, text]) => (
-            <article key={title} className="expert-info-card">
-              <strong>{title}</strong>
-              <p>{text}</p>
-            </article>
-          ))}
-        </div>
       </section>
 
       <section className="panel">
@@ -6282,20 +6282,50 @@ function ExpertDiagnosisPage({ setActivePage }) {
         </div>
       </section>
 
-      <section className="panel expert-article-panel">
+      <section className="panel expert-article-library">
         <div className="panel-heading">
           <div>
-            <span className="eyebrow">文章摘要</span>
-            <h2>《认识夏雨老师和他的方法（2023）》</h2>
+            <span className="eyebrow">夏雨老师文章</span>
+            <h2>文章目录与阅读</h2>
           </div>
           <FileText size={24} />
         </div>
-        <p>
-          文章通过一个高二化学学习困难案例展开：学生并不是单纯缺少补课，而是上课、笔记、作业、错题、周末复盘整个学习流程需要重新设计。夏雨老师的工作，就是帮助学生建立可执行的学习链，并在每周执行中继续调整。
-        </p>
-        <p>
-          后续可以继续在这里增加更多介绍文章，形成“认识夏雨老师”“认识夏雨学习法”“案例与方法”三个层次的文章区。
-        </p>
+        <div className="expert-article-layout">
+          <aside className="expert-article-index" aria-label="夏雨老师文章目录">
+            <span>文章目录</span>
+            {articles.map((article, index) => (
+              <button
+                key={article.id}
+                type="button"
+                className={activeArticle.id === article.id ? "is-active" : ""}
+                onClick={() => setActiveArticleId(article.id)}
+              >
+                <em>{String(index + 1).padStart(2, "0")}</em>
+                <strong>{article.title}</strong>
+                <small>{article.category} · {article.readTime}</small>
+              </button>
+            ))}
+            <p>后续可以继续增加约20篇文章，保持同一套目录和详情排版。</p>
+          </aside>
+          <article className="expert-article-detail">
+            <div className="expert-article-cover">
+              <img src={activeArticle.heroImage} alt={activeArticle.title} />
+              <div>
+                <span className="eyebrow">{activeArticle.category}</span>
+                <h2>{activeArticle.title}</h2>
+                <p>{activeArticle.summary}</p>
+              </div>
+            </div>
+            <div className="expert-article-body">
+              {activeArticle.sections.map((section) => (
+                <section key={section.title}>
+                  <h3>{section.title}</h3>
+                  <p>{section.body}</p>
+                </section>
+              ))}
+            </div>
+          </article>
+        </div>
       </section>
     </section>
   );
