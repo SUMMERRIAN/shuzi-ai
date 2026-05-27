@@ -1377,28 +1377,41 @@ p {
 
 .expert-intro-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+  gap: 18px;
   align-items: start;
 }
 
 .expert-lead-panel {
   display: grid;
-  align-content: center;
-  gap: 14px;
-  min-height: 220px;
-  padding: clamp(20px, 2.4vw, 30px);
-  border: 1px solid rgba(0, 134, 83, 0.2);
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
+  gap: clamp(18px, 2.5vw, 34px);
+  align-items: center;
+  min-height: 260px;
+  padding: clamp(22px, 2.6vw, 34px);
+  border: 1px solid rgba(0, 134, 83, 0.18);
   border-radius: 8px;
   background:
-    linear-gradient(135deg, rgba(0, 134, 83, 0.09), rgba(255, 255, 255, 0.94)),
+    radial-gradient(circle at 100% 0%, rgba(0, 134, 83, 0.12), transparent 34%),
+    linear-gradient(135deg, rgba(243, 250, 246, 0.98), rgba(255, 255, 255, 0.96)),
     #ffffff;
-  box-shadow: inset 5px 0 0 var(--expert-accent), 0 14px 34px rgba(18, 35, 28, 0.06);
+  box-shadow: inset 5px 0 0 var(--expert-accent), 0 18px 42px rgba(18, 35, 28, 0.07);
+}
+
+.expert-lead-copy {
+  display: grid;
+  gap: 14px;
 }
 
 .expert-booking-panel {
   display: grid;
+  align-content: start;
   gap: 14px;
+  padding: 18px;
+  border: 1px solid #dfe5da;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 16px 36px rgba(18, 35, 28, 0.06);
 }
 
 .expert-lead-panel h2,
@@ -1410,39 +1423,89 @@ p {
 
 .expert-lead-panel h2 {
   color: #102018;
-  font-size: clamp(32px, 3vw, 46px);
+  font-size: clamp(34px, 3.2vw, 50px);
 }
 
 .expert-booking-panel h2 {
-  font-size: clamp(22px, 2vw, 30px);
+  color: #102018;
+  font-size: clamp(20px, 1.7vw, 26px);
 }
 
-.expert-quote {
-  width: fit-content;
-  max-width: 100%;
-  padding: 10px 14px;
+.expert-keywords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.expert-keywords span {
+  padding: 8px 12px;
+  border: 1px solid #cfe7d8;
   border-radius: 8px;
-  background: #102018;
-  color: #ffffff;
+  background: #ffffff;
+  color: #008653;
   font-weight: 900;
 }
 
-.expert-booking-panel img {
-  width: min(280px, 100%);
-  justify-self: center;
-  border: 1px solid #dfe5da;
+.expert-principle {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  border: 1px solid rgba(0, 134, 83, 0.16);
   border-radius: 8px;
-  background: #ffffff;
+  background: #102018;
+  color: #ffffff;
 }
 
-.expert-booking-panel strong {
+.expert-principle strong {
+  color: #bcefd0;
+  font-size: 14px;
+}
+
+.expert-principle p {
+  margin: 0;
+  color: #ffffff;
+  font-size: clamp(20px, 1.8vw, 28px);
+  font-weight: 900;
+  line-height: 1.45;
+}
+
+.expert-booking-head {
+  display: grid;
+  gap: 8px;
+}
+
+.expert-booking-head p {
+  margin: 0;
+  color: #657069;
+  line-height: 1.7;
+}
+
+.expert-booking-panel img {
+  width: min(210px, 100%);
+  justify-self: center;
+  padding: 10px;
+  border: 1px solid #edf0ea;
+  border-radius: 8px;
+  background: #fbfdfb;
+}
+
+.expert-contact-line {
+  display: grid;
+  gap: 3px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f4fbf7;
+}
+
+.expert-contact-line strong {
   color: #102018;
   font-size: 18px;
 }
 
-.expert-booking-panel p {
+.expert-contact-line span {
   margin: 0;
   color: #48534d;
+  font-size: 14px;
 }
 
 .expert-method-grid {
@@ -1489,12 +1552,13 @@ p {
 .expert-article-library {
   display: grid;
   gap: 16px;
+  overflow: visible;
 }
 
 .expert-article-layout {
   display: grid;
-  grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+  gap: 18px;
   align-items: start;
 }
 
@@ -1502,11 +1566,11 @@ p {
   position: sticky;
   top: 18px;
   display: grid;
-  gap: 10px;
-  padding: 12px;
+  gap: 8px;
+  padding: 10px;
   border: 1px solid #dfe5da;
   border-radius: 8px;
-  background: #fbfdfb;
+  background: #ffffff;
 }
 
 .expert-article-index > span {
@@ -1516,19 +1580,23 @@ p {
 
 .expert-article-index button {
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr);
+  grid-template-columns: 28px minmax(0, 1fr);
   gap: 4px 10px;
-  padding: 10px;
+  padding: 10px 8px;
   border: 1px solid #dfe5da;
   border-radius: 8px;
   background: #ffffff;
   color: #102018;
   text-align: left;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .expert-article-index button.is-active {
   border-color: #008653;
-  background: #edf9f2;
+  background: #f2fbf5;
   box-shadow: inset 4px 0 0 #008653;
 }
 
@@ -1547,7 +1615,7 @@ p {
 }
 
 .expert-article-index strong {
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.45;
 }
 
@@ -1560,6 +1628,7 @@ p {
 
 .expert-article-detail {
   display: grid;
+  justify-items: center;
   border: 1px solid #dfe5da;
   border-radius: 8px;
   background: #ffffff;
@@ -1567,15 +1636,20 @@ p {
 }
 
 .expert-article-header {
-  padding: 24px clamp(22px, 3vw, 34px);
+  width: 100%;
+  padding: 30px clamp(22px, 4vw, 46px);
   border-bottom: 1px solid #dfe5da;
   background: linear-gradient(135deg, #f4fbf7, #ffffff);
 }
 
+.expert-article-header > * {
+  max-width: 960px;
+}
+
 .expert-article-header h2 {
-  margin: 8px 0 10px;
+  margin: 10px 0 12px;
   color: #102018;
-  font-size: clamp(28px, 2.6vw, 40px);
+  font-size: clamp(32px, 3vw, 46px);
   line-height: 1.2;
 }
 
@@ -1587,24 +1661,24 @@ p {
 }
 
 .expert-article-body {
-  padding: 24px clamp(22px, 3vw, 34px) 34px;
+  width: min(960px, 100%);
+  padding: 30px clamp(22px, 3.6vw, 44px) 42px;
 }
 
 .expert-article-body p {
-  max-width: 1120px;
   margin: 0 0 15px;
   color: #48534d;
   font-size: 16px;
-  line-height: 1.95;
+  line-height: 2;
 }
 
 .expert-article-body p.is-heading {
-  margin-top: 28px;
-  margin-bottom: 12px;
-  padding-left: 12px;
+  margin-top: 34px;
+  margin-bottom: 14px;
+  padding-left: 14px;
   border-left: 4px solid var(--expert-accent);
   color: #102018;
-  font-size: clamp(20px, 1.8vw, 28px);
+  font-size: clamp(22px, 2vw, 30px);
   font-weight: 900;
   line-height: 1.35;
 }
@@ -6222,6 +6296,7 @@ audio {
   .hero-band,
   .expert-hero,
   .expert-intro-grid,
+  .expert-lead-panel,
   .expert-method-grid,
   .expert-article-layout,
   .strategy-grid,
@@ -6299,6 +6374,7 @@ audio {
   .home-about-grid,
   .expert-hero,
   .expert-intro-grid,
+  .expert-lead-panel,
   .expert-method-grid,
   .expert-article-layout,
   .profile-grid,

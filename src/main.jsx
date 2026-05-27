@@ -6244,21 +6244,34 @@ function ExpertDiagnosisPage() {
 
       <section className="expert-intro-grid">
         <article className="expert-lead-panel">
-          <span className="eyebrow">核心定位</span>
-          <h2>让孩子会学习，提升孩子领悟力、理解力和执行力</h2>
-          <p>
-            很多学习困难表面上是听不懂、做不完、不会做、成绩波动，实质上往往是学习系统出了问题。夏雨老师会先帮助孩子看清问题成因，再设计学习策略、操作计划和跟踪办法，让孩子在日复一日的学习中逐渐形成自己的学习能力。
-          </p>
-          <div className="expert-quote">
-            希望孩子会学习，能学习，爱学习，可以独立自主地学习。
+          <div className="expert-lead-copy">
+            <span className="eyebrow">核心定位</span>
+            <h2>让孩子会学习，提升孩子领悟力、理解力和执行力</h2>
+            <p>
+              很多学习困难表面上是听不懂、做不完、不会做、成绩波动，实质上往往是学习系统出了问题。夏雨老师会先帮助孩子看清问题成因，再设计学习策略、操作计划和跟踪办法，让孩子在日复一日的学习中逐渐形成自己的学习能力。
+            </p>
+            <div className="expert-keywords" aria-label="专家诊断关键词">
+              <span>学习策略</span>
+              <span>学习链</span>
+              <span>每周跟踪</span>
+            </div>
+          </div>
+          <div className="expert-principle">
+            <strong>诊断目标</strong>
+            <p>希望孩子会学习，能学习，爱学习，可以独立自主地学习。</p>
           </div>
         </article>
-        <article className="panel expert-booking-panel">
-          <span className="eyebrow">如何报名</span>
-          <h2>联系夏雨老师助理，预约专家诊断时间</h2>
+        <article className="expert-booking-panel">
+          <div className="expert-booking-head">
+            <span className="eyebrow">如何报名</span>
+            <h2>扫码联系助理预约</h2>
+            <p>添加微信后，说明学生年级、主要学习问题和希望预约的时间。</p>
+          </div>
           <img src="/assets/xia-yu-assistant-wechat.jpg" alt="夏雨老师助理微信二维码" />
-          <strong>助理微信：Joy Redoda</strong>
-          <p>扫码添加助理微信，说明学生年级、主要学习问题和希望预约的时间。</p>
+          <div className="expert-contact-line">
+            <strong>Joy Redoda</strong>
+            <span>夏雨老师助理微信</span>
+          </div>
         </article>
       </section>
 
@@ -6304,7 +6317,6 @@ function ExpertDiagnosisPage() {
                 <small>{article.category} · {article.readTime}</small>
               </button>
             ))}
-            <p>后续可以继续增加约20篇文章，保持同一套目录和详情排版。</p>
           </aside>
           <article className="expert-article-detail">
             <div className="expert-article-header">
