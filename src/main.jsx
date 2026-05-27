@@ -6221,19 +6221,10 @@ function ExpertDiagnosisPage() {
         <article className="expert-lead-panel">
           <div className="expert-lead-copy">
             <span className="eyebrow">核心定位</span>
-            <h2>让孩子会学习，提升孩子领悟力、理解力和执行力</h2>
+            <h2>让孩子会学习，能学习，爱学习，在学习的路上能够主动克服困难，愿意投入心思在个人的成长上。</h2>
             <p>
               很多学习困难表面上是听不懂、做不完、不会做、成绩波动，实质上往往是学习系统出了问题。夏雨老师会先帮助孩子看清问题成因，再设计学习策略、操作计划和跟踪办法，让孩子在日复一日的学习中逐渐形成自己的学习能力。
             </p>
-            <div className="expert-keywords" aria-label="专家诊断关键词">
-              <span>学习策略</span>
-              <span>学习链</span>
-              <span>每周跟踪</span>
-            </div>
-          </div>
-          <div className="expert-principle">
-            <strong>诊断目标</strong>
-            <p>希望孩子会学习，能学习，爱学习，可以独立自主地学习。</p>
           </div>
         </article>
         <article className="expert-booking-panel">
@@ -6294,20 +6285,20 @@ function ExpertDiagnosisPage() {
                 <small>{article.category} · {article.readTime}</small>
               </button>
             ))}
+            <div className="expert-pdf-actions">
+              <a href={activeArticle.pdfUrl} target="_blank" rel="noreferrer">
+                新窗口打开
+              </a>
+              <a href={activeArticle.pdfUrl} download>
+                下载PDF
+              </a>
+            </div>
           </aside>
           <article className="expert-article-detail">
             <div className="expert-article-header">
               <span className="eyebrow">{activeArticle.category}</span>
               <h2>{activeArticle.title}</h2>
               <p>{activeArticle.summary}</p>
-              <div className="expert-pdf-actions">
-                <a href={activeArticle.pdfUrl} target="_blank" rel="noreferrer">
-                  新窗口打开
-                </a>
-                <a href={activeArticle.pdfUrl} download>
-                  下载PDF
-                </a>
-              </div>
             </div>
             <div className="expert-pdf-reader">
               <iframe src={`${activeArticle.pdfUrl}#view=FitH`} title={activeArticle.title} />

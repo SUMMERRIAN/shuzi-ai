@@ -1384,10 +1384,8 @@ p {
 
 .expert-lead-panel {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
-  gap: clamp(18px, 2.5vw, 34px);
-  align-items: center;
-  min-height: 260px;
+  align-items: start;
+  min-height: 0;
   padding: clamp(22px, 2.6vw, 34px);
   border: 1px solid rgba(0, 134, 83, 0.18);
   border-radius: 8px;
@@ -1401,6 +1399,7 @@ p {
 .expert-lead-copy {
   display: grid;
   gap: 14px;
+  max-width: 1180px;
 }
 
 .expert-booking-panel {
@@ -1424,50 +1423,14 @@ p {
 
 .expert-lead-panel h2 {
   color: #102018;
-  font-size: clamp(34px, 3.2vw, 50px);
+  max-width: 1120px;
+  font-size: clamp(30px, 2.5vw, 44px);
+  line-height: 1.24;
 }
 
 .expert-booking-panel h2 {
   color: #102018;
   font-size: clamp(20px, 1.7vw, 26px);
-}
-
-.expert-keywords {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.expert-keywords span {
-  padding: 8px 12px;
-  border: 1px solid #cfe7d8;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #008653;
-  font-weight: 900;
-}
-
-.expert-principle {
-  display: grid;
-  gap: 10px;
-  padding: 18px;
-  border: 1px solid rgba(0, 134, 83, 0.16);
-  border-radius: 8px;
-  background: #102018;
-  color: #ffffff;
-}
-
-.expert-principle strong {
-  color: #bcefd0;
-  font-size: 14px;
-}
-
-.expert-principle p {
-  margin: 0;
-  color: #ffffff;
-  font-size: clamp(20px, 1.8vw, 28px);
-  font-weight: 900;
-  line-height: 1.45;
 }
 
 .expert-booking-head {
@@ -1673,15 +1636,15 @@ p {
 }
 
 .expert-pdf-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 16px;
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
 }
 
 .expert-pdf-actions a {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   min-height: 38px;
   padding: 0 14px;
   border: 1px solid #cfe7d8;
