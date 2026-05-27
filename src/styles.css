@@ -1379,12 +1379,12 @@ p {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(440px, 520px);
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .expert-lead-panel {
   display: grid;
-  align-items: start;
+  align-items: center;
   min-height: 0;
   padding: clamp(22px, 2.6vw, 34px);
   border: 1px solid rgba(0, 134, 83, 0.18);
@@ -1404,9 +1404,10 @@ p {
 
 .expert-booking-panel {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 220px;
   gap: 18px;
   align-items: center;
+  height: 100%;
   padding: 18px;
   border: 1px solid #dfe5da;
   border-radius: 8px;
@@ -1451,7 +1452,7 @@ p {
 }
 
 .expert-booking-panel img {
-  width: 190px;
+  width: 220px;
   justify-self: center;
   padding: 10px;
   border: 1px solid #edf0ea;
@@ -1611,13 +1612,21 @@ p {
 }
 
 .expert-article-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(148px, 180px);
+  gap: 18px;
+  align-items: center;
   width: 100%;
   padding: 30px clamp(22px, 4vw, 46px);
   border-bottom: 1px solid #dfe5da;
   background: linear-gradient(135deg, #f4fbf7, #ffffff);
 }
 
-.expert-article-header > * {
+.expert-article-header-copy {
+  min-width: 0;
+}
+
+.expert-article-header-copy > * {
   max-width: 960px;
 }
 

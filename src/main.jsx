@@ -6285,20 +6285,22 @@ function ExpertDiagnosisPage() {
                 <small>{article.category} · {article.readTime}</small>
               </button>
             ))}
-            <div className="expert-pdf-actions">
-              <a href={activeArticle.pdfUrl} target="_blank" rel="noreferrer">
-                新窗口打开
-              </a>
-              <a href={activeArticle.pdfUrl} download>
-                下载PDF
-              </a>
-            </div>
           </aside>
           <article className="expert-article-detail">
             <div className="expert-article-header">
-              <span className="eyebrow">{activeArticle.category}</span>
-              <h2>{activeArticle.title}</h2>
-              <p>{activeArticle.summary}</p>
+              <div className="expert-article-header-copy">
+                <span className="eyebrow">{activeArticle.category}</span>
+                <h2>{activeArticle.title}</h2>
+                <p>{activeArticle.summary}</p>
+              </div>
+              <div className="expert-pdf-actions">
+                <a href={activeArticle.pdfUrl} target="_blank" rel="noreferrer">
+                  新窗口打开
+                </a>
+                <a href={activeArticle.pdfUrl} download>
+                  下载PDF
+                </a>
+              </div>
             </div>
             <div className="expert-pdf-reader">
               <iframe src={`${activeArticle.pdfUrl}#view=FitH`} title={activeArticle.title} />
