@@ -55,6 +55,7 @@ import {
   shuziLearningCoachAgent,
 } from "./aiAgent.js";
 import { apiRequest, getAuthToken, mapAccountToMember, setAuthToken } from "./apiClient.js";
+import { expertArticles } from "./expertArticles.js";
 import { storagePlans } from "./membershipConfig.js";
 import "./styles.css";
 
@@ -6195,35 +6196,33 @@ function ExpertDiagnosisPage() {
     ["状态管理", "管理时间、情绪、精力和关系，让学习能长期保持。"],
     ["每周跟踪", "在执行过程中不断发现新问题，再做个性化调整。"],
   ];
-  const articles = [
-    {
-      id: "know-xiayu-2023",
-      title: "认识夏雨老师和他的方法（2023）",
-      category: "认识夏雨老师",
-      readTime: "约8分钟",
-      summary: "从一个高二化学学习困难案例出发，说明学习问题往往不是一道题、一个知识点的问题，而是整个学习流程需要重新设计。",
-      heroImage: "/assets/xia-yu-teacher.jpg",
-      sections: [
-        {
-          title: "从一个真实学习困难开始",
-          body:
-            "文中提到，一位高二学生因为新化学老师讲课节奏很快、内容跳跃，上课逐渐听不懂，作业开始乱做，成绩从七八十分下降到四五十分，心态也出现焦虑和逃避。夏雨老师没有简单安排补课，而是先分析课堂、笔记、作业、预习和复习之间的关系。",
-        },
-        {
-          title: "重新建立学习链",
-          body:
-            "处理方案包括周末提前预习一章、课堂上以听懂为第一目标、用辅导书辅助跟课、作业前研究经典例题、对错题进行标记和三遍做题法处理，并在周末复习总结。重点不是多做题，而是让学生把学习流程重新跑顺。",
-        },
-        {
-          title: "夏雨老师的工作方式",
-          body:
-            "夏雨老师会发现学生问题，分析成因，制定应对策略，再把策略变成具体计划和每日执行方式。学生执行过程中继续汇报，老师再根据新问题做调整。这个过程关注的是学习力、执行力和可持续的学习状态。",
-        },
-      ],
-    },
-  ];
+  const articles = expertArticles;
   const [activeArticleId, setActiveArticleId] = useState(articles[0].id);
   const activeArticle = articles.find((article) => article.id === activeArticleId) || articles[0];
+  const getArticleParagraphClass = (text) => {
+    if (
+      text.startsWith("一、") ||
+      text.startsWith("四、") ||
+      text.startsWith("第一个问题") ||
+      text.startsWith("第二个问题") ||
+      text.startsWith("第三个问题") ||
+      text.startsWith("第四个问题") ||
+      text.startsWith("第五部分") ||
+      text === "总结" ||
+      text === "案例总结" ||
+      text === "认识夏雨学习法" ||
+      text === "夏雨学习法总结" ||
+      text === "夏雨学习法与传统补课的区别" ||
+      text === "主要经历：" ||
+      text === "夏雨老师自评："
+    ) {
+      return "is-heading";
+    }
+    if (/^\d+\./.test(text) || text.startsWith("学习策略：") || text.startsWith("学习计划：") || text.startsWith("学习链：") || text.startsWith("学习方法与技巧：") || text.startsWith("学习状态管理：")) {
+      return "is-list-like";
+    }
+    return "";
+  };
 
   return (
     <section className="stack expert-page">
@@ -6244,7 +6243,7 @@ function ExpertDiagnosisPage() {
       </section>
 
       <section className="expert-intro-grid">
-        <article className="panel expert-lead-panel">
+        <article className="expert-lead-panel">
           <span className="eyebrow">核心定位</span>
           <h2>让孩子会学习，提升孩子领悟力、理解力和执行力</h2>
           <p>
@@ -6308,20 +6307,16 @@ function ExpertDiagnosisPage() {
             <p>后续可以继续增加约20篇文章，保持同一套目录和详情排版。</p>
           </aside>
           <article className="expert-article-detail">
-            <div className="expert-article-cover">
-              <img src={activeArticle.heroImage} alt={activeArticle.title} />
-              <div>
-                <span className="eyebrow">{activeArticle.category}</span>
-                <h2>{activeArticle.title}</h2>
-                <p>{activeArticle.summary}</p>
-              </div>
+            <div className="expert-article-header">
+              <span className="eyebrow">{activeArticle.category}</span>
+              <h2>{activeArticle.title}</h2>
+              <p>{activeArticle.summary}</p>
             </div>
             <div className="expert-article-body">
-              {activeArticle.sections.map((section) => (
-                <section key={section.title}>
-                  <h3>{section.title}</h3>
-                  <p>{section.body}</p>
-                </section>
+              {activeArticle.content.map((paragraph, index) => (
+                <p key={`${activeArticle.id}-${index}`} className={getArticleParagraphClass(paragraph)}>
+                  {paragraph}
+                </p>
               ))}
             </div>
           </article>
