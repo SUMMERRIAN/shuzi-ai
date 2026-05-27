@@ -63,6 +63,7 @@ const subPages = [
   { id: "questionnaire", label: "学情问卷", icon: ClipboardList },
   { id: "statement", label: "学情陈述", icon: Mic },
   { id: "profile", label: "学情画像", icon: BarChart3 },
+  { id: "expert", label: "专家诊断", icon: ShieldCheck },
   { id: "strategy", label: "学习任务", icon: BookOpen },
   { id: "plan", label: "学习计划", icon: CalendarDays },
   { id: "mistakes", label: "错题专项", icon: Library },
@@ -3878,6 +3879,7 @@ function App() {
           ))}
         </nav>
 
+        <div className="sidebar-bottom">
         <div className="member-sidebar-card">
           <span className="eyebrow">会员状态</span>
             <strong>{member.isPaid ? "已开通会员" : member.isLoggedIn ? "未开通会员" : "未登录"}</strong>
@@ -3888,27 +3890,26 @@ function App() {
             </p>
           {accountNotice && <p className="account-notice">{accountNotice}</p>}
         </div>
+        <div className="sidebar-account-actions">
+          <button className={member.isPaid ? "member-pill is-active" : "member-pill"} onClick={loadMemberCenter}>
+            {member.isPaid ? <Crown size={17} /> : <LockKeyhole size={17} />}
+            {member.isLoggedIn ? "会员中心" : "登录 / 注册"}
+          </button>
+          {member.isLoggedIn && (
+            <button className="ghost-action sidebar-logout-button" onClick={logoutMember}>
+              <LogOut size={17} />
+              退出
+            </button>
+          )}
+        </div>
         <button type="button" className="admin-sidebar-button" onClick={() => setActivePage("admin")}>
           <LockKeyhole size={16} />
           管理员中心
         </button>
+        </div>
       </aside>
 
       <main className="workspace">
-        <header className="topbar">
-          <div className="topbar-actions">
-            <button className={member.isPaid ? "member-pill is-active" : "member-pill"} onClick={loadMemberCenter}>
-              {member.isPaid ? <Crown size={17} /> : <LockKeyhole size={17} />}
-              {member.isLoggedIn ? "会员中心" : "登录 / 注册"}
-            </button>
-            {member.isLoggedIn && (
-              <button className="ghost-action" onClick={logoutMember}>
-                <LogOut size={17} />
-                退出
-              </button>
-            )}
-          </div>
-        </header>
         {activeAiNotice && (
           <div className="ai-service-notice" role="status">
             <div>
@@ -3988,6 +3989,8 @@ function App() {
             weeklyDiscussionArchive={weeklyDiscussionArchive}
           />
         )}
+
+        {activePage === "expert" && <ExpertDiagnosisPage setActivePage={setActivePage} />}
 
         {activePage === "strategy" && (
           <StrategyDesignPage
@@ -6179,6 +6182,121 @@ function ModernStatementPage({
           </div>
         </section>
       )}
+    </section>
+  );
+}
+
+function ExpertDiagnosisPage({ setActivePage }) {
+  const issueCards = [
+    ["上课听不懂", "不是简单补课，而是重新分析课堂、预习、作业和复习的完整学习链。"],
+    ["努力但效率低", "从学习策略、时间安排、任务设计和方法细节里找真正卡住的地方。"],
+    ["错题反复错", "把错题变成知识点、方法缺口和复测安排，而不是只改一遍答案。"],
+    ["动力和状态受影响", "把学习问题与情绪、关系、精力状态一起看，制定能持续执行的方案。"],
+  ];
+  const methodCards = [
+    ["学习策略", "判断什么事情该做、先做什么，避免把时间花在低效任务上。"],
+    ["学习计划", "把科目任务、时间和执行标准安排清楚，让学习每天能落地。"],
+    ["学习链", "从预习、听课、作业、错题到周复盘，建立完整知识掌握流程。"],
+    ["方法与习惯", "训练具体学习技巧，并持续跟踪习惯是否真正形成。"],
+    ["状态管理", "管理时间、情绪、精力和关系，让学习能长期保持。"],
+    ["每周跟踪", "在执行过程中不断发现新问题，再做个性化调整。"],
+  ];
+
+  return (
+    <section className="stack expert-page">
+      <section className="expert-hero">
+        <div className="expert-hero-copy">
+          <span className="eyebrow">专家诊断</span>
+          <h1>认识夏雨老师和夏雨学习法</h1>
+          <p>
+            夏雨老师是一个教孩子如何学习的老师。他不只是补课，也不只是心理咨询，而是帮助学生发现问题、制定策略、安排计划、训练方法，并在长期跟踪中提升学习力。
+          </p>
+          <div className="expert-hero-actions">
+            <button type="button" className="primary-action" onClick={() => setActivePage("questionnaire")}>
+              先做学情问卷
+            </button>
+            <button type="button" className="ghost-action" onClick={() => setActivePage("profile")}>
+              查看学情画像
+            </button>
+          </div>
+        </div>
+        <figure className="expert-photo">
+          <img src="/assets/xia-yu-teacher.jpg" alt="夏雨老师" />
+        </figure>
+      </section>
+
+      <section className="expert-intro-grid">
+        <article className="panel expert-lead-panel">
+          <span className="eyebrow">核心定位</span>
+          <h2>不是替孩子多做题，而是让孩子会学习</h2>
+          <p>
+            文档中的案例说明，很多学习困难并不是某一道题、某一节课的问题，而是学习系统出了问题。夏雨老师会先分析问题成因，再为学生设计学习策略、操作计划和跟踪办法。
+          </p>
+          <div className="expert-quote">
+            希望孩子会学习，能学习，爱学习，可以独立自主地学习。
+          </div>
+        </article>
+        <article className="panel expert-booking-panel">
+          <span className="eyebrow">如何报名</span>
+          <h2>联系夏雨老师助理，预约专家诊断时间</h2>
+          <img src="/assets/xia-yu-assistant-wechat.jpg" alt="夏雨老师助理微信二维码" />
+          <strong>助理微信：Joy Redoda</strong>
+          <p>扫码添加助理微信，说明学生年级、主要学习问题和希望预约的时间。</p>
+        </article>
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">适合什么问题</span>
+            <h2>从问题表面进入学习系统本身</h2>
+          </div>
+          <Brain size={24} />
+        </div>
+        <div className="expert-card-grid">
+          {issueCards.map(([title, text]) => (
+            <article key={title} className="expert-info-card">
+              <strong>{title}</strong>
+              <p>{text}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">方法体系</span>
+            <h2>夏雨学习法的核心组成</h2>
+          </div>
+          <ShieldCheck size={24} />
+        </div>
+        <div className="expert-method-grid">
+          {methodCards.map(([title, text], index) => (
+            <article key={title} className="expert-method-card">
+              <span>{index + 1}</span>
+              <strong>{title}</strong>
+              <p>{text}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel expert-article-panel">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">文章摘要</span>
+            <h2>《认识夏雨老师和他的方法（2023）》</h2>
+          </div>
+          <FileText size={24} />
+        </div>
+        <p>
+          文章通过一个高二化学学习困难案例展开：学生并不是单纯缺少补课，而是上课、笔记、作业、错题、周末复盘整个学习流程需要重新设计。夏雨老师的工作，就是帮助学生建立可执行的学习链，并在每周执行中继续调整。
+        </p>
+        <p>
+          后续可以继续在这里增加更多介绍文章，形成“认识夏雨老师”“认识夏雨学习法”“案例与方法”三个层次的文章区。
+        </p>
+      </section>
     </section>
   );
 }
