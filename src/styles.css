@@ -5171,6 +5171,74 @@ audio {
   color: #344039;
 }
 
+.mistake-teacher-card {
+  display: grid;
+  gap: 16px;
+}
+
+.mistake-teacher-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.mistake-teacher-grid article,
+.mistake-teacher-summary article {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid #dfe5da;
+  border-radius: 8px;
+  background: #fbfcfa;
+}
+
+.mistake-teacher-grid span,
+.mistake-step-list span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 50%;
+  background: #008653;
+  color: #ffffff;
+  font-weight: 900;
+}
+
+.mistake-teacher-grid strong,
+.mistake-teacher-summary strong,
+.mistake-step-list strong {
+  color: #111820;
+  font-size: 16px;
+}
+
+.mistake-teacher-grid ul {
+  display: grid;
+  gap: 6px;
+  padding-left: 18px;
+  margin: 0;
+}
+
+.mistake-step-list {
+  display: grid;
+  gap: 10px;
+}
+
+.mistake-step-list article {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  padding: 14px;
+  border-left: 4px solid #008653;
+  border-radius: 8px;
+  background: #f2f8f4;
+}
+
+.mistake-teacher-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .mistake-report-list {
   display: grid;
   gap: 10px;
@@ -6525,6 +6593,8 @@ audio {
   .issue-detail-grid,
   .mistake-meta-row,
   .mistake-archive-layout,
+  .mistake-teacher-grid,
+  .mistake-teacher-summary,
   .knowledge-input-row,
   .flow-step-body {
     grid-template-columns: 1fr;

@@ -3433,20 +3433,23 @@ function App() {
   }
 
   function normalizeMistakeResultToArchive(report, savedId) {
+    const teacher = report?.teacher_explanation || {};
     const extracted = Array.isArray(report?.extracted_questions) && report.extracted_questions.length
       ? report.extracted_questions
       : [
           {
             title: report?.title || mistakeDraft.title || "AI整理结果",
-            question_content: report?.summary || "",
+            question_content: teacher.question_restate || report?.summary || "",
             subject: mistakeDraft.subject,
-            error_type: report?.analysis?.error_reason || report?.error_reason || "等待确认",
+            error_type: teacher.error_diagnosis || report?.analysis?.error_reason || report?.error_reason || "等待确认",
             knowledge_points: report?.analysis?.knowledge_points || report?.knowledge_points || [],
-            method_gap: report?.analysis?.method_gap || report?.method_gap || "",
-            correction_steps: report?.analysis?.correction_steps || report?.correction_steps || "",
+            method_gap: teacher.core_idea || report?.analysis?.method_gap || report?.method_gap || "",
+            correction_steps: Array.isArray(teacher.standard_steps)
+              ? teacher.standard_steps.map((step) => `${step.step || ""} ${step.explanation || ""}`.trim())
+              : report?.analysis?.correction_steps || report?.correction_steps || "",
             suggestion: Array.isArray(report?.analysis?.training_suggestions)
               ? report.analysis.training_suggestions.join("；")
-              : report?.analysis?.training_suggestions || report?.review_schedule || "",
+              : teacher.method_summary || report?.analysis?.training_suggestions || report?.review_schedule || "",
           },
         ];
 
@@ -7504,6 +7507,16 @@ function MistakeReportView({ report }) {
   const sections = Array.isArray(report.sections) ? report.sections : [];
   const extracted = Array.isArray(report.extracted_questions) ? report.extracted_questions : [];
   const similar = Array.isArray(report.similar_questions) ? report.similar_questions : [];
+  const teacher = report.teacher_explanation || {};
+  const hasTeacherReport = Boolean(
+    teacher.question_restate ||
+      teacher.core_idea ||
+      teacher.final_answer ||
+      teacher.error_diagnosis ||
+      (Array.isArray(teacher.standard_steps) && teacher.standard_steps.length)
+  );
+  const knownConditions = Array.isArray(teacher.known_conditions) ? teacher.known_conditions : [];
+  const standardSteps = Array.isArray(teacher.standard_steps) ? teacher.standard_steps : [];
   const suggestions = Array.isArray(report.training_suggestions)
     ? report.training_suggestions
     : Array.isArray(report.analysis?.training_suggestions)
@@ -7513,6 +7526,66 @@ function MistakeReportView({ report }) {
   return (
     <div className="mistake-report-view">
       {report.summary && <p className="mistake-report-summary">{report.summary}</p>}
+      {hasTeacherReport && (
+        <section className="mistake-teacher-card">
+          <div className="mistake-teacher-grid">
+            <article>
+              <span>1</span>
+              <strong>题目在问什么</strong>
+              <p>{teacher.question_restate || "AI暂未识别出完整题干，请补充更清晰的图片或文字。"}</p>
+            </article>
+            <article>
+              <span>2</span>
+              <strong>已知条件</strong>
+              {knownConditions.length ? (
+                <ul>{knownConditions.map((item, index) => <li key={index}>{item}</li>)}</ul>
+              ) : (
+                <p>暂未识别到明确条件。</p>
+              )}
+            </article>
+            <article>
+              <span>3</span>
+              <strong>解题目标</strong>
+              <p>{teacher.target || "先明确题目要求，再选择方法。"}</p>
+            </article>
+            <article>
+              <span>4</span>
+              <strong>核心思路</strong>
+              <p>{teacher.core_idea || "从题目条件和对应知识点建立关系。"}</p>
+            </article>
+          </div>
+
+          {standardSteps.length > 0 && (
+            <div className="mistake-step-list">
+              <h3>标准解题步骤</h3>
+              {standardSteps.map((item, index) => (
+                <article key={`${item.step || "step"}-${index}`}>
+                  <span>{index + 1}</span>
+                  <div>
+                    <strong>{item.step || `第${index + 1}步`}</strong>
+                    <p>{typeof item === "string" ? item : item.explanation || ""}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+
+          <div className="mistake-teacher-summary">
+            <article>
+              <strong>最终答案</strong>
+              <p>{teacher.final_answer || "暂未确认"}</p>
+            </article>
+            <article>
+              <strong>错因诊断</strong>
+              <p>{teacher.error_diagnosis || "需要结合学生原答案进一步确认。"}</p>
+            </article>
+            <article>
+              <strong>方法总结</strong>
+              <p>{teacher.method_summary || "同类题先审题，再列条件，最后按步骤验证答案。"}</p>
+            </article>
+          </div>
+        </section>
+      )}
       {sections.map((section, index) => (
         <section key={`${section.title}-${index}`}>
           <h3>{section.title}</h3>
@@ -7567,9 +7640,23 @@ function renderMistakeReportHtml(report) {
   const sections = Array.isArray(report.sections) ? report.sections : [];
   const extracted = Array.isArray(report.extracted_questions) ? report.extracted_questions : [];
   const similar = Array.isArray(report.similar_questions) ? report.similar_questions : [];
+  const teacher = report.teacher_explanation || {};
+  const knownConditions = Array.isArray(teacher.known_conditions) ? teacher.known_conditions : [];
+  const standardSteps = Array.isArray(teacher.standard_steps) ? teacher.standard_steps : [];
   return `
     <h1>${escape(report.title || "错题专项分析")}</h1>
     <p>${escape(report.summary || "")}</p>
+    ${teacher.question_restate || standardSteps.length ? `
+      <h2>标准讲解</h2>
+      <h3>题目在问什么</h3><p>${escape(teacher.question_restate || "")}</p>
+      <h3>已知条件</h3>${knownConditions.length ? `<ul>${knownConditions.map((item) => `<li>${escape(item)}</li>`).join("")}</ul>` : "<p>暂未识别到明确条件。</p>"}
+      <h3>解题目标</h3><p>${escape(teacher.target || "")}</p>
+      <h3>核心思路</h3><p>${escape(teacher.core_idea || "")}</p>
+      <h3>标准解题步骤</h3>${standardSteps.map((item, index) => `<p><strong>${escape(item.step || `第${index + 1}步`)}</strong>：${escape(typeof item === "string" ? item : item.explanation || "")}</p>`).join("")}
+      <h3>最终答案</h3><p>${escape(teacher.final_answer || "")}</p>
+      <h3>错因诊断</h3><p>${escape(teacher.error_diagnosis || "")}</p>
+      <h3>方法总结</h3><p>${escape(teacher.method_summary || "")}</p>
+    ` : ""}
     ${sections.map((section) => `<h2>${escape(section.title)}</h2><p>${escape(section.content)}</p>`).join("")}
     ${extracted.length ? `<h2>错题清单</h2>${extracted.map((item, index) => `<h3>${index + 1}. ${escape(item.title)}</h3><p>${escape(item.question_content || "")}</p><p>知识点：${escape(Array.isArray(item.knowledge_points) ? item.knowledge_points.join("、") : item.knowledge_points || "")}</p><p>错因：${escape(item.error_type || "")}</p><p>方法缺口：${escape(item.method_gap || "")}</p>`).join("")}` : ""}
     ${similar.length ? `<h2>同类训练题</h2>${similar.map((item, index) => `<h3>${escape(item.title || `训练题 ${index + 1}`)}</h3><p>${escape(item.question || "")}</p><p>答案：${escape(item.answer || "")}</p><p>解析：${escape(Array.isArray(item.solution_steps) ? item.solution_steps.join("；") : item.solution_steps || "")}</p>`).join("")}` : ""}

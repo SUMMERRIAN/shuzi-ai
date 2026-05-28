@@ -40,7 +40,7 @@ export function getGeminiText(data) {
     .trim();
 }
 
-export async function generateGeminiText({ model, prompt, files = [], temperature = 0.25 }) {
+export async function generateGeminiText({ model, prompt, files = [], temperature = 0.25, responseMimeType = "" }) {
   ensureGeminiKey();
   const parts = [{ text: prompt }, ...files.map(toGeminiPart).filter(Boolean)];
   const controller = new AbortController();
@@ -57,6 +57,7 @@ export async function generateGeminiText({ model, prompt, files = [], temperatur
           temperature,
           candidateCount: 1,
           maxOutputTokens: geminiMaxOutputTokens,
+          ...(responseMimeType ? { responseMimeType } : {}),
         },
       }),
     });

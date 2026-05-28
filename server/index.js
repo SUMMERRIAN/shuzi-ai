@@ -157,6 +157,62 @@ function getMistakeGeminiModel() {
   return process.env.GEMINI_MODEL_MISTAKE || geminiFastModel;
 }
 
+function normalizeTextList(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item || "").trim()).filter(Boolean);
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  return [];
+}
+
+function normalizeMistakeWorkflowReport(reportText, fallback = {}) {
+  const parsed = parseJsonText(reportText, {});
+  const rawText = parsed.rawText || (!Object.keys(parsed).length ? String(reportText || "").trim() : "");
+  const extractedQuestions = Array.isArray(parsed.extracted_questions) ? parsed.extracted_questions : [];
+  const firstQuestion = extractedQuestions[0] || {};
+  const teacherExplanation = parsed.teacher_explanation || firstQuestion.teacher_explanation || {};
+  const standardSteps = Array.isArray(teacherExplanation.standard_steps)
+    ? teacherExplanation.standard_steps.map((step, index) =>
+        typeof step === "string"
+          ? { step: `第${index + 1}步`, explanation: step }
+          : { step: String(step?.step || `第${index + 1}步`).trim(), explanation: String(step?.explanation || "").trim() }
+      )
+    : Array.isArray(firstQuestion.correction_steps)
+      ? firstQuestion.correction_steps.map((step, index) => ({ step: `第${index + 1}步`, explanation: step }))
+      : normalizeTextList(firstQuestion.correction_steps).map((step, index) => ({ step: `第${index + 1}步`, explanation: step }));
+  const normalizedTeacherExplanation = {
+    question_restate: teacherExplanation.question_restate || firstQuestion.question_content || "",
+    known_conditions: normalizeTextList(teacherExplanation.known_conditions || firstQuestion.known_conditions),
+    target: teacherExplanation.target || firstQuestion.target || "",
+    core_idea: teacherExplanation.core_idea || firstQuestion.method_gap || "",
+    standard_steps: standardSteps,
+    final_answer: teacherExplanation.final_answer || firstQuestion.standard_answer || "",
+    error_diagnosis: teacherExplanation.error_diagnosis || firstQuestion.error_type || "",
+    method_summary: teacherExplanation.method_summary || firstQuestion.suggestion || "",
+  };
+  const sections = Array.isArray(parsed.sections) ? parsed.sections.filter((item) => item?.title || item?.content) : [];
+  if (!sections.length && rawText) {
+    sections.push({ title: "老师讲解原文", content: rawText });
+  }
+  const trainingSuggestions = normalizeTextList(parsed.training_suggestions || firstQuestion.training_suggestions);
+  if (!trainingSuggestions.length && firstQuestion.suggestion) trainingSuggestions.push(String(firstQuestion.suggestion));
+  return {
+    title: parsed.title || fallback.title || "错题专项分析",
+    summary: parsed.summary || rawText.slice(0, 220) || "AI已完成错题分析，请按下方结构复盘。",
+    teacher_explanation: normalizedTeacherExplanation,
+    sections,
+    extracted_questions: extractedQuestions,
+    similar_questions: Array.isArray(parsed.similar_questions) ? parsed.similar_questions : [],
+    training_suggestions: trainingSuggestions,
+    archive_note: parsed.archive_note || "",
+    meta: {
+      ...(parsed.meta || {}),
+      provider: fallback.provider || "gemini",
+      model: fallback.model || getMistakeGeminiModel(),
+      normalized: true,
+      rawText: rawText || undefined,
+    },
+  };
+}
+
 function getErrorDetail(error) {
   return typeof error.detail === "string"
     ? error.detail
@@ -1665,11 +1721,24 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
         await assertTokenBalance(req.user.id, tokenCost);
         const documentText = await makeDocumentTextSummary(files);
         const geminiPrompt = [
-          "你是树子AI错题专项智能体。你的任务只围绕错题、同类题训练、作业/试卷材料分析和错题档案沉淀。",
-          "输出要像给学生看的学习报告，干净、完整、具体、可执行。不要生成学情画像总报告，不要制定完整周计划。必须输出严格JSON。",
+          "你是树子AI错题专项老师。你不是随意聊天，而是在给学生做标准化错题讲评。",
+          "必须像一位耐心老师：先识别题目，再说明考点，再讲解标准思路，再一步一步推导，最后指出错因和后续训练。",
+          "所有输出必须严格为JSON，不要Markdown，不要代码块，不要寒暄。如果图片内容不清楚，要明确写出“无法确认的部分”，不能编造题干。",
           jsonInstruction(
-            "{title, summary, sections:[{title,content}], extracted_questions:[{id,title,question_content,subject,error_type,knowledge_points,method_gap,correction_steps,suggestion,is_likely_wrong}], similar_questions:[{title,question,answer,solution_steps,training_goal,difficulty}], training_suggestions:[string], archive_note}"
+            "{title:string, summary:string, teacher_explanation:{question_restate:string, known_conditions:[string], target:string, core_idea:string, standard_steps:[{step:string, explanation:string}], final_answer:string, error_diagnosis:string, method_summary:string}, sections:[{title:string,content:string}], extracted_questions:[{id:string,title:string,question_content:string,subject:string,error_type:string,knowledge_points:[string],method_gap:string,correction_steps:[string],standard_answer:string,suggestion:string,is_likely_wrong:boolean}], similar_questions:[{title:string,question:string,answer:string,solution_steps:[string],training_goal:string,difficulty:string}], training_suggestions:[string], archive_note:string}"
           ),
+          "标准讲解格式要求：",
+          "1. title：用题目主题命名，不要只写文件名。",
+          "2. summary：一句话说清这道题的问题本质和学生要学会什么。",
+          "3. teacher_explanation.question_restate：把题目用清楚中文复述出来。",
+          "4. known_conditions：列出题目给了哪些条件或图中能读出的信息。",
+          "5. target：说明题目要求求什么、判断什么或证明什么。",
+          "6. core_idea：说明这题应该从哪个知识点/方法切入。",
+          "7. standard_steps：按第1步、第2步、第3步写，每一步都要解释为什么这样做。",
+          "8. final_answer：写最终答案；如果无法从图片确认，写“暂无法确认”。",
+          "9. error_diagnosis：指出学生可能错在哪里，比如概念没分清、条件没用上、步骤跳跃、计算不稳。",
+          "10. method_summary：总结以后遇到同类题应该按什么顺序处理。",
+          "11. training_suggestions：给2到4条后续训练建议，具体、可执行。",
           `任务类型：${taskMap[taskType] || taskMap.analyzeMistake}`,
           `科目：${subject}`,
           `题目所属年级：${grade || "未指定"}`,
@@ -1680,14 +1749,11 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
           `学生档案摘要：${archiveSnapshot}`,
           `上传文档文字摘录：\n${documentText || "无可提取文档文字；如有图片或PDF，请结合附件内容分析。"}`,
         ].join("\n");
-        const reportText = await generateGeminiText({ model: geminiModel, prompt: geminiPrompt, files });
-        const report = parseJsonText(reportText, {
+        const reportText = await generateGeminiText({ model: geminiModel, prompt: geminiPrompt, files, responseMimeType: "application/json" });
+        const report = normalizeMistakeWorkflowReport(reportText, {
           title,
-          summary: "",
-          sections: [],
-          extracted_questions: [],
-          similar_questions: [],
-          training_suggestions: [],
+          provider: "gemini",
+          model: geminiModel,
         });
         const saved = await withTransaction(async (client) => {
           const fileRows = await saveUploadedFiles(client, req.user, student, "mistake", files);
@@ -1756,7 +1822,7 @@ app.post("/api/ai/mistakes/analyze", requireAuth, upload.array("files", 6), asyn
           `标题：${title}`,
           `学生补充：${note}`,
         ].join("\n");
-        const analysisText = await generateGeminiText({ model: mistakeGeminiModel, prompt, files });
+        const analysisText = await generateGeminiText({ model: mistakeGeminiModel, prompt, files, responseMimeType: "application/json" });
         const analysis = parseJsonText(analysisText, { mistake_title: title });
         const saved = await withTransaction(async (client) => {
           const fileRows = await saveUploadedFiles(client, req.user, student, "mistake", files);
@@ -1812,7 +1878,7 @@ app.post("/api/ai/mistakes/practice", requireAuth, async (req, res, next) => {
           `数量：${Math.min(3, Math.max(1, Number(count) || 1))}`,
           `错题信息：${JSON.stringify(mistake)}`,
         ].join("\n");
-        const generatedText = await generateGeminiText({ model: mistakeGeminiModel, prompt });
+        const generatedText = await generateGeminiText({ model: mistakeGeminiModel, prompt, responseMimeType: "application/json" });
         const generated = parseJsonText(generatedText, { questions: [] });
         const saved = (
           await query(
