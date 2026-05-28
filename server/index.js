@@ -26,7 +26,7 @@ const openaiFastModel = process.env.OPENAI_MODEL_FAST || process.env.OPENAI_MODE
 const openaiThinkingModel = process.env.OPENAI_MODEL_THINKING || process.env.OPENAI_MODEL_TEXT || textModel;
 const geminiFastModel = process.env.GEMINI_MODEL_FAST || "gemini-2.5-flash";
 const geminiThinkingModel = process.env.GEMINI_MODEL_THINKING || "gemini-2.5-pro";
-const imageModel = process.env.OPENAI_MODEL_IMAGE || "gpt-image-1.5";
+const imageModel = process.env.OPENAI_MODEL_IMAGE || "gpt-image-2";
 const transcriptionModel = process.env.OPENAI_MODEL_TRANSCRIBE || "gpt-4o-mini-transcribe";
 
 const knowledgeInfographicTemplate = `超精细教育信息图 [SUBJECT]，
