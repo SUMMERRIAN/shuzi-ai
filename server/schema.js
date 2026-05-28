@@ -287,6 +287,10 @@ export async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_forum_replies_post_id ON forum_replies(post_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_ai_generation_jobs_user_feature ON ai_generation_jobs(user_id, feature, created_at DESC);
   `);
+  await query(`ALTER TABLE ai_generation_jobs ADD COLUMN IF NOT EXISTS provider TEXT`);
+  await query(`ALTER TABLE ai_generation_jobs ADD COLUMN IF NOT EXISTS mode TEXT`);
+  await query(`ALTER TABLE ai_generation_jobs ADD COLUMN IF NOT EXISTS external_response_id TEXT`);
+  await query(`ALTER TABLE ai_generation_jobs ADD COLUMN IF NOT EXISTS token_cost INTEGER NOT NULL DEFAULT 0`);
   await query(`
     ALTER TABLE users DROP CONSTRAINT IF EXISTS users_channel_check;
     ALTER TABLE users ADD CONSTRAINT users_channel_check CHECK (channel IN ('username', 'email', 'phone'));

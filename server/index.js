@@ -13,7 +13,7 @@ import { requireAdminToken, requireAuth, signToken } from "./auth.js";
 import { ltPackages, membershipPlans, storageExpansionPackages, tokenBillingRules } from "./plans.js";
 import { upload, toStoredFile } from "./uploads.js";
 import { ensureGeminiKey, generateGeminiText } from "./geminiClient.js";
-import { ensureOpenAIKey, getResponseText, openai, parseJsonText, readFileAsDataUrl } from "./openaiClient.js";
+import { ensureOpenAIKey, getGeneratedImageBase64, getResponseText, openai, parseJsonText, readFileAsDataUrl } from "./openaiClient.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -30,6 +30,8 @@ const imageModel = process.env.OPENAI_MODEL_IMAGE || "gpt-image-2";
 const imageGenerationEnabled = process.env.OPENAI_IMAGE_GENERATION_ENABLED === "true";
 const imageQuality = process.env.OPENAI_IMAGE_QUALITY || "low";
 const imageSize = process.env.OPENAI_IMAGE_SIZE || "1024x1024";
+const imageBackgroundPollMs = Number(process.env.OPENAI_IMAGE_BACKGROUND_POLL_MS || 5000);
+const imageBackgroundMaxPolls = Number(process.env.OPENAI_IMAGE_BACKGROUND_MAX_POLLS || 120);
 const transcriptionModel = process.env.OPENAI_MODEL_TRANSCRIBE || "gpt-4o-mini-transcribe";
 
 const knowledgeInfographicTemplate = `超精细教育信息图 [SUBJECT]，
@@ -49,18 +51,24 @@ function getOpenAITextModel(mode = "fast") {
   return normalizeAiMode(mode) === "thinking" ? openaiThinkingModel : openaiFastModel;
 }
 
-async function generateOpenAIImage(prompt) {
+async function generateOpenAIImageBackground(prompt, onResponseId = async () => {}) {
   if (!imageGenerationEnabled) {
     throw createHttpError(503, "OPENAI_IMAGE_GENERATION_DISABLED", "AI生图已暂时关闭，避免继续消耗OpenAI费用。");
   }
   try {
-    const response = await openai.images.generate({
-      model: imageModel,
-      prompt,
-      size: imageSize,
-      quality: imageQuality,
+    let response = await openai.responses.create({
+      model: openaiFastModel,
+      input: prompt,
+      tools: [{ type: "image_generation", quality: imageQuality, size: imageSize }],
+      background: true,
     });
-    const imageBase64 = response?.data?.[0]?.b64_json || "";
+    await onResponseId(response.id);
+    response = await waitForOpenAIBackgroundResponse(response, {
+      timeoutMessage: "OpenAI后台生图仍未完成，系统已尝试取消以控制费用。",
+      pollMs: imageBackgroundPollMs,
+      maxPolls: imageBackgroundMaxPolls,
+    });
+    const imageBase64 = getGeneratedImageBase64(response);
     if (!imageBase64) {
       throw createHttpError(502, "OPENAI_IMAGE_EMPTY_RESPONSE", "OpenAI没有返回有效图片，请稍后重试或检查图片模型权限。");
     }
@@ -95,6 +103,107 @@ function serializeJobError(error) {
     model: error.model || undefined,
     status: error.status || 500,
   };
+}
+
+function publicJob(row) {
+  if (!row) return null;
+  return {
+    jobId: row.id,
+    feature: row.feature,
+    status: row.status,
+    provider: row.provider || undefined,
+    mode: row.mode || undefined,
+    input: row.input || {},
+    result: row.result || {},
+    error: row.error || {},
+    externalResponseId: row.external_response_id || undefined,
+    tokenCost: row.token_cost || 0,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    completedAt: row.completed_at,
+  };
+}
+
+async function createAiJob({ userId, studentId, feature, provider = "", mode = "", tokenCost = 0, input = {}, activeWindowMinutes = 30, reuseActive = true }) {
+  if (reuseActive) {
+    const activeJob = (
+      await query(
+        `SELECT *
+         FROM ai_generation_jobs
+         WHERE user_id = $1
+           AND feature = $2
+           AND status IN ('queued', 'processing')
+           AND created_at > now() - ($3::text || ' minutes')::interval
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [userId, feature, activeWindowMinutes]
+      )
+    ).rows[0];
+    if (activeJob) return { job: activeJob, reused: true };
+  }
+  const job = (
+    await query(
+      `INSERT INTO ai_generation_jobs (user_id, student_id, feature, status, input, provider, mode, token_cost)
+       VALUES ($1, $2, $3, 'queued', $4, $5, $6, $7)
+       RETURNING *`,
+      [userId, studentId, feature, JSON.stringify(input), provider, mode, tokenCost]
+    )
+  ).rows[0];
+  return { job, reused: false };
+}
+
+function startAiJob(jobId, executor) {
+  setTimeout(async () => {
+    try {
+      await query("UPDATE ai_generation_jobs SET status = 'processing', updated_at = now() WHERE id = $1", [jobId]);
+      const result = await executor({
+        setExternalResponseId: async (externalResponseId) => {
+          await query("UPDATE ai_generation_jobs SET external_response_id = $2, updated_at = now() WHERE id = $1", [jobId, externalResponseId]);
+        },
+      });
+      await query(
+        `UPDATE ai_generation_jobs
+         SET status = 'completed', result = $2, updated_at = now(), completed_at = now()
+         WHERE id = $1`,
+        [jobId, JSON.stringify(result || {})]
+      );
+    } catch (error) {
+      console.error("AI async job failed", jobId, error);
+      await query(
+        `UPDATE ai_generation_jobs
+         SET status = 'failed', error = $2, updated_at = now(), completed_at = now()
+         WHERE id = $1`,
+        [jobId, JSON.stringify(serializeJobError(error))]
+      );
+    }
+  }, 0);
+}
+
+async function waitForOpenAIBackgroundResponse(response, { jobId = "", timeoutMessage = "OpenAI后台任务仍未完成，请稍后查看。", pollMs = 3000, maxPolls = 60 } = {}) {
+  if (jobId && response.id) {
+    await query("UPDATE ai_generation_jobs SET external_response_id = $2, updated_at = now() WHERE id = $1", [jobId, response.id]);
+  }
+  let completed = response;
+  for (let attempt = 0; attempt < maxPolls && ["queued", "in_progress"].includes(completed.status); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    completed = await openai.responses.retrieve(response.id);
+  }
+  if (["queued", "in_progress"].includes(completed.status)) {
+    try {
+      await openai.responses.cancel(response.id);
+    } catch (error) {
+      console.warn("Failed to cancel timed-out OpenAI background response", response.id, error.message);
+    }
+    const error = createHttpError(504, "OPENAI_BACKGROUND_TIMEOUT", timeoutMessage);
+    error.detail = `response_id=${response.id}; status=${completed.status}; cancelled=true`;
+    throw error;
+  }
+  if (completed.status !== "completed") {
+    const error = createHttpError(502, "OPENAI_BACKGROUND_FAILED", "OpenAI后台任务失败。");
+    error.detail = completed.error?.message || JSON.stringify(completed.error || { status: completed.status });
+    throw error;
+  }
+  return completed;
 }
 
 async function extractPdfText(buffer) {
@@ -1236,33 +1345,39 @@ app.post("/api/ai/transcribe", requireAuth, upload.single("audio"), async (req, 
       );
       return row;
     });
-    let text = "";
-    let transcribeError = "";
-    try {
-      const filePath = (
-        await query("SELECT path FROM uploaded_files WHERE id = $1 AND user_id = $2", [saved.file_id, req.user.id])
-      ).rows[0]?.path;
-      const transcript = await openai.audio.transcriptions.create({
-        file: fs.createReadStream(filePath || req.file.path),
-        model: transcriptionModel,
+    const { job, reused } = await createAiJob({
+      userId: req.user.id,
+      studentId: student.id,
+      feature: "transcribe",
+      provider: "openai",
+      mode: "audio-background",
+      tokenCost: 6,
+      input: { audioId: saved.id, fileId: saved.file_id },
+      activeWindowMinutes: 10,
+      reuseActive: false,
+    });
+    if (!reused) {
+      startAiJob(job.id, async () => {
+        await assertTokenBalance(req.user.id, 6);
+        const filePath = (
+          await query("SELECT path FROM uploaded_files WHERE id = $1 AND user_id = $2", [saved.file_id, req.user.id])
+        ).rows[0]?.path;
+        const transcript = await openai.audio.transcriptions.create({
+          file: fs.createReadStream(filePath || req.file.path),
+          model: transcriptionModel,
+        });
+        const text = transcript.text || "";
+        await query("UPDATE statement_audio_files SET transcript = $2 WHERE id = $1", [saved.id, text]);
+        await query(
+          `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
+           VALUES ($1, $2, 'audio_transcript_done', '语音陈述转写完成', $3)`,
+          [student.id, req.user.id, JSON.stringify({ transcript: text, audioId: saved.id })]
+        );
+        await recordTokenUsage(req.user.id, 6, "语音转文字", { feature: "transcribe", audioId: saved.id, jobId: job.id });
+        return { transcript: text, saved, transcribeError: "" };
       });
-      text = transcript.text || "";
-      await query("UPDATE statement_audio_files SET transcript = $2 WHERE id = $1", [saved.id, text]);
-      await query(
-        `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
-         VALUES ($1, $2, 'audio_transcript_done', '语音陈述转写完成', $3)`,
-        [student.id, req.user.id, JSON.stringify({ transcript: text, audioId: saved.id })]
-      );
-      await recordTokenUsage(req.user.id, 6, "语音转文字", { feature: "transcribe", audioId: saved.id });
-    } catch (error) {
-      transcribeError = error.message || "语音已保存，但转写暂时失败。";
-      await query(
-        `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
-         VALUES ($1, $2, 'audio_transcript_pending', '语音陈述待转写', $3)`,
-        [student.id, req.user.id, JSON.stringify({ audioId: saved.id, error: transcribeError })]
-      );
     }
-    res.json({ transcript: text, saved, transcribeError });
+    res.status(202).json(publicJob(job));
   } catch (error) {
     next(error);
   }
@@ -1275,48 +1390,65 @@ app.post("/api/ai/profile", requireAuth, async (req, res, next) => {
     await assertTokenBalance(req.user.id, 12);
     const student = await getPrimaryStudent(req.user);
     const { archiveSnapshot = {} } = req.body || {};
-    const response = await openai.responses.create({
-      model: textModel,
-      input: [
-        {
-          role: "system",
-          content:
-            "You are the Shuzi AI learning profile agent. Only integrate questionnaire, student statements, daily reflections, and weekly discussions, with recent one to two months as priority. Do not use mistake practice, knowledge notes, calendar, library, community, or free-chat content as profile evidence. Separate confirmed facts, AI inference, and follow-up questions. Return strict JSON in Chinese.",
-        },
-        {
-          role: "user",
-          content: jsonInstruction(
-            "{summary, core, reasons:[string], evidence:[string], tags:[string], questions:[string], next, archiveConclusion, scores:{motivation:number, method:number, habit:number, execution:number, subject_strategy:number, emotion:number}}"
-          ) + "\nStudent profile archive snapshot:\n" + JSON.stringify(archiveSnapshot),
-        },
-      ],
+    const { job, reused } = await createAiJob({
+      userId: req.user.id,
+      studentId: student.id,
+      feature: "profile",
+      provider: "openai",
+      mode: "text-background",
+      tokenCost: 12,
+      input: { archiveSnapshot },
     });
-    const profile = parseJsonText(getResponseText(response), {
-      summary: "",
-      core: "",
-      reasons: [],
-      evidence: [],
-      tags: [],
-      questions: [],
-      next: "",
-      archiveConclusion: "",
-      scores: {},
-    });
-    const saved = await withTransaction(async (client) => {
-      const row = (
-        await client.query(
-          "INSERT INTO student_learning_profiles (student_id, user_id, report) VALUES ($1, $2, $3) RETURNING *",
-          [student.id, req.user.id, JSON.stringify({ profile, sourcePolicy: archiveSnapshot?.policy || null })]
-        )
-      ).rows[0];
-      await client.query(
-        "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'learning_profile_ai', $3, $4)",
-        [student.id, req.user.id, "AI learning profile analysis", JSON.stringify({ profile, sourcePolicy: archiveSnapshot?.policy || null })]
-      );
-      return row;
-    });
-    await recordTokenUsage(req.user.id, 12, "AI learning profile analysis", { feature: "profile", model: textModel, profileId: saved.id });
-    res.json({ profile, saved });
+    if (!reused) {
+      startAiJob(job.id, async () => {
+        await assertTokenBalance(req.user.id, 12);
+        const response = await openai.responses.create({
+          model: textModel,
+          background: true,
+          input: [
+            {
+              role: "system",
+              content:
+                "You are the Shuzi AI learning profile agent. Only integrate questionnaire, student statements, daily reflections, and weekly discussions, with recent one to two months as priority. Do not use mistake practice, knowledge notes, calendar, library, community, or free-chat content as profile evidence. Separate confirmed facts, AI inference, and follow-up questions. Return strict JSON in Chinese.",
+            },
+            {
+              role: "user",
+              content: jsonInstruction(
+                "{summary, core, reasons:[string], evidence:[string], tags:[string], questions:[string], next, archiveConclusion, scores:{motivation:number, method:number, habit:number, execution:number, subject_strategy:number, emotion:number}}"
+              ) + "\nStudent profile archive snapshot:\n" + JSON.stringify(archiveSnapshot),
+            },
+          ],
+        });
+        const completed = await waitForOpenAIBackgroundResponse(response, { jobId: job.id, timeoutMessage: "学情画像AI任务仍未完成，系统已尝试取消以控制费用。" });
+        const profile = parseJsonText(getResponseText(completed), {
+          summary: "",
+          core: "",
+          reasons: [],
+          evidence: [],
+          tags: [],
+          questions: [],
+          next: "",
+          archiveConclusion: "",
+          scores: {},
+        });
+        const saved = await withTransaction(async (client) => {
+          const row = (
+            await client.query(
+              "INSERT INTO student_learning_profiles (student_id, user_id, report) VALUES ($1, $2, $3) RETURNING *",
+              [student.id, req.user.id, JSON.stringify({ profile, sourcePolicy: archiveSnapshot?.policy || null })]
+            )
+          ).rows[0];
+          await client.query(
+            "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'learning_profile_ai', $3, $4)",
+            [student.id, req.user.id, "AI learning profile analysis", JSON.stringify({ profile, sourcePolicy: archiveSnapshot?.policy || null })]
+          );
+          return row;
+        });
+        await recordTokenUsage(req.user.id, 12, "AI learning profile analysis", { feature: "profile", model: textModel, profileId: saved.id, jobId: job.id });
+        return { profile, saved };
+      });
+    }
+    res.status(202).json(publicJob(job));
   } catch (error) {
     next(error);
   }
@@ -1329,29 +1461,46 @@ app.post("/api/ai/strategy", requireAuth, async (req, res, next) => {
     await assertTokenBalance(req.user.id, 8);
     const student = await getPrimaryStudent(req.user);
     const { subject = "", section = "strategy", mode = "generate", targetId = "", task = null, archiveSnapshot = {} } = req.body || {};
-    const response = await openai.responses.create({
-      model: textModel,
-      input: [
-        {
-          role: "system",
-          content:
-            "You are the Shuzi AI learning task agent. Only work on the current subject learning tasks, material-use advice, execution details, and completion standards based on the latest learning profile and current subject context. Do not rediagnose the whole student, do not create a weekly timetable, do not analyze mistake images. When section is strategy, put a well-structured multi-task recommendation into strategy_suggestion. Each task must include task name, why the student should do it, and concrete execution guidance. Return strict JSON in Chinese.",
-        },
-        {
-          role: "user",
-          content: jsonInstruction(
-            "{strategy_suggestion, ai_note, task:{title, problem, time, material, detail, standard, studentNote}, revision_notes:[string]}"
-          ) + "\nSubject: " + subject + "\nSection: " + section + "\nMode: " + mode + "\nTarget ID: " + targetId + "\nCurrent task JSON:\n" + JSON.stringify(task || {}) + "\nStrategy archive snapshot:\n" + JSON.stringify(archiveSnapshot),
-        },
-      ],
+    const { job, reused } = await createAiJob({
+      userId: req.user.id,
+      studentId: student.id,
+      feature: "strategy",
+      provider: "openai",
+      mode: "text-background",
+      tokenCost: 8,
+      input: { subject, section, mode, targetId, task, archiveSnapshot },
     });
-    const result = parseJsonText(getResponseText(response), { strategy_suggestion: "", ai_note: "", task: null, revision_notes: [] });
-    await query(
-      "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'subject_strategy_ai', $3, $4)",
-      [student.id, req.user.id, "AI learning task suggestion", JSON.stringify({ subject, section, mode, targetId, result })]
-    );
-    await recordTokenUsage(req.user.id, 8, "AI learning task suggestion", { feature: "strategy", model: textModel, subject, section, mode });
-    res.json({ result });
+    if (!reused) {
+      startAiJob(job.id, async () => {
+        await assertTokenBalance(req.user.id, 8);
+        const response = await openai.responses.create({
+          model: textModel,
+          background: true,
+          input: [
+            {
+              role: "system",
+              content:
+                "You are the Shuzi AI learning task agent. Only work on the current subject learning tasks, material-use advice, execution details, and completion standards based on the latest learning profile and current subject context. Do not rediagnose the whole student, do not create a weekly timetable, do not analyze mistake images. When section is strategy, put a well-structured multi-task recommendation into strategy_suggestion. Each task must include task name, why the student should do it, and concrete execution guidance. Return strict JSON in Chinese.",
+            },
+            {
+              role: "user",
+              content: jsonInstruction(
+                "{strategy_suggestion, ai_note, task:{title, problem, time, material, detail, standard, studentNote}, revision_notes:[string]}"
+              ) + "\nSubject: " + subject + "\nSection: " + section + "\nMode: " + mode + "\nTarget ID: " + targetId + "\nCurrent task JSON:\n" + JSON.stringify(task || {}) + "\nStrategy archive snapshot:\n" + JSON.stringify(archiveSnapshot),
+            },
+          ],
+        });
+        const completed = await waitForOpenAIBackgroundResponse(response, { jobId: job.id, timeoutMessage: "学习策略AI任务仍未完成，系统已尝试取消以控制费用。" });
+        const result = parseJsonText(getResponseText(completed), { strategy_suggestion: "", ai_note: "", task: null, revision_notes: [] });
+        await query(
+          "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'subject_strategy_ai', $3, $4)",
+          [student.id, req.user.id, "AI learning task suggestion", JSON.stringify({ subject, section, mode, targetId, result })]
+        );
+        await recordTokenUsage(req.user.id, 8, "AI learning task suggestion", { feature: "strategy", model: textModel, subject, section, mode, jobId: job.id });
+        return { result };
+      });
+    }
+    res.status(202).json(publicJob(job));
   } catch (error) {
     next(error);
   }
@@ -1364,29 +1513,46 @@ app.post("/api/ai/study-plan", requireAuth, async (req, res, next) => {
     await assertTokenBalance(req.user.id, 8);
     const student = await getPrimaryStudent(req.user);
     const { archiveSnapshot = {}, currentPlanRows = [], methodFocusRows = [], habitFocusRows = [] } = req.body || {};
-    const response = await openai.responses.create({
-      model: textModel,
-      input: [
-        {
-          role: "system",
-          content:
-            "You are the Shuzi AI study plan agent. Only arrange confirmed strategies, tasks, available time, method training, and habit goals into an editable weekly plan. Do not rediagnose the learning profile, do not analyze images, and do not generate similar questions. Keep the plan concrete, executable, and not overloaded. Return strict JSON in Chinese.",
-        },
-        {
-          role: "user",
-          content: jsonInstruction(
-            "{note, rows:[{cells:{\u661f\u671f\u4e00:{start,end,task,note},\u661f\u671f\u4e8c:{start,end,task,note},\u661f\u671f\u4e09:{start,end,task,note},\u661f\u671f\u56db:{start,end,task,note},\u661f\u671f\u4e94:{start,end,task,note},\u661f\u671f\u516d:{start,end,task,note},\u661f\u671f\u65e5:{start,end,task,note}}}], method_focus_suggestions, habit_focus_suggestions, execution_notes}"
-          ) + "\nPlan archive snapshot:\n" + JSON.stringify(archiveSnapshot) + "\nCurrent weekly plan rows:\n" + JSON.stringify(currentPlanRows) + "\nMethod focus rows:\n" + JSON.stringify(methodFocusRows) + "\nHabit focus rows:\n" + JSON.stringify(habitFocusRows),
-        },
-      ],
+    const { job, reused } = await createAiJob({
+      userId: req.user.id,
+      studentId: student.id,
+      feature: "study-plan",
+      provider: "openai",
+      mode: "text-background",
+      tokenCost: 8,
+      input: { archiveSnapshot, currentPlanRows, methodFocusRows, habitFocusRows },
     });
-    const plan = parseJsonText(getResponseText(response), { rows: [], note: "" });
-    await query(
-      "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'study_plan_ai', $3, $4)",
-      [student.id, req.user.id, "AI study plan", JSON.stringify({ plan })]
-    );
-    await recordTokenUsage(req.user.id, 8, "AI study plan", { feature: "study-plan", model: textModel });
-    res.json({ plan });
+    if (!reused) {
+      startAiJob(job.id, async () => {
+        await assertTokenBalance(req.user.id, 8);
+        const response = await openai.responses.create({
+          model: textModel,
+          background: true,
+          input: [
+            {
+              role: "system",
+              content:
+                "You are the Shuzi AI study plan agent. Only arrange confirmed strategies, tasks, available time, method training, and habit goals into an editable weekly plan. Do not rediagnose the learning profile, do not analyze images, and do not generate similar questions. Keep the plan concrete, executable, and not overloaded. Return strict JSON in Chinese.",
+            },
+            {
+              role: "user",
+              content: jsonInstruction(
+                "{note, rows:[{cells:{\u661f\u671f\u4e00:{start,end,task,note},\u661f\u671f\u4e8c:{start,end,task,note},\u661f\u671f\u4e09:{start,end,task,note},\u661f\u671f\u56db:{start,end,task,note},\u661f\u671f\u4e94:{start,end,task,note},\u661f\u671f\u516d:{start,end,task,note},\u661f\u671f\u65e5:{start,end,task,note}}}], method_focus_suggestions, habit_focus_suggestions, execution_notes}"
+              ) + "\nPlan archive snapshot:\n" + JSON.stringify(archiveSnapshot) + "\nCurrent weekly plan rows:\n" + JSON.stringify(currentPlanRows) + "\nMethod focus rows:\n" + JSON.stringify(methodFocusRows) + "\nHabit focus rows:\n" + JSON.stringify(habitFocusRows),
+            },
+          ],
+        });
+        const completed = await waitForOpenAIBackgroundResponse(response, { jobId: job.id, timeoutMessage: "学习计划AI任务仍未完成，系统已尝试取消以控制费用。" });
+        const plan = parseJsonText(getResponseText(completed), { rows: [], note: "" });
+        await query(
+          "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'study_plan_ai', $3, $4)",
+          [student.id, req.user.id, "AI study plan", JSON.stringify({ plan })]
+        );
+        await recordTokenUsage(req.user.id, 8, "AI study plan", { feature: "study-plan", model: textModel, jobId: job.id });
+        return { plan };
+      });
+    }
+    res.status(202).json(publicJob(job));
   } catch (error) {
     next(error);
   }
@@ -1409,66 +1575,81 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
     const tokenCost = taskType === "generateSimilar" ? 6 : 8;
     await assertTokenBalance(req.user.id, tokenCost);
     if (!prompt.trim() && !files.length) return res.status(400).json({ error: "PROMPT_OR_FILE_REQUIRED" });
-
     const taskMap = {
       analyzeMistake: "AI分析错题：识别题目内容、知识点、错误类型、错因、解题方法缺口和后续训练建议。",
       generateSimilar: "AI生成类似题：根据上传或选择的错题生成1-3道同类型训练题，包含答案、步骤和训练目的。",
       analyzePaper: "AI分析试卷：整理试卷/作业中的错题清单、薄弱知识点、错误类型、优先训练顺序和复习建议。",
     };
-    const documentText = await makeDocumentTextSummary(files);
     const geminiMode = "fast";
     const geminiModel = getMistakeGeminiModel();
-    const geminiPrompt = [
-      "你是树子AI错题专项智能体。你的任务只围绕错题、同类题训练、作业/试卷材料分析和错题档案沉淀。",
-      "输出要像给学生看的学习报告，干净、完整、具体、可执行。不要生成学情画像总报告，不要制定完整周计划。必须输出严格JSON。",
-      jsonInstruction(
-        "{title, summary, sections:[{title,content}], extracted_questions:[{id,title,question_content,subject,error_type,knowledge_points,method_gap,correction_steps,suggestion,is_likely_wrong}], similar_questions:[{title,question,answer,solution_steps,training_goal,difficulty}], training_suggestions:[string], archive_note}"
-      ),
-      `任务类型：${taskMap[taskType] || taskMap.analyzeMistake}`,
-      `科目：${subject}`,
-      `题目所属年级：${grade || "未指定"}`,
-      `讲解约束：请优先使用“${grade || "学生当前年级"}”对应的知识范围、术语和解题方法来讲解。不要用明显超出该年级水平的高中或大学方法解释低年级题目；如果必须补充更高阶方法，需要先说明这是拓展，不作为默认解法。`,
-      `标题：${title}`,
-      `来源：${source}`,
-      `学生提示词：${prompt}`,
-      `学生档案摘要：${archiveSnapshot}`,
-      `上传文档文字摘录：\n${documentText || "无可提取文档文字；如有图片或PDF，请结合附件内容分析。"}`,
-    ].join("\n");
-    const reportText = await generateGeminiText({ model: geminiModel, prompt: geminiPrompt, files });
-    const report = parseJsonText(reportText, {
-      title,
-      summary: "",
-      sections: [],
-      extracted_questions: [],
-      similar_questions: [],
-      training_suggestions: [],
-    });
-    const saved = await withTransaction(async (client) => {
-      const fileRows = await saveUploadedFiles(client, req.user, student, "mistake", files);
-      const row = (
-        await client.query(
-          `INSERT INTO mistake_files (student_id, user_id, subject, title, file_ids, analysis)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           RETURNING *`,
-          [student.id, req.user.id, subject, title, fileRows.map((item) => item.id), JSON.stringify({ taskType, prompt, grade, provider: "gemini", model: geminiModel, report })]
-        )
-      ).rows[0];
-      await client.query(
-        `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
-         VALUES ($1, $2, 'mistake_workspace', $3, $4)`,
-        [student.id, req.user.id, title, JSON.stringify({ taskType, prompt, grade, provider: "gemini", model: geminiModel, report, fileCount: files.length })]
-      );
-      return row;
-    });
-    await recordTokenUsage(req.user.id, tokenCost, taskMap[taskType] || "错题专项AI处理", {
+    const { job, reused } = await createAiJob({
+      userId: req.user.id,
+      studentId: student.id,
       feature: "mistake-workflow",
       provider: "gemini",
-      model: geminiModel,
       mode: geminiMode,
-      taskType,
-      mistakeId: saved.id,
+      tokenCost,
+      input: { taskType, prompt, subject, grade, title, source, archiveSnapshot, fileCount: files.length },
     });
-    res.json({ report, saved });
+    if (!reused) {
+      startAiJob(job.id, async () => {
+        await assertTokenBalance(req.user.id, tokenCost);
+        const documentText = await makeDocumentTextSummary(files);
+        const geminiPrompt = [
+          "你是树子AI错题专项智能体。你的任务只围绕错题、同类题训练、作业/试卷材料分析和错题档案沉淀。",
+          "输出要像给学生看的学习报告，干净、完整、具体、可执行。不要生成学情画像总报告，不要制定完整周计划。必须输出严格JSON。",
+          jsonInstruction(
+            "{title, summary, sections:[{title,content}], extracted_questions:[{id,title,question_content,subject,error_type,knowledge_points,method_gap,correction_steps,suggestion,is_likely_wrong}], similar_questions:[{title,question,answer,solution_steps,training_goal,difficulty}], training_suggestions:[string], archive_note}"
+          ),
+          `任务类型：${taskMap[taskType] || taskMap.analyzeMistake}`,
+          `科目：${subject}`,
+          `题目所属年级：${grade || "未指定"}`,
+          `讲解约束：请优先使用“${grade || "学生当前年级"}”对应的知识范围、术语和解题方法来讲解。不要用明显超出该年级水平的高中或大学方法解释低年级题目；如果必须补充更高阶方法，需要先说明这是拓展，不作为默认解法。`,
+          `标题：${title}`,
+          `来源：${source}`,
+          `学生提示词：${prompt}`,
+          `学生档案摘要：${archiveSnapshot}`,
+          `上传文档文字摘录：\n${documentText || "无可提取文档文字；如有图片或PDF，请结合附件内容分析。"}`,
+        ].join("\n");
+        const reportText = await generateGeminiText({ model: geminiModel, prompt: geminiPrompt, files });
+        const report = parseJsonText(reportText, {
+          title,
+          summary: "",
+          sections: [],
+          extracted_questions: [],
+          similar_questions: [],
+          training_suggestions: [],
+        });
+        const saved = await withTransaction(async (client) => {
+          const fileRows = await saveUploadedFiles(client, req.user, student, "mistake", files);
+          const row = (
+            await client.query(
+              `INSERT INTO mistake_files (student_id, user_id, subject, title, file_ids, analysis)
+               VALUES ($1, $2, $3, $4, $5, $6)
+               RETURNING *`,
+              [student.id, req.user.id, subject, title, fileRows.map((item) => item.id), JSON.stringify({ taskType, prompt, grade, provider: "gemini", model: geminiModel, report })]
+            )
+          ).rows[0];
+          await client.query(
+            `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
+             VALUES ($1, $2, 'mistake_workspace', $3, $4)`,
+            [student.id, req.user.id, title, JSON.stringify({ taskType, prompt, grade, provider: "gemini", model: geminiModel, report, fileCount: files.length })]
+          );
+          return row;
+        });
+        await recordTokenUsage(req.user.id, tokenCost, taskMap[taskType] || "错题专项AI处理", {
+          feature: "mistake-workflow",
+          provider: "gemini",
+          model: geminiModel,
+          mode: geminiMode,
+          taskType,
+          mistakeId: saved.id,
+          jobId: job.id,
+        });
+        return { report, saved };
+      });
+    }
+    res.status(202).json(publicJob(job));
   } catch (error) {
     next(error);
   }
@@ -1483,38 +1664,53 @@ app.post("/api/ai/mistakes/analyze", requireAuth, upload.array("files", 6), asyn
     if (!files.length) return res.status(400).json({ error: "FILES_REQUIRED" });
     const student = await getPrimaryStudent(req.user);
     const { subject = "", title = "错题分析", note = "" } = req.body || {};
-    const prompt = [
-      "你是树子AI错题专项智能体。只围绕上传材料中的错题识别、题目拆分、错因归类、知识点、解题方法缺口、相似题训练建议和复测安排输出。",
-      "如果材料里有多道题，要拆成题目清单；不要制定完整周计划，不要做学情画像总报告。必须输出严格JSON。",
-      jsonInstruction(
-        "{summary, extracted_questions:[{id,title,question_content,subject,error_type,knowledge_points,method_gap,correction_steps,suggestion,is_likely_wrong}], analysis:{test_point,error_reason,method_gap,correction_steps,training_suggestions,review_schedule}}"
-      ),
-      `科目：${subject}`,
-      `标题：${title}`,
-      `学生补充：${note}`,
-    ].join("\n");
     const mistakeGeminiModel = getMistakeGeminiModel();
-    const analysisText = await generateGeminiText({ model: mistakeGeminiModel, prompt, files });
-    const analysis = parseJsonText(analysisText, { mistake_title: title });
-    const saved = await withTransaction(async (client) => {
-      const fileRows = await saveUploadedFiles(client, req.user, student, "mistake", files);
-      const row = (
-        await client.query(
-          `INSERT INTO mistake_files (student_id, user_id, subject, title, file_ids, analysis)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           RETURNING *`,
-          [student.id, req.user.id, subject, title, fileRows.map((item) => item.id), JSON.stringify({ provider: "gemini", model: mistakeGeminiModel, analysis })]
-        )
-      ).rows[0];
-      await client.query(
-        `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
-         VALUES ($1, $2, 'mistake_analysis', $3, $4)`,
-        [student.id, req.user.id, title, JSON.stringify({ provider: "gemini", model: mistakeGeminiModel, analysis })]
-      );
-      return row;
+    const { job, reused } = await createAiJob({
+      userId: req.user.id,
+      studentId: student.id,
+      feature: "mistake-analyze",
+      provider: "gemini",
+      mode: "vision-background",
+      tokenCost: 12,
+      input: { subject, title, note, fileCount: files.length },
     });
-    await recordTokenUsage(req.user.id, 12, "AI错题识别", { feature: "mistake-analyze", provider: "gemini", model: mistakeGeminiModel, mistakeId: saved.id });
-    res.json({ analysis, saved });
+    if (!reused) {
+      startAiJob(job.id, async () => {
+        await assertTokenBalance(req.user.id, 12);
+        const prompt = [
+          "你是树子AI错题专项智能体。只围绕上传材料中的错题识别、题目拆分、错因归类、知识点、解题方法缺口、相似题训练建议和复测安排输出。",
+          "如果材料里有多道题，要拆成题目清单；不要制定完整周计划，不要做学情画像总报告。必须输出严格JSON。",
+          jsonInstruction(
+            "{summary, extracted_questions:[{id,title,question_content,subject,error_type,knowledge_points,method_gap,correction_steps,suggestion,is_likely_wrong}], analysis:{test_point,error_reason,method_gap,correction_steps,training_suggestions,review_schedule}}"
+          ),
+          `科目：${subject}`,
+          `标题：${title}`,
+          `学生补充：${note}`,
+        ].join("\n");
+        const analysisText = await generateGeminiText({ model: mistakeGeminiModel, prompt, files });
+        const analysis = parseJsonText(analysisText, { mistake_title: title });
+        const saved = await withTransaction(async (client) => {
+          const fileRows = await saveUploadedFiles(client, req.user, student, "mistake", files);
+          const row = (
+            await client.query(
+              `INSERT INTO mistake_files (student_id, user_id, subject, title, file_ids, analysis)
+               VALUES ($1, $2, $3, $4, $5, $6)
+               RETURNING *`,
+              [student.id, req.user.id, subject, title, fileRows.map((item) => item.id), JSON.stringify({ provider: "gemini", model: mistakeGeminiModel, analysis })]
+            )
+          ).rows[0];
+          await client.query(
+            `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
+             VALUES ($1, $2, 'mistake_analysis', $3, $4)`,
+            [student.id, req.user.id, title, JSON.stringify({ provider: "gemini", model: mistakeGeminiModel, analysis })]
+          );
+          return row;
+        });
+        await recordTokenUsage(req.user.id, 12, "AI错题识别", { feature: "mistake-analyze", provider: "gemini", model: mistakeGeminiModel, mistakeId: saved.id, jobId: job.id });
+        return { analysis, saved };
+      });
+    }
+    res.status(202).json(publicJob(job));
   } catch (error) {
     next(error);
   }
@@ -1527,26 +1723,115 @@ app.post("/api/ai/mistakes/practice", requireAuth, async (req, res, next) => {
     await assertTokenBalance(req.user.id, 10);
     const student = await getPrimaryStudent(req.user);
     const { sourceMistakeId = null, subject = "", mistake = {}, count = 3 } = req.body || {};
-    const prompt = [
-      "你是树子AI相似题训练智能体。根据错题的知识点、方法缺口和错误类型，生成1-3道相似题，必须包含答案、步骤和训练目的。必须输出严格JSON。",
-      jsonInstruction("{questions:[{title, question, answer, solution_steps, training_goal, difficulty}]}"),
-      `科目：${subject}`,
-      `数量：${Math.min(3, Math.max(1, Number(count) || 1))}`,
-      `错题信息：${JSON.stringify(mistake)}`,
-    ].join("\n");
     const mistakeGeminiModel = getMistakeGeminiModel();
-    const generatedText = await generateGeminiText({ model: mistakeGeminiModel, prompt });
-    const generated = parseJsonText(generatedText, { questions: [] });
-    const saved = (
+    const { job, reused } = await createAiJob({
+      userId: req.user.id,
+      studentId: student.id,
+      feature: "mistake-practice",
+      provider: "gemini",
+      mode: "text-background",
+      tokenCost: 10,
+      input: { sourceMistakeId, subject, mistake, count },
+    });
+    if (!reused) {
+      startAiJob(job.id, async () => {
+        await assertTokenBalance(req.user.id, 10);
+        const prompt = [
+          "你是树子AI相似题训练智能体。根据错题的知识点、方法缺口和错误类型，生成1-3道相似题，必须包含答案、步骤和训练目的。必须输出严格JSON。",
+          jsonInstruction("{questions:[{title, question, answer, solution_steps, training_goal, difficulty}]}"),
+          `科目：${subject}`,
+          `数量：${Math.min(3, Math.max(1, Number(count) || 1))}`,
+          `错题信息：${JSON.stringify(mistake)}`,
+        ].join("\n");
+        const generatedText = await generateGeminiText({ model: mistakeGeminiModel, prompt });
+        const generated = parseJsonText(generatedText, { questions: [] });
+        const saved = (
+          await query(
+            `INSERT INTO generated_practice (student_id, user_id, source_mistake_id, questions)
+             VALUES ($1, $2, $3, $4)
+             RETURNING *`,
+            [student.id, req.user.id, sourceMistakeId, JSON.stringify(generated.questions || generated)]
+          )
+        ).rows[0];
+        await recordTokenUsage(req.user.id, 10, "AI生成相似题", { feature: "mistake-practice", provider: "gemini", model: mistakeGeminiModel, practiceId: saved.id, jobId: job.id });
+        return { practice: generated, saved };
+      });
+    }
+    res.status(202).json(publicJob(job));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/ai/jobs/:jobId", requireAuth, async (req, res, next) => {
+  try {
+    const job = (
       await query(
-        `INSERT INTO generated_practice (student_id, user_id, source_mistake_id, questions)
-         VALUES ($1, $2, $3, $4)
-         RETURNING *`,
-        [student.id, req.user.id, sourceMistakeId, JSON.stringify(generated.questions || generated)]
+        `SELECT *
+         FROM ai_generation_jobs
+         WHERE id = $1 AND user_id = $2`,
+        [req.params.jobId, req.user.id]
       )
     ).rows[0];
-    await recordTokenUsage(req.user.id, 10, "AI生成相似题", { feature: "mistake-practice", provider: "gemini", model: mistakeGeminiModel, practiceId: saved.id });
-    res.json({ practice: generated, saved });
+    if (!job) return res.status(404).json({ error: "JOB_NOT_FOUND", message: "没有找到这次AI任务。" });
+    res.json(publicJob(job));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/ai/jobs/active/:feature", requireAuth, async (req, res, next) => {
+  try {
+    const job = (
+      await query(
+        `SELECT *
+         FROM ai_generation_jobs
+         WHERE user_id = $1
+           AND feature = $2
+           AND status IN ('queued', 'processing')
+           AND created_at > now() - interval '30 minutes'
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [req.user.id, req.params.feature]
+      )
+    ).rows[0];
+    res.json({ job: publicJob(job) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/ai/jobs/:jobId/cancel", requireAuth, async (req, res, next) => {
+  try {
+    const job = (
+      await query(
+        `SELECT *
+         FROM ai_generation_jobs
+         WHERE id = $1 AND user_id = $2`,
+        [req.params.jobId, req.user.id]
+      )
+    ).rows[0];
+    if (!job) return res.status(404).json({ error: "JOB_NOT_FOUND", message: "没有找到这次AI任务。" });
+    if (job.external_response_id && job.provider === "openai") {
+      try {
+        await openai.responses.cancel(job.external_response_id);
+      } catch (error) {
+        console.warn("Failed to cancel OpenAI background response", job.external_response_id, error.message);
+      }
+    }
+    const updated = (
+      await query(
+        `UPDATE ai_generation_jobs
+         SET status = 'failed',
+             error = $3,
+             updated_at = now(),
+             completed_at = now()
+         WHERE id = $1 AND user_id = $2
+         RETURNING *`,
+        [job.id, req.user.id, JSON.stringify({ message: "AI任务已取消。", detail: "cancelled_by_user" })]
+      )
+    ).rows[0];
+    res.json(publicJob(updated));
   } catch (error) {
     next(error);
   }
@@ -1574,46 +1859,6 @@ function buildKnowledgeNotePrompt({ topic = "", grade = "", subject = "", useTem
   );
 }
 
-async function processKnowledgeNoteJob(jobId, userId, studentId, payload) {
-  try {
-    await query("UPDATE ai_generation_jobs SET status = 'processing', updated_at = now() WHERE id = $1", [jobId]);
-    ensureOpenAIKey();
-    await assertTokenBalance(userId, 35);
-    const topic = String(payload.topic || "").trim();
-    const prompt = buildKnowledgeNotePrompt(payload);
-    const imageBase64 = await generateOpenAIImage(prompt);
-    const note = {
-      topic,
-      prompt,
-      text: `已根据“${topic}”生成中文知识图。`,
-      imageMimeType: "image/png",
-    };
-    const saved = (
-      await query(
-        `INSERT INTO knowledge_notes (student_id, user_id, topic, note, image_base64)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, student_id, user_id, topic, note, created_at`,
-        [studentId, userId, topic, JSON.stringify(note), imageBase64 || null]
-      )
-    ).rows[0];
-    await recordTokenUsage(userId, 35, "AI知识图生成", { feature: "knowledge-note", noteId: saved.id, jobId });
-    await query(
-      `UPDATE ai_generation_jobs
-       SET status = 'completed', result = $2, updated_at = now(), completed_at = now()
-       WHERE id = $1`,
-      [jobId, JSON.stringify({ note, imageBase64, saved })]
-    );
-  } catch (error) {
-    console.error("Knowledge note async job failed", error);
-    await query(
-      `UPDATE ai_generation_jobs
-       SET status = 'failed', error = $2, updated_at = now(), completed_at = now()
-       WHERE id = $1`,
-      [jobId, JSON.stringify(serializeJobError(error))]
-    );
-  }
-}
-
 app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
   try {
     await assertPaidMember(req.user.id);
@@ -1623,39 +1868,41 @@ app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
     const payload = req.body || {};
     const topic = String(payload.topic || "").trim();
     if (!topic) return res.status(400).json({ error: "TOPIC_REQUIRED" });
-    const activeJob = (
-      await query(
-        `SELECT id, status, input, created_at
-         FROM ai_generation_jobs
-         WHERE user_id = $1
-           AND feature = 'knowledge-note'
-           AND status IN ('queued', 'processing')
-           AND created_at > now() - interval '30 minutes'
-         ORDER BY created_at DESC
-         LIMIT 1`,
-        [req.user.id]
-      )
-    ).rows[0];
-    if (activeJob) {
-      return res.status(202).json({
-        jobId: activeJob.id,
-        status: activeJob.status,
-        input: activeJob.input || {},
-        message: "已有知识图正在后台生成，已继续等待原任务，避免重复扣费。",
+    const jobPayload = { ...payload, topic };
+    const { job, reused } = await createAiJob({
+      userId: req.user.id,
+      studentId: student.id,
+      feature: "knowledge-note",
+      provider: "openai",
+      mode: "image-background",
+      tokenCost: 35,
+      input: jobPayload,
+    });
+    if (!reused) {
+      startAiJob(job.id, async ({ setExternalResponseId }) => {
+        ensureOpenAIKey();
+        await assertTokenBalance(req.user.id, 35);
+        const prompt = buildKnowledgeNotePrompt(jobPayload);
+        const imageBase64 = await generateOpenAIImageBackground(prompt, setExternalResponseId);
+        const note = {
+          topic,
+          prompt,
+          text: `已根据“${topic}”生成中文知识图。`,
+          imageMimeType: "image/png",
+        };
+        const saved = (
+          await query(
+            `INSERT INTO knowledge_notes (student_id, user_id, topic, note, image_base64)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING id, student_id, user_id, topic, note, created_at`,
+            [student.id, req.user.id, topic, JSON.stringify(note), imageBase64 || null]
+          )
+        ).rows[0];
+        await recordTokenUsage(req.user.id, 35, "AI知识图生成", { feature: "knowledge-note", noteId: saved.id, jobId: job.id });
+        return { note, imageBase64, saved };
       });
     }
-    const job = (
-      await query(
-        `INSERT INTO ai_generation_jobs (user_id, student_id, feature, status, input)
-         VALUES ($1, $2, 'knowledge-note', 'queued', $3)
-         RETURNING id, status, created_at`,
-        [req.user.id, student.id, JSON.stringify({ ...payload, topic })]
-      )
-    ).rows[0];
-    setTimeout(() => {
-      void processKnowledgeNoteJob(job.id, req.user.id, student.id, { ...payload, topic });
-    }, 0);
-    res.status(202).json({ jobId: job.id, status: job.status, message: "知识图已进入后台生成，请稍候。" });
+    res.status(202).json({ ...publicJob(job), message: reused ? "已有知识图正在后台生成，已继续等待原任务，避免重复扣费。" : "知识图已进入后台生成，请稍候。" });
   } catch (error) {
     next(error);
   }
@@ -1745,6 +1992,98 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 6), async (req, 
       documentText ? "Extracted attachment text:\n" + documentText : "",
     ].filter(Boolean).join("\n");
 
+    if (shouldGenerateImage || files.length) {
+      const { job, reused } = await createAiJob({
+        userId: req.user.id,
+        studentId: student.id,
+        feature: "free-ask",
+        provider: aiProvider,
+        mode: shouldGenerateImage ? "mixed-background" : `${aiMode}-background`,
+        tokenCost,
+        input: { question, wantsImage: shouldGenerateImage, provider: aiProvider, mode: aiMode, fileCount: files.length },
+      });
+      if (!reused) {
+        startAiJob(job.id, async ({ setExternalResponseId }) => {
+          await assertTokenBalance(req.user.id, tokenCost);
+          let answer = "";
+          let model = "";
+          let imageBase64 = "";
+          if (aiProvider === "gemini") {
+            ensureGeminiKey();
+            model = getGeminiModel(aiMode);
+            answer = await generateGeminiText({
+              model,
+              prompt: [
+                "You are Shuzi AI free-question assistant. Answer only the current question and current attachments. You may answer study, knowledge, homework, science, life, interest, or open-ended questions. Be clear, warm, and suitable for middle/high-school students. If it is a learning question, give a concrete next step. Answer in Chinese.",
+                promptText,
+              ].join("\n"),
+              files,
+              temperature: aiMode === "thinking" ? 0.2 : 0.35,
+            });
+          } else {
+            ensureOpenAIKey();
+            model = getOpenAITextModel(aiMode);
+            const imageInputs = makeImageInputs(files);
+            const response = await openai.responses.create({
+              model,
+              background: true,
+              input: [
+                {
+                  role: "system",
+                  content:
+                    "You are Shuzi AI free-question assistant. Answer only the current question and current attachments. You may answer study, knowledge, homework, science, life, interest, or open-ended questions. Be clear, warm, and suitable for middle/high-school students. If it is a learning question, give a concrete next step. If the user asks for a knowledge image, first explain the structure and key points. Answer in Chinese.",
+                },
+                {
+                  role: "user",
+                  content: [{ type: "input_text", text: promptText }, ...imageInputs],
+                },
+              ],
+            });
+            await setExternalResponseId(response.id);
+            const completed = await waitForOpenAIBackgroundResponse(response, { timeoutMessage: "AI自由问后台任务仍未完成，系统已尝试取消以控制费用。" });
+            answer = getResponseText(completed);
+          }
+          if (shouldGenerateImage) {
+            ensureOpenAIKey();
+            const imagePrompt = [
+              "Create a simple professional Chinese educational infographic image.",
+              "Use clear labels, readable hierarchy, white background, and no dense text.",
+              "Topic or request: " + (question || "knowledge explanation"),
+              answer ? "Text answer context: " + answer.slice(0, 800) : "",
+            ].filter(Boolean).join("\n");
+            imageBase64 = (await generateOpenAIImageBackground(imagePrompt, setExternalResponseId)) || "";
+          }
+          answer = answer || "AI has read your question, but did not generate a valid answer. Please try asking in another way.";
+          const eventPayload = { question, answer, provider: aiProvider, mode: aiMode, model, imageModel: imageBase64 ? imageModel : null, hasImage: Boolean(imageBase64) };
+          if (files.length) {
+            await withTransaction(async (client) => {
+              const fileRows = await saveUploadedFiles(client, req.user, student, "free_ask", files);
+              await client.query(
+                "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'free_ask', $3, $4)",
+                [student.id, req.user.id, "AI free ask", JSON.stringify({ ...eventPayload, fileIds: fileRows.map((item) => item.id) })]
+              );
+            });
+          } else {
+            await query(
+              "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'free_ask', $3, $4)",
+              [student.id, req.user.id, "AI free ask", JSON.stringify(eventPayload)]
+            );
+          }
+          await recordTokenUsage(req.user.id, tokenCost, "AI free ask", {
+            feature: "free-ask",
+            provider: aiProvider,
+            mode: aiMode,
+            model,
+            imageModel: imageBase64 ? imageModel : null,
+            hasImage: Boolean(imageBase64),
+            jobId: job.id,
+          });
+          return { answer, provider: aiProvider, mode: aiMode, model, imageBase64, imageModel: imageBase64 ? imageModel : null };
+        });
+      }
+      return res.status(202).json(publicJob(job));
+    }
+
     let answer = "";
     let model = "";
     let imageBase64 = "";
@@ -1779,17 +2118,6 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 6), async (req, 
         ],
       });
       answer = getResponseText(response);
-    }
-
-    if (shouldGenerateImage) {
-      ensureOpenAIKey();
-      const imagePrompt = [
-        "Create a professional Chinese educational infographic image.",
-        "Use clear labels, structured annotations, readable hierarchy, and a clean study-note layout. The image must be useful for student learning.",
-        "Topic or request: " + (question || "knowledge explanation"),
-        answer ? "Text answer context: " + answer : "",
-      ].filter(Boolean).join("\n");
-      imageBase64 = (await generateOpenAIImage(imagePrompt)) || "";
     }
 
     answer = answer || "AI has read your question, but did not generate a valid answer. Please try asking in another way.";

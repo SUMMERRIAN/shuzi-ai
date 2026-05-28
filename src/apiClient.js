@@ -13,6 +13,32 @@ export function setAuthToken(token) {
   }
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function buildAiJobError(job) {
+  const jobError = job?.error || {};
+  const detail = jobError.detail && jobError.detail !== jobError.message ? `；详情：${jobError.detail}` : "";
+  const error = new Error(`${jobError.message || "AI任务处理失败"}${detail}`);
+  error.payload = job;
+  error.status = jobError.status || 500;
+  return error;
+}
+
+async function waitForAiJob(jobId, options = {}) {
+  const attempts = options.aiJobAttempts || 120;
+  const intervalMs = options.aiJobIntervalMs || 5000;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const job = await apiRequest(`/ai/jobs/${jobId}`, { skipAiJobPoll: true });
+    if (job.status === "completed") return job.result || {};
+    if (job.status === "failed") throw buildAiJobError(job);
+    if (job.status === "cancelled") throw new Error("AI任务已取消。");
+    await sleep(intervalMs);
+  }
+  throw new Error("AI任务仍在后台处理中，请稍后刷新页面查看结果。");
+}
+
 export async function apiRequest(path, options = {}) {
   const token = getAuthToken();
   const isFormData = options.body instanceof FormData;
@@ -68,6 +94,9 @@ export async function apiRequest(path, options = {}) {
     error.status = response.status;
     error.payload = data;
     throw error;
+  }
+  if (!options.skipAiJobPoll && data?.jobId && data?.status && ["queued", "processing"].includes(data.status)) {
+    return waitForAiJob(data.jobId, options);
   }
   return data;
 }
