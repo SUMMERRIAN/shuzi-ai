@@ -971,6 +971,81 @@ button:disabled {
   padding: 18px clamp(18px, 3vw, 42px) 44px;
 }
 
+.ai-job-center {
+  margin: 0 0 14px;
+  border: 1px solid #c8ead7;
+  border-radius: 8px;
+  background: #f4fbf7;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
+}
+
+.ai-job-summary {
+  display: flex;
+  width: 100%;
+  min-height: 46px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  color: #06281e;
+  font-weight: 900;
+}
+
+.ai-job-summary span {
+  flex: 1;
+  text-align: left;
+}
+
+.ai-job-summary .rotate {
+  transform: rotate(90deg);
+}
+
+.ai-job-panel {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.ai-job-row {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #d8e7d6;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.ai-job-row div {
+  display: grid;
+  gap: 3px;
+}
+
+.ai-job-row strong {
+  color: #061b16;
+}
+
+.ai-job-row span {
+  color: #5e6a64;
+  font-size: 13px;
+}
+
+.ai-job-row button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #d9ded6;
+  border-radius: 8px;
+  background: #fff;
+  color: #0b8f5a;
+  font-weight: 900;
+}
+
 .admin-sidebar-button {
   display: inline-flex;
   min-height: 42px;

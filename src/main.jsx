@@ -31,6 +31,7 @@ import {
   LogIn,
   LogOut,
   Mic,
+  MinusCircle,
   PauseCircle,
   Plus,
   Save,
@@ -74,6 +75,26 @@ const subPages = [
   { id: "freeAsk", label: "AI自由问", icon: Sparkles },
   { id: "expert", label: "专家诊断", icon: ShieldCheck },
 ];
+
+const aiJobFeatureLabels = {
+  transcribe: "语音转写",
+  profile: "学情画像",
+  strategy: "学习策略",
+  "study-plan": "学习计划",
+  "mistake-workflow": "错题专项",
+  "mistake-analyze": "错题分析",
+  "mistake-practice": "相似题",
+  "knowledge-note": "知识图",
+  "free-ask": "AI自由问",
+};
+
+function aiJobStatusLabel(status = "") {
+  if (status === "queued") return "排队中";
+  if (status === "processing") return "生成中";
+  if (status === "completed") return "已完成";
+  if (status === "failed") return "已结束";
+  return status || "未知";
+}
 
 const defaultMemberPlans = [
   { id: "monthly", name: "月付会员", price: "¥19.9/月", priceCny: 19.9, durationDays: 31, description: `适合先体验完整学习系统，包含AI分析、错题训练、资料下载和${storagePlans.vip.storageGb}GB基础存储。` },
@@ -1821,6 +1842,8 @@ function App() {
   });
   const [accountNotice, setAccountNotice] = useState("");
   const [aiNotice, setAiNotice] = useState({ page: "", message: "" });
+  const [aiJobs, setAiJobs] = useState([]);
+  const [aiJobsOpen, setAiJobsOpen] = useState(false);
   const [authModal, setAuthModal] = useState({
     open: false,
     actionName: "",
@@ -1934,8 +1957,6 @@ function App() {
   const [knowledgeAiStatus, setKnowledgeAiStatus] = useState("idle");
   const [knowledgeUseTemplate, setKnowledgeUseTemplate] = useState(false);
   const [knowledgePromptTemplate, setKnowledgePromptTemplate] = useState(defaultKnowledgePromptTemplate);
-  const knowledgeJobRef = useRef("");
-  const knowledgePollingRef = useRef(false);
   const [forumPosts, setForumPosts] = useState(defaultForumPosts);
   const [activeForumPostId, setActiveForumPostId] = useState(defaultForumPosts[0].id);
   const [forumStatus, setForumStatus] = useState("idle");
@@ -1984,6 +2005,7 @@ function App() {
   const activeAiNotice = aiNotice.page === activePage ? aiNotice.message : "";
   const memberPlans = billingConfig.memberPlans.length ? billingConfig.memberPlans : defaultMemberPlans;
   const tokenPackages = billingConfig.tokenPackages.length ? billingConfig.tokenPackages : defaultTokenPackages;
+  const activeAiJobs = aiJobs.filter((job) => ["queued", "processing"].includes(job.status));
 
   function showAiError(error, fallback = "AI服务暂时不可用，请稍后再试。") {
     setAiNotice({ page: activePage, message: error?.message || fallback });
@@ -2025,21 +2047,34 @@ function App() {
       });
   }, []);
 
+  async function loadAiJobs() {
+    if (!member.isLoggedIn) return;
+    try {
+      const data = await apiRequest("/ai/jobs?limit=12", { skipAiJobPoll: true });
+      setAiJobs(data.jobs || []);
+    } catch {
+      setAiJobs([]);
+    }
+  }
+
+  async function cancelAiJob(jobId) {
+    if (!jobId) return;
+    try {
+      await apiRequest(`/ai/jobs/${jobId}/cancel`, { method: "POST", skipAiJobPoll: true });
+      await loadAiJobs();
+    } catch (error) {
+      showAiError(error, "AI任务暂时无法取消。");
+    }
+  }
+
   useEffect(() => {
-    if (!member.isLoggedIn || knowledgePollingRef.current) return;
-    const savedJob = readDraftValue("knowledgeJob", null);
-    if (savedJob?.jobId) {
-      void pollKnowledgeJob(savedJob.jobId, savedJob.topic || knowledgeQuestion);
+    if (!member.isLoggedIn) {
+      setAiJobs([]);
       return;
     }
-    apiRequest("/ai/knowledge-note/jobs/active")
-      .then((data) => {
-        if (!data.job?.jobId || knowledgePollingRef.current) return;
-        const topic = data.job.input?.topic || knowledgeQuestion;
-        writeDraftValue("knowledgeJob", { jobId: data.job.jobId, topic, startedAt: Date.now() });
-        void pollKnowledgeJob(data.job.jobId, topic);
-      })
-      .catch(() => {});
+    void loadAiJobs();
+    const timer = window.setInterval(loadAiJobs, 8000);
+    return () => window.clearInterval(timer);
   }, [member.isLoggedIn]);
 
   useEffect(() => {
@@ -3506,55 +3541,6 @@ function App() {
     printPage("打包下载错题PDF", "系统会把你选择的错题整理为打印版；在打印窗口中选择“另存为PDF”。");
   }
 
-  function applyKnowledgeJobResult(result, fallbackTopic = knowledgeQuestion) {
-    if (!result?.imageBase64) return false;
-    const title = result.note?.topic || fallbackTopic || "AI知识图";
-    setKnowledgeQuestion(title);
-    setKnowledgeNote({
-      title,
-      subtitle: "AI生成知识图",
-      points: [],
-      svg: `<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254"><image href="data:image/png;base64,${result.imageBase64}" width="1254" height="1254"/></svg>`,
-      prompt: result.note?.prompt || "",
-    });
-    setKnowledgeAiStatus("done");
-    knowledgeJobRef.current = "";
-    clearDraftValue("knowledgeJob");
-    clearAiNotice();
-    return true;
-  }
-
-  async function pollKnowledgeJob(jobId, fallbackTopic = knowledgeQuestion) {
-    if (!jobId || knowledgePollingRef.current) return;
-    knowledgePollingRef.current = true;
-    knowledgeJobRef.current = jobId;
-    setKnowledgeAiStatus("loading");
-    setAiNotice({ page: "knowledge-note", message: "知识图正在后台生成，刷新页面后也会继续恢复等待结果。" });
-    try {
-      for (let attempt = 0; attempt < 120; attempt += 1) {
-        const job = await apiRequest(`/ai/knowledge-note/jobs/${jobId}`);
-        if (job.status === "completed") {
-          if (applyKnowledgeJobResult(job.result || {}, fallbackTopic)) return;
-          throw new Error("知识图后台任务完成了，但没有返回图片。");
-        }
-        if (job.status === "failed") {
-          const jobError = job.error || {};
-          const detail = jobError.detail && jobError.detail !== jobError.message ? `；详情：${jobError.detail}` : "";
-          throw new Error(`${jobError.message || "知识图生成失败"}${detail}`);
-        }
-        await new Promise((resolve) => window.setTimeout(resolve, 5000));
-      }
-      throw new Error("知识图生成时间太长，系统会保留任务记录，请稍后刷新页面查看。");
-    } catch (error) {
-      showAiError(error, "知识图后台生成失败。");
-      setKnowledgeAiStatus("idle");
-      knowledgeJobRef.current = "";
-      clearDraftValue("knowledgeJob");
-    } finally {
-      knowledgePollingRef.current = false;
-    }
-  }
-
   async function generateKnowledgeNote() {
     if (!requireMemberAction("AI生成知识图", generateKnowledgeNote, "知识图生成会调用AI图片与讲解能力，需要会员权限。")) return;
     if (knowledgeAiStatus === "loading") return;
@@ -3583,13 +3569,19 @@ function App() {
         method: "POST",
         body: JSON.stringify(requestBody),
       });
-      if (data.jobId) {
-        const savedInput = data.input || requestBody;
-        writeDraftValue("knowledgeJob", { jobId: data.jobId, topic: savedInput.topic || knowledgeQuestion, startedAt: Date.now() });
-        await pollKnowledgeJob(data.jobId, savedInput.topic || knowledgeQuestion);
+      if (data.imageBase64) {
+        setKnowledgeNote({
+          title: data.note?.topic || knowledgeQuestion,
+          subtitle: "AI生成知识图",
+          points: [],
+          svg: `<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254"><image href="data:image/png;base64,${data.imageBase64}" width="1254" height="1254"/></svg>`,
+          prompt: data.note?.prompt || "",
+        });
+        setKnowledgeAiStatus("done");
+        clearAiNotice();
+        void loadAiJobs();
         return;
       }
-      if (applyKnowledgeJobResult(data, knowledgeQuestion)) return;
       throw new Error("知识图后台任务暂未返回图片，请稍后重试。");
     } catch (error) {
       showAiError(error, "服务器知识图生成暂时不可用，已使用前端知识图。");
@@ -3977,6 +3969,32 @@ function App() {
       </aside>
 
       <main className="workspace">
+        {member.isLoggedIn && activeAiJobs.length > 0 && (
+          <section className="ai-job-center">
+            <button type="button" className="ai-job-summary" onClick={() => setAiJobsOpen((prev) => !prev)}>
+              <Loader2 className="spin" size={17} />
+              <span>{activeAiJobs.length} 个AI任务正在处理</span>
+              <ChevronRight className={aiJobsOpen ? "rotate" : ""} size={17} />
+            </button>
+            {aiJobsOpen && (
+              <div className="ai-job-panel">
+                {activeAiJobs.map((job) => (
+                  <article key={job.jobId} className="ai-job-row">
+                    <div>
+                      <strong>{aiJobFeatureLabels[job.feature] || "AI任务"}</strong>
+                      <span>{aiJobStatusLabel(job.status)} · {job.provider || "AI"} · {job.mode || "后台处理"}</span>
+                    </div>
+                    <button type="button" onClick={() => cancelAiJob(job.jobId)}>
+                      <MinusCircle size={16} />
+                      取消
+                    </button>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
         {activeAiNotice && (
           <div className="ai-service-notice" role="status">
             <div>

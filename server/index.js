@@ -1801,6 +1801,33 @@ app.get("/api/ai/jobs/active/:feature", requireAuth, async (req, res, next) => {
   }
 });
 
+app.get("/api/ai/jobs", requireAuth, async (req, res, next) => {
+  try {
+    const { status = "", limit = 12 } = req.query || {};
+    const params = [req.user.id];
+    const statusFilter = String(status || "").trim();
+    const where = ["user_id = $1"];
+    if (statusFilter) {
+      params.push(statusFilter);
+      where.push(`status = $${params.length}`);
+    }
+    params.push(Math.min(50, Math.max(1, Number(limit) || 12)));
+    const rows = (
+      await query(
+        `SELECT *
+         FROM ai_generation_jobs
+         WHERE ${where.join(" AND ")}
+         ORDER BY created_at DESC
+         LIMIT $${params.length}`,
+        params
+      )
+    ).rows;
+    res.json({ jobs: rows.map(publicJob) });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/ai/jobs/:jobId/cancel", requireAuth, async (req, res, next) => {
   try {
     const job = (
@@ -1903,65 +1930,6 @@ app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
       });
     }
     res.status(202).json({ ...publicJob(job), message: reused ? "已有知识图正在后台生成，已继续等待原任务，避免重复扣费。" : "知识图已进入后台生成，请稍候。" });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get("/api/ai/knowledge-note/jobs/active", requireAuth, async (req, res, next) => {
-  try {
-    const job = (
-      await query(
-        `SELECT id, feature, status, input, result, error, created_at, updated_at, completed_at
-         FROM ai_generation_jobs
-         WHERE user_id = $1
-           AND feature = 'knowledge-note'
-           AND status IN ('queued', 'processing')
-           AND created_at > now() - interval '30 minutes'
-         ORDER BY created_at DESC
-         LIMIT 1`,
-        [req.user.id]
-      )
-    ).rows[0];
-    res.json({
-      job: job
-        ? {
-            jobId: job.id,
-            status: job.status,
-            input: job.input || {},
-            result: job.result || {},
-            error: job.error || {},
-            createdAt: job.created_at,
-            updatedAt: job.updated_at,
-            completedAt: job.completed_at,
-          }
-        : null,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get("/api/ai/knowledge-note/jobs/:jobId", requireAuth, async (req, res, next) => {
-  try {
-    const job = (
-      await query(
-        `SELECT id, feature, status, result, error, created_at, updated_at, completed_at
-         FROM ai_generation_jobs
-         WHERE id = $1 AND user_id = $2 AND feature = 'knowledge-note'`,
-        [req.params.jobId, req.user.id]
-      )
-    ).rows[0];
-    if (!job) return res.status(404).json({ error: "JOB_NOT_FOUND", message: "没有找到这次知识图生成任务。" });
-    res.json({
-      jobId: job.id,
-      status: job.status,
-      result: job.result || {},
-      error: job.error || {},
-      createdAt: job.created_at,
-      updatedAt: job.updated_at,
-      completedAt: job.completed_at,
-    });
   } catch (error) {
     next(error);
   }
