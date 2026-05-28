@@ -3504,27 +3504,47 @@ function App() {
     );
     try {
       clearAiNotice();
+      const requestBody = {
+        topic: knowledgeQuestion,
+        grade: answers.grade,
+        subject: "",
+        useTemplate: knowledgeUseTemplate,
+        template: knowledgePromptTemplate,
+      };
       const data = await apiRequest("/ai/knowledge-note", {
         method: "POST",
-        body: JSON.stringify({
-          topic: knowledgeQuestion,
-          grade: answers.grade,
-          subject: "",
-          useTemplate: knowledgeUseTemplate,
-          template: knowledgePromptTemplate,
-        }),
+        body: JSON.stringify(requestBody),
       });
-      if (data.imageBase64) {
+      let result = data;
+      if (data.jobId) {
+        setAiNotice({ page: activePage, message: "知识图已进入后台生成，页面会自动刷新结果，请先不要重复点击。" });
+        for (let attempt = 0; attempt < 120; attempt += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 5000));
+          const job = await apiRequest(`/ai/knowledge-note/jobs/${data.jobId}`);
+          if (job.status === "completed") {
+            result = job.result || {};
+            break;
+          }
+          if (job.status === "failed") {
+            const jobError = job.error || {};
+            const detail = jobError.detail && jobError.detail !== jobError.message ? `；详情：${jobError.detail}` : "";
+            throw new Error(`${jobError.message || "知识图生成失败"}${detail}`);
+          }
+        }
+      }
+      if (result.imageBase64) {
         setKnowledgeNote({
           title: knowledgeQuestion,
           subtitle: "AI生成知识图",
           points: [],
-          svg: `<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254"><image href="data:image/png;base64,${data.imageBase64}" width="1254" height="1254"/></svg>`,
-          prompt: data.note?.prompt || "",
+          svg: `<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254"><image href="data:image/png;base64,${result.imageBase64}" width="1254" height="1254"/></svg>`,
+          prompt: result.note?.prompt || "",
         });
         setKnowledgeAiStatus("done");
+        clearAiNotice();
         return;
       }
+      throw new Error("知识图后台任务暂未返回图片，请稍后重试。");
     } catch (error) {
       showAiError(error, "服务器知识图生成暂时不可用，已使用前端知识图。");
     }

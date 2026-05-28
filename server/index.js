@@ -99,6 +99,23 @@ function getMistakeGeminiModel() {
   return process.env.GEMINI_MODEL_MISTAKE || geminiFastModel;
 }
 
+function getErrorDetail(error) {
+  return typeof error.detail === "string"
+    ? error.detail
+    : error.detail?.message || error.detail?.error?.message || error.message;
+}
+
+function serializeJobError(error) {
+  return {
+    code: error.code || "AI_JOB_FAILED",
+    message: error.status ? error.message : "服务器处理失败。",
+    detail: getErrorDetail(error),
+    provider: error.provider || undefined,
+    model: error.model || undefined,
+    status: error.status || 500,
+  };
+}
+
 async function extractPdfText(buffer) {
   const parser = new PDFParse({ data: buffer });
   try {
@@ -1554,23 +1571,27 @@ app.post("/api/ai/mistakes/practice", requireAuth, async (req, res, next) => {
   }
 });
 
-app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
+function buildKnowledgeNotePrompt({ topic = "", grade = "", subject = "", useTemplate = false, template = "" } = {}) {
+  const cleanTopic = String(topic || "").trim();
+  const templateSource = String(template || "").trim() || knowledgeInfographicTemplate;
+  const templatePrompt =
+    useTemplate === true || useTemplate === "true"
+      ? `\n\n专业知识图模板：\n${templateSource.replaceAll("[SUBJECT]", cleanTopic)}`
+      : "";
+  return (
+    `请为学生制作一张严谨、丰富、适合复习的中文知识图。主题：${cleanTopic}。学科：${subject || "不限"}。年级：${grade || "中学生"}。` +
+    "画面要求：信息量充足，包含标题、结构图、标注线、关键概念解释、底部总结，不要做简单示意图，风格专业清晰。" +
+    templatePrompt
+  );
+}
+
+async function processKnowledgeNoteJob(jobId, userId, studentId, payload) {
   try {
-    await assertPaidMember(req.user.id);
+    await query("UPDATE ai_generation_jobs SET status = 'processing', updated_at = now() WHERE id = $1", [jobId]);
     ensureOpenAIKey();
-    await assertTokenBalance(req.user.id, 35);
-    const student = await getPrimaryStudent(req.user);
-    const { topic = "", grade = "", subject = "", useTemplate = false, template = "" } = req.body || {};
-    if (!topic.trim()) return res.status(400).json({ error: "TOPIC_REQUIRED" });
-    const templateSource = String(template || "").trim() || knowledgeInfographicTemplate;
-    const templatePrompt =
-      useTemplate === true || useTemplate === "true"
-        ? `\n\n专业知识图模板：\n${templateSource.replaceAll("[SUBJECT]", topic.trim())}`
-        : "";
-    const prompt =
-      `请为学生制作一张严谨、丰富、适合复习的中文知识图。主题：${topic}。学科：${subject || "不限"}。年级：${grade || "中学生"}。` +
-      "画面要求：信息量充足，包含标题、结构图、标注线、关键概念解释、底部总结，不要做简单示意图，风格专业清晰。" +
-      templatePrompt;
+    await assertTokenBalance(userId, 35);
+    const topic = String(payload.topic || "").trim();
+    const prompt = buildKnowledgeNotePrompt(payload);
     const imageBase64 = await generateOpenAIImage(prompt);
     const note = {
       topic,
@@ -1583,11 +1604,73 @@ app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
         `INSERT INTO knowledge_notes (student_id, user_id, topic, note, image_base64)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING id, student_id, user_id, topic, note, created_at`,
-        [student.id, req.user.id, topic, JSON.stringify(note), imageBase64 || null]
+        [studentId, userId, topic, JSON.stringify(note), imageBase64 || null]
       )
     ).rows[0];
-    await recordTokenUsage(req.user.id, 35, "AI知识图生成", { feature: "knowledge-note", noteId: saved.id });
-    res.json({ note, imageBase64, saved });
+    await recordTokenUsage(userId, 35, "AI知识图生成", { feature: "knowledge-note", noteId: saved.id, jobId });
+    await query(
+      `UPDATE ai_generation_jobs
+       SET status = 'completed', result = $2, updated_at = now(), completed_at = now()
+       WHERE id = $1`,
+      [jobId, JSON.stringify({ note, imageBase64, saved })]
+    );
+  } catch (error) {
+    console.error("Knowledge note async job failed", error);
+    await query(
+      `UPDATE ai_generation_jobs
+       SET status = 'failed', error = $2, updated_at = now(), completed_at = now()
+       WHERE id = $1`,
+      [jobId, JSON.stringify(serializeJobError(error))]
+    );
+  }
+}
+
+app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    ensureOpenAIKey();
+    await assertTokenBalance(req.user.id, 35);
+    const student = await getPrimaryStudent(req.user);
+    const payload = req.body || {};
+    const topic = String(payload.topic || "").trim();
+    if (!topic) return res.status(400).json({ error: "TOPIC_REQUIRED" });
+    const job = (
+      await query(
+        `INSERT INTO ai_generation_jobs (user_id, student_id, feature, status, input)
+         VALUES ($1, $2, 'knowledge-note', 'queued', $3)
+         RETURNING id, status, created_at`,
+        [req.user.id, student.id, JSON.stringify({ ...payload, topic })]
+      )
+    ).rows[0];
+    setTimeout(() => {
+      void processKnowledgeNoteJob(job.id, req.user.id, student.id, { ...payload, topic });
+    }, 0);
+    res.status(202).json({ jobId: job.id, status: job.status, message: "知识图已进入后台生成，请稍候。" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/ai/knowledge-note/jobs/:jobId", requireAuth, async (req, res, next) => {
+  try {
+    const job = (
+      await query(
+        `SELECT id, feature, status, result, error, created_at, updated_at, completed_at
+         FROM ai_generation_jobs
+         WHERE id = $1 AND user_id = $2 AND feature = 'knowledge-note'`,
+        [req.params.jobId, req.user.id]
+      )
+    ).rows[0];
+    if (!job) return res.status(404).json({ error: "JOB_NOT_FOUND", message: "没有找到这次知识图生成任务。" });
+    res.json({
+      jobId: job.id,
+      status: job.status,
+      result: job.result || {},
+      error: job.error || {},
+      createdAt: job.created_at,
+      updatedAt: job.updated_at,
+      completedAt: job.completed_at,
+    });
   } catch (error) {
     next(error);
   }
@@ -1920,10 +2003,7 @@ app.get("/api/admin/users", requireAdminToken, async (req, res) => {
 
 app.use((error, req, res, next) => {
   console.error(error);
-  const detail =
-    typeof error.detail === "string"
-      ? error.detail
-      : error.detail?.message || error.detail?.error?.message || error.message;
+  const detail = getErrorDetail(error);
   res.status(error.status || 500).json({
     error: error.code || "SERVER_ERROR",
     message: error.status ? error.message : "服务器处理失败。",

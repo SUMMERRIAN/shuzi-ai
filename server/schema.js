@@ -231,6 +231,20 @@ export async function ensureSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS ai_generation_jobs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      student_id UUID REFERENCES students(id) ON DELETE CASCADE,
+      feature TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'processing', 'completed', 'failed')),
+      input JSONB NOT NULL DEFAULT '{}'::jsonb,
+      result JSONB NOT NULL DEFAULT '{}'::jsonb,
+      error JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      completed_at TIMESTAMPTZ
+    );
+
     CREATE TABLE IF NOT EXISTS forum_posts (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       student_id UUID REFERENCES students(id) ON DELETE SET NULL,
@@ -271,6 +285,7 @@ export async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_library_items_user_view ON library_items(user_id, is_trashed, is_starred, updated_at);
     CREATE INDEX IF NOT EXISTS idx_forum_posts_created_at ON forum_posts(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_forum_replies_post_id ON forum_replies(post_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_ai_generation_jobs_user_feature ON ai_generation_jobs(user_id, feature, created_at DESC);
   `);
   await query(`
     ALTER TABLE users DROP CONSTRAINT IF EXISTS users_channel_check;
