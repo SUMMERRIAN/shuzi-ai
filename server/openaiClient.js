@@ -1,8 +1,11 @@
 import fs from "node:fs";
 import OpenAI from "openai";
 
+export const openaiTimeoutMs = Number(process.env.OPENAI_TIMEOUT_MS || 240000);
+
 export const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
+  timeout: openaiTimeoutMs,
 });
 
 export function ensureOpenAIKey() {
