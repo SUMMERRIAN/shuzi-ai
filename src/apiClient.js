@@ -42,7 +42,11 @@ export async function apiRequest(path, options = {}) {
     data = { detail: rawText };
   }
   if (!response.ok) {
-    const detail = `${data.message || ""} ${data.detail || ""} ${data.provider || ""} ${data.model || ""}`;
+    const rawDetail =
+      typeof data.detail === "string"
+        ? data.detail
+        : data.detail?.message || data.detail?.error?.message || "";
+    const detail = `${data.message || ""} ${rawDetail} ${data.provider || ""} ${data.model || ""}`;
     const providerLabel = data.provider === "gemini" ? "Gemini" : data.provider === "openai" ? "OpenAI" : "AI";
     const modelLabel = data.model ? `（模型：${data.model}）` : "";
     let message = data.message || data.error || `请求失败（HTTP ${response.status}）`;
@@ -55,9 +59,10 @@ export async function apiRequest(path, options = {}) {
     } else if (/API key|not configured|GEMINI_NOT_CONFIGURED|OPENAI_NOT_CONFIGURED/i.test(detail)) {
       message = `${providerLabel} API Key 未配置或不可用${modelLabel}。`;
     } else if (/model|not found|not supported|permission|access/i.test(detail)) {
-      message = `${providerLabel}模型不可用${modelLabel}：${data.message || data.detail || data.error || "请检查模型名称和账号权限。"}`;
+      message = `${providerLabel}模型不可用${modelLabel}：${data.message || rawDetail || data.error || "请检查模型名称和账号权限。"}`;
     } else if (data.provider || data.model) {
-      message = `${providerLabel}请求失败${modelLabel}：${message}`;
+      const visibleDetail = rawDetail && rawDetail !== message ? `；详情：${rawDetail}` : "";
+      message = `${providerLabel}请求失败${modelLabel}：${message}${visibleDetail}`;
     }
     const error = new Error(message);
     error.status = response.status;
