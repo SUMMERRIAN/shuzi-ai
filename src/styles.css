@@ -5477,6 +5477,7 @@ audio {
 }
 
 .knowledge-image-frame {
+  min-height: 360px;
   padding: 12px;
   border: 1px solid #dfe5da;
   border-radius: 8px;
@@ -5532,6 +5533,30 @@ audio {
 .knowledge-point-list p {
   margin-bottom: 0;
   color: #48534d;
+}
+
+.knowledge-empty-state {
+  min-height: 330px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  padding: 28px;
+  border: 1px dashed #cbd8cd;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #69766d;
+  text-align: center;
+}
+
+.knowledge-empty-state p {
+  max-width: 360px;
+  margin: 0;
+  line-height: 1.7;
+}
+
+.knowledge-empty-state.compact {
+  min-height: 220px;
 }
 
 .forum-page {

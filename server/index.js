@@ -28,7 +28,7 @@ const geminiFastModel = process.env.GEMINI_MODEL_FAST || "gemini-2.5-flash";
 const geminiThinkingModel = process.env.GEMINI_MODEL_THINKING || "gemini-2.5-pro";
 const imageModel = process.env.OPENAI_MODEL_IMAGE || "gpt-image-2";
 const imageGenerationEnabled = process.env.OPENAI_IMAGE_GENERATION_ENABLED === "true";
-const imageQuality = process.env.OPENAI_IMAGE_QUALITY || "low";
+const imageQuality = process.env.OPENAI_IMAGE_QUALITY || "medium";
 const imageSize = process.env.OPENAI_IMAGE_SIZE || "1024x1024";
 const imageBackgroundPollMs = Number(process.env.OPENAI_IMAGE_BACKGROUND_POLL_MS || 5000);
 const imageBackgroundMaxPolls = Number(process.env.OPENAI_IMAGE_BACKGROUND_MAX_POLLS || 120);
@@ -51,7 +51,7 @@ function getOpenAITextModel(mode = "fast") {
   return normalizeAiMode(mode) === "thinking" ? openaiThinkingModel : openaiFastModel;
 }
 
-async function generateOpenAIImageBackground(prompt, onResponseId = async () => {}) {
+async function generateOpenAIImageBackground(prompt, onResponseId = async () => {}, quality = imageQuality) {
   if (!imageGenerationEnabled) {
     throw createHttpError(503, "OPENAI_IMAGE_GENERATION_DISABLED", "AI生图已暂时关闭，避免继续消耗OpenAI费用。");
   }
@@ -59,7 +59,7 @@ async function generateOpenAIImageBackground(prompt, onResponseId = async () => 
     let response = await openai.responses.create({
       model: openaiFastModel,
       input: prompt,
-      tools: [{ type: "image_generation", quality: imageQuality, size: imageSize }],
+      tools: [{ type: "image_generation", quality, size: imageSize }],
       background: true,
     });
     await onResponseId(response.id);
@@ -78,6 +78,75 @@ async function generateOpenAIImageBackground(prompt, onResponseId = async () => 
     error.model = imageModel;
     throw error;
   }
+}
+
+function resolveImageQuality(text = "") {
+  const content = String(text || "").toLowerCase();
+  if (/低质量|省钱|节省|快速|快一点|便宜|测试|草稿|low|draft|cheap|fast/.test(content)) return "low";
+  if (/高清|高质量|精细|细致|更清楚|高分辨率|正式版|high|hd|detailed|premium/.test(content)) return "high";
+  if (/中等|中等质量|默认|普通质量|medium|normal|standard/.test(content)) return "medium";
+  return imageQuality;
+}
+
+function fallbackKnowledgeBreakdown(topic = "") {
+  const cleanTopic = String(topic || "知识点").trim();
+  return {
+    title: cleanTopic,
+    subtitle: "AI生成知识图",
+    summary: `围绕“${cleanTopic}”整理核心内容，帮助学生先理解结构，再记住重点。`,
+    points: [
+      { name: "核心概念", desc: `先弄清楚“${cleanTopic}”是什么、解决什么问题。`, tip: "不要只背名词，要能用自己的话解释。" },
+      { name: "组成结构", desc: "把知识点拆成几个可以观察、比较或推理的部分。", tip: "看图时先找整体，再看局部。" },
+      { name: "关键关系", desc: "理解原因、条件、过程和结果之间的联系。", tip: "复习时画箭头，比单纯抄写更有效。" },
+      { name: "典型应用", desc: "知道它在题目、实验或生活情境中怎样使用。", tip: "遇到题目先判断它考的是哪个关系。" },
+      { name: "易错提醒", desc: "区分相似概念，避免把名称、功能或条件混在一起。", tip: "错题里要写清楚自己错在哪里。" },
+    ],
+    imageBrief: "用中心结构图配合周围短标签呈现，适合学生复习。",
+  };
+}
+
+async function generateKnowledgeBreakdown({ topic, grade = "", subject = "", promptText = "" }) {
+  const response = await openai.responses.create({
+    model: openaiFastModel,
+    input: [
+      {
+        role: "system",
+        content:
+          "你是树子AI知识笔记老师。任务是把学生输入的知识点整理成适合中学生复习的中文知识拆解。必须严格输出JSON，不要输出Markdown。解释要准确、短、学生能懂。",
+      },
+      {
+        role: "user",
+        content:
+          jsonInstruction(
+            "{title:string, subtitle:string, summary:string, points:[{name:string, desc:string, tip:string}], image_brief:string}"
+          ) +
+          "\n主题：" + topic +
+          "\n学科：" + (subject || "不限") +
+          "\n年级：" + (grade || "中学生") +
+          "\n学生要求：" + promptText +
+          "\n要求：points 生成5到7个核心知识点；desc用一句话解释功能或含义；tip写一个学习提醒或易错点；image_brief用一句话说明图片应如何呈现。",
+      },
+    ],
+  });
+  const parsed = parseJsonText(getResponseText(response), {});
+  const points = Array.isArray(parsed.points)
+    ? parsed.points
+        .map((item) => ({
+          name: String(item?.name || "").trim(),
+          desc: String(item?.desc || "").trim(),
+          tip: String(item?.tip || "").trim(),
+        }))
+        .filter((item) => item.name && item.desc)
+        .slice(0, 7)
+    : [];
+  const fallback = fallbackKnowledgeBreakdown(topic);
+  return {
+    title: String(parsed.title || topic || "知识图").trim(),
+    subtitle: String(parsed.subtitle || fallback.subtitle).trim(),
+    summary: String(parsed.summary || fallback.summary).trim(),
+    points: points.length ? points : fallback.points,
+    imageBrief: String(parsed.image_brief || fallback.imageBrief).trim(),
+  };
 }
 
 function getGeminiModel(mode = "fast") {
@@ -1864,7 +1933,7 @@ app.post("/api/ai/jobs/:jobId/cancel", requireAuth, async (req, res, next) => {
   }
 });
 
-function buildKnowledgeNotePrompt({ topic = "", grade = "", subject = "", useTemplate = false, template = "" } = {}) {
+function buildKnowledgeNotePrompt({ topic = "", grade = "", subject = "", useTemplate = false, template = "", breakdown = null } = {}) {
   const cleanTopic = String(topic || "").trim();
   const templateSource = String(template || "").trim() || knowledgeInfographicTemplate;
   const compactTemplate = templateSource
@@ -1879,9 +1948,19 @@ function buildKnowledgeNotePrompt({ topic = "", grade = "", subject = "", useTem
     useTemplate === true || useTemplate === "true"
       ? `\n\n参考版式要求：${compactTemplate}`
       : "";
+  const pointsText = Array.isArray(breakdown?.points) && breakdown.points.length
+    ? "\n核心知识点：" +
+      breakdown.points
+        .map((item, index) => `${index + 1}. ${item.name}：${item.desc}${item.tip ? `；学习提醒：${item.tip}` : ""}`)
+        .join("；")
+    : "";
+  const summaryText = breakdown?.summary ? `\n知识总结：${breakdown.summary}` : "";
   return (
-    `制作一张中文学习知识图。主题：${cleanTopic}。学科：${subject || "不限"}。年级：${grade || "中学生"}。` +
-    "要求：白色背景，清楚大标题，中心结构图，3到5个短标签，底部一句学习总结。文字要少而准确，避免密集长文，适合学生复习。" +
+    `制作一张中文学习知识图。主题：${breakdown?.title || cleanTopic}。学科：${subject || "不限"}。年级：${grade || "中学生"}。` +
+    "要求：白色背景，清楚大标题，中心结构图，5到7个短标签，底部一句学习总结。文字要少而准确，标签内容必须尽量来自下方核心知识点，适合学生复习。不要编造教材事实，不要把中文写成乱码。" +
+    summaryText +
+    pointsText +
+    (breakdown?.imageBrief ? `\n画面说明：${breakdown.imageBrief}` : "") +
     templatePrompt
   );
 }
@@ -1909,12 +1988,25 @@ app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
       startAiJob(job.id, async ({ setExternalResponseId }) => {
         ensureOpenAIKey();
         await assertTokenBalance(req.user.id, 35);
-        const prompt = buildKnowledgeNotePrompt(jobPayload);
-        const imageBase64 = await generateOpenAIImageBackground(prompt, setExternalResponseId);
+        const imageQualityForRequest = resolveImageQuality(topic);
+        const breakdown = await generateKnowledgeBreakdown({
+          topic,
+          grade: jobPayload.grade,
+          subject: jobPayload.subject,
+          promptText: topic,
+        });
+        const prompt = buildKnowledgeNotePrompt({ ...jobPayload, breakdown });
+        const imageBase64 = await generateOpenAIImageBackground(prompt, setExternalResponseId, imageQualityForRequest);
         const note = {
           topic,
+          title: breakdown.title,
+          subtitle: breakdown.subtitle,
+          summary: breakdown.summary,
+          points: breakdown.points,
+          imageBrief: breakdown.imageBrief,
+          quality: imageQualityForRequest,
           prompt,
-          text: `已根据“${topic}”生成中文知识图。`,
+          text: breakdown.summary,
           imageMimeType: "image/png",
         };
         const saved = (
@@ -1926,7 +2018,7 @@ app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
           )
         ).rows[0];
         await recordTokenUsage(req.user.id, 35, "AI知识图生成", { feature: "knowledge-note", noteId: saved.id, jobId: job.id });
-        return { note, imageBase64, saved };
+        return { note, imageBase64, saved, points: breakdown.points, quality: imageQualityForRequest };
       });
     }
     res.status(202).json({ ...publicJob(job), message: reused ? "已有知识图正在后台生成，已继续等待原任务，避免重复扣费。" : "知识图已进入后台生成，请稍候。" });
@@ -2013,13 +2105,14 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 6), async (req, 
           }
           if (shouldGenerateImage) {
             ensureOpenAIKey();
+            const imageQualityForRequest = resolveImageQuality(question);
             const imagePrompt = [
               "Create a simple professional Chinese educational infographic image.",
               "Use clear labels, readable hierarchy, white background, and no dense text.",
               "Topic or request: " + (question || "knowledge explanation"),
               answer ? "Text answer context: " + answer.slice(0, 800) : "",
             ].filter(Boolean).join("\n");
-            imageBase64 = (await generateOpenAIImageBackground(imagePrompt, setExternalResponseId)) || "";
+            imageBase64 = (await generateOpenAIImageBackground(imagePrompt, setExternalResponseId, imageQualityForRequest)) || "";
           }
           answer = answer || "AI has read your question, but did not generate a valid answer. Please try asking in another way.";
           const eventPayload = { question, answer, provider: aiProvider, mode: aiMode, model, imageModel: imageBase64 ? imageModel : null, hasImage: Boolean(imageBase64) };

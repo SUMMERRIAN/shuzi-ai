@@ -1825,6 +1825,29 @@ function buildKnowledgeNote(question) {
   return { title, subtitle, points, svg, prompt };
 }
 
+function createEmptyKnowledgeNote() {
+  return {
+    title: "",
+    subtitle: "",
+    points: [],
+    svg: "",
+    prompt: "",
+  };
+}
+
+function normalizeKnowledgePointPairs(points = []) {
+  if (!Array.isArray(points)) return [];
+  return points
+    .map((item) => {
+      if (Array.isArray(item)) return [String(item[0] || "").trim(), String(item[1] || "").trim()];
+      const name = String(item?.name || item?.title || "").trim();
+      const desc = [item?.desc, item?.tip].filter(Boolean).map((value) => String(value).trim()).join("；");
+      return [name, desc];
+    })
+    .filter(([name, desc]) => name && desc)
+    .slice(0, 8);
+}
+
 function App() {
   const [activePage, setActivePage] = useState("home");
   const [member, setMember] = useState({
@@ -1952,8 +1975,8 @@ function App() {
   const [mistakeArchiveSubject, setMistakeArchiveSubject] = useState("全部");
   const [selectedMistakeId, setSelectedMistakeId] = useState(defaultMistakes[0].id);
   const [mistakeAiStatus, setMistakeAiStatus] = useState("idle");
-  const [knowledgeQuestion, setKnowledgeQuestion] = useState("细胞结构");
-  const [knowledgeNote, setKnowledgeNote] = useState(() => buildKnowledgeNote("细胞结构"));
+  const [knowledgeQuestion, setKnowledgeQuestion] = useState("");
+  const [knowledgeNote, setKnowledgeNote] = useState(createEmptyKnowledgeNote);
   const [knowledgeAiStatus, setKnowledgeAiStatus] = useState("idle");
   const [knowledgeUseTemplate, setKnowledgeUseTemplate] = useState(false);
   const [knowledgePromptTemplate, setKnowledgePromptTemplate] = useState(defaultKnowledgePromptTemplate);
@@ -3544,6 +3567,11 @@ function App() {
   async function generateKnowledgeNote() {
     if (!requireMemberAction("AI生成知识图", generateKnowledgeNote, "知识图生成会调用AI图片与讲解能力，需要会员权限。")) return;
     if (knowledgeAiStatus === "loading") return;
+    const topic = knowledgeQuestion.trim();
+    if (!topic) {
+      setAiNotice({ page: activePage, message: "请先输入一个想理解的知识点。" });
+      return;
+    }
     setKnowledgeAiStatus("loading");
     console.info(
       "知识笔记AI提示词",
@@ -3552,14 +3580,14 @@ function App() {
         buildPageOnlySnapshot({
           page: "knowledge-note",
           answers,
-          payload: { topic: knowledgeQuestion, useTemplate: knowledgeUseTemplate },
+          payload: { topic, useTemplate: knowledgeUseTemplate },
         })
       )
     );
     try {
       clearAiNotice();
       const requestBody = {
-        topic: knowledgeQuestion,
+        topic,
         grade: answers.grade,
         subject: "",
         useTemplate: knowledgeUseTemplate,
@@ -3570,10 +3598,11 @@ function App() {
         body: JSON.stringify(requestBody),
       });
       if (data.imageBase64) {
+        const points = normalizeKnowledgePointPairs(data.note?.points || data.points);
         setKnowledgeNote({
-          title: data.note?.topic || knowledgeQuestion,
-          subtitle: "AI生成知识图",
-          points: [],
+          title: data.note?.title || data.note?.topic || topic,
+          subtitle: data.note?.summary || data.note?.subtitle || "AI生成知识图",
+          points,
           svg: `<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254"><image href="data:image/png;base64,${data.imageBase64}" width="1254" height="1254"/></svg>`,
           prompt: data.note?.prompt || "",
         });
@@ -3584,24 +3613,27 @@ function App() {
       }
       throw new Error("知识图后台任务暂未返回图片，请稍后重试。");
     } catch (error) {
-      showAiError(error, "服务器知识图生成暂时不可用，已使用前端知识图。");
+      showAiError(error, "服务器知识图生成暂时不可用，请稍后重试。");
     }
-    setKnowledgeNote(buildKnowledgeNote(knowledgeQuestion));
-    setKnowledgeAiStatus("done");
+    setKnowledgeAiStatus("idle");
   }
 
   function downloadKnowledgeImage() {
     if (!requireMemberAction("下载知识图", downloadKnowledgeImage, "下载学习资料和知识图片需要会员权限。")) return;
+    if (!knowledgeNote.svg) {
+      setAiNotice({ page: activePage, message: "请先生成知识图，再下载图片。" });
+      return;
+    }
     const svgBlob = new Blob([knowledgeNote.svg], { type: "image/svg+xml;charset=utf-8" });
     const url = URL.createObjectURL(svgBlob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${knowledgeNote.title}.svg`;
+    link.download = `${knowledgeNote.title || "AI知识图"}.svg`;
     document.body.appendChild(link);
     link.click();
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    recordDownload("下载知识图", `${knowledgeNote.title}.svg`, "AI知识图");
+    recordDownload("下载知识图", `${knowledgeNote.title || "AI知识图"}.svg`, "AI知识图");
   }
 
   async function runStrategyAi(section, mode, targetId = "") {
@@ -7576,7 +7608,9 @@ function ModernKnowledgeNotePage({
   promptTemplate,
   setPromptTemplate,
 }) {
-  const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(knowledgeNote.svg)}`;
+  const hasKnowledgeImage = Boolean(knowledgeNote?.svg);
+  const knowledgePoints = normalizeKnowledgePointPairs(knowledgeNote?.points);
+  const svgUrl = hasKnowledgeImage ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(knowledgeNote.svg)}` : "";
   return (
     <section className="stack knowledge-page">
       <section className="panel knowledge-control-panel">
@@ -7638,15 +7672,22 @@ function ModernKnowledgeNotePage({
           <div className="panel-heading">
             <div>
               <span className="eyebrow">图片预览</span>
-              <h2>{knowledgeNote.title}</h2>
+              <h2>{knowledgeNote.title || "生成后显示知识图"}</h2>
             </div>
-            <button type="button" className="preview-download-button" onClick={downloadKnowledgeImage}>
+            <button type="button" className="preview-download-button" onClick={downloadKnowledgeImage} disabled={!hasKnowledgeImage}>
               <Download size={17} />
               下载图片
             </button>
           </div>
           <div className="knowledge-image-frame">
-            <img src={svgUrl} alt={knowledgeNote.title} />
+            {hasKnowledgeImage ? (
+              <img src={svgUrl} alt={knowledgeNote.title || "AI知识图"} />
+            ) : (
+              <div className="knowledge-empty-state">
+                <ImageIcon size={32} />
+                <p>输入知识点后点击生成，这里会显示AI知识图。</p>
+              </div>
+            )}
           </div>
         </article>
 
@@ -7658,17 +7699,24 @@ function ModernKnowledgeNotePage({
             </div>
             <BookOpen size={24} />
           </div>
-          <p className="knowledge-subtitle">{knowledgeNote.subtitle}</p>
+          <p className="knowledge-subtitle">{knowledgeNote.subtitle || "生成后，这里会同步显示图中知识点的拆解说明。"}</p>
           <div className="knowledge-point-list">
-            {knowledgeNote.points.map(([name, desc], index) => (
-              <article key={name}>
-                <span>{index + 1}</span>
-                <div>
-                  <strong>{name}</strong>
-                  <p>{desc}</p>
-                </div>
-              </article>
-            ))}
+            {knowledgePoints.length ? (
+              knowledgePoints.map(([name, desc], index) => (
+                <article key={name}>
+                  <span>{index + 1}</span>
+                  <div>
+                    <strong>{name}</strong>
+                    <p>{desc}</p>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <div className="knowledge-empty-state compact">
+                <BookOpen size={28} />
+                <p>生成完成后，AI会把核心概念、结构关系和易错提醒整理在这里。</p>
+              </div>
+            )}
           </div>
         </aside>
       </section>
