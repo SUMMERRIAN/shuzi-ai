@@ -27,37 +27,15 @@ const openaiThinkingModel = process.env.OPENAI_MODEL_THINKING || process.env.OPE
 const geminiFastModel = process.env.GEMINI_MODEL_FAST || "gemini-2.5-flash";
 const geminiThinkingModel = process.env.GEMINI_MODEL_THINKING || "gemini-2.5-pro";
 const imageModel = process.env.OPENAI_MODEL_IMAGE || "gpt-image-2";
+const imageGenerationEnabled = process.env.OPENAI_IMAGE_GENERATION_ENABLED === "true";
+const imageQuality = process.env.OPENAI_IMAGE_QUALITY || "low";
+const imageSize = process.env.OPENAI_IMAGE_SIZE || "1024x1024";
 const transcriptionModel = process.env.OPENAI_MODEL_TRANSCRIBE || "gpt-4o-mini-transcribe";
 
 const knowledgeInfographicTemplate = `超精细教育信息图 [SUBJECT]，
-科学教科书插画风格，
-干净的学术学习版式，
-高度整理的学习笔记美学，
-带有虚线引导的结构注释图，
-物体周围带有多个教育说明标签，
-适合学生阅读的清晰视觉层级，
-教材风格，
-科学课堂海报设计，
-教育用途的结构注释与组件标注，
-手写笔记感与现代信息图设计结合，
-适合学生理解的可视化讲解，
-分步骤结构拆解，
-悬浮式标签与指示箭头，
-点状连接虚线，
-精准的科学可视化表现，
-居中构图，
-纯白干净背景，
-柔和粉彩配色，
-高可读性，
-现代教育出版物风格，
-干净留白边距，
-3D 科学渲染，
-Octane Render 渲染风格，
-次表面散射（Subsurface Scattering），
-超高细节纹理，
-电影级灯光，
-视觉化学习设计，
-教育海报美学。`;
+科学教科书插画风格，干净的学习笔记版式。
+包含标题、核心结构图、3到5个关键标注、底部一句总结。
+白色背景，文字尽量少但清楚，适合中学生复习。`;
 
 function normalizeAiProvider(provider = "") {
   return String(provider).toLowerCase() === "gemini" ? "gemini" : "openai";
@@ -72,12 +50,15 @@ function getOpenAITextModel(mode = "fast") {
 }
 
 async function generateOpenAIImage(prompt) {
+  if (!imageGenerationEnabled) {
+    throw createHttpError(503, "OPENAI_IMAGE_GENERATION_DISABLED", "AI生图已暂时关闭，避免继续消耗OpenAI费用。");
+  }
   try {
     const response = await openai.images.generate({
       model: imageModel,
       prompt,
-      size: "1024x1024",
-      quality: "high",
+      size: imageSize,
+      quality: imageQuality,
     });
     const imageBase64 = response?.data?.[0]?.b64_json || "";
     if (!imageBase64) {
@@ -1574,13 +1555,21 @@ app.post("/api/ai/mistakes/practice", requireAuth, async (req, res, next) => {
 function buildKnowledgeNotePrompt({ topic = "", grade = "", subject = "", useTemplate = false, template = "" } = {}) {
   const cleanTopic = String(topic || "").trim();
   const templateSource = String(template || "").trim() || knowledgeInfographicTemplate;
+  const compactTemplate = templateSource
+    .replaceAll("[SUBJECT]", cleanTopic)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 8)
+    .join("，")
+    .slice(0, 500);
   const templatePrompt =
     useTemplate === true || useTemplate === "true"
-      ? `\n\n专业知识图模板：\n${templateSource.replaceAll("[SUBJECT]", cleanTopic)}`
+      ? `\n\n参考版式要求：${compactTemplate}`
       : "";
   return (
-    `请为学生制作一张严谨、丰富、适合复习的中文知识图。主题：${cleanTopic}。学科：${subject || "不限"}。年级：${grade || "中学生"}。` +
-    "画面要求：信息量充足，包含标题、结构图、标注线、关键概念解释、底部总结，不要做简单示意图，风格专业清晰。" +
+    `制作一张中文学习知识图。主题：${cleanTopic}。学科：${subject || "不限"}。年级：${grade || "中学生"}。` +
+    "要求：白色背景，清楚大标题，中心结构图，3到5个短标签，底部一句学习总结。文字要少而准确，避免密集长文，适合学生复习。" +
     templatePrompt
   );
 }
