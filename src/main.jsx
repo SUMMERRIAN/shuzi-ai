@@ -1934,6 +1934,8 @@ function App() {
   const [knowledgeAiStatus, setKnowledgeAiStatus] = useState("idle");
   const [knowledgeUseTemplate, setKnowledgeUseTemplate] = useState(false);
   const [knowledgePromptTemplate, setKnowledgePromptTemplate] = useState(defaultKnowledgePromptTemplate);
+  const knowledgeJobRef = useRef("");
+  const knowledgePollingRef = useRef(false);
   const [forumPosts, setForumPosts] = useState(defaultForumPosts);
   const [activeForumPostId, setActiveForumPostId] = useState(defaultForumPosts[0].id);
   const [forumStatus, setForumStatus] = useState("idle");
@@ -2022,6 +2024,23 @@ function App() {
         setAuthToken("");
       });
   }, []);
+
+  useEffect(() => {
+    if (!member.isLoggedIn || knowledgePollingRef.current) return;
+    const savedJob = readDraftValue("knowledgeJob", null);
+    if (savedJob?.jobId) {
+      void pollKnowledgeJob(savedJob.jobId, savedJob.topic || knowledgeQuestion);
+      return;
+    }
+    apiRequest("/ai/knowledge-note/jobs/active")
+      .then((data) => {
+        if (!data.job?.jobId || knowledgePollingRef.current) return;
+        const topic = data.job.input?.topic || knowledgeQuestion;
+        writeDraftValue("knowledgeJob", { jobId: data.job.jobId, topic, startedAt: Date.now() });
+        void pollKnowledgeJob(data.job.jobId, topic);
+      })
+      .catch(() => {});
+  }, [member.isLoggedIn]);
 
   useEffect(() => {
     if (activePage === "calendar" && member.isLoggedIn) loadCalendarEvents();
@@ -3487,6 +3506,55 @@ function App() {
     printPage("打包下载错题PDF", "系统会把你选择的错题整理为打印版；在打印窗口中选择“另存为PDF”。");
   }
 
+  function applyKnowledgeJobResult(result, fallbackTopic = knowledgeQuestion) {
+    if (!result?.imageBase64) return false;
+    const title = result.note?.topic || fallbackTopic || "AI知识图";
+    setKnowledgeQuestion(title);
+    setKnowledgeNote({
+      title,
+      subtitle: "AI生成知识图",
+      points: [],
+      svg: `<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254"><image href="data:image/png;base64,${result.imageBase64}" width="1254" height="1254"/></svg>`,
+      prompt: result.note?.prompt || "",
+    });
+    setKnowledgeAiStatus("done");
+    knowledgeJobRef.current = "";
+    clearDraftValue("knowledgeJob");
+    clearAiNotice();
+    return true;
+  }
+
+  async function pollKnowledgeJob(jobId, fallbackTopic = knowledgeQuestion) {
+    if (!jobId || knowledgePollingRef.current) return;
+    knowledgePollingRef.current = true;
+    knowledgeJobRef.current = jobId;
+    setKnowledgeAiStatus("loading");
+    setAiNotice({ page: "knowledge-note", message: "知识图正在后台生成，刷新页面后也会继续恢复等待结果。" });
+    try {
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        const job = await apiRequest(`/ai/knowledge-note/jobs/${jobId}`);
+        if (job.status === "completed") {
+          if (applyKnowledgeJobResult(job.result || {}, fallbackTopic)) return;
+          throw new Error("知识图后台任务完成了，但没有返回图片。");
+        }
+        if (job.status === "failed") {
+          const jobError = job.error || {};
+          const detail = jobError.detail && jobError.detail !== jobError.message ? `；详情：${jobError.detail}` : "";
+          throw new Error(`${jobError.message || "知识图生成失败"}${detail}`);
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 5000));
+      }
+      throw new Error("知识图生成时间太长，系统会保留任务记录，请稍后刷新页面查看。");
+    } catch (error) {
+      showAiError(error, "知识图后台生成失败。");
+      setKnowledgeAiStatus("idle");
+      knowledgeJobRef.current = "";
+      clearDraftValue("knowledgeJob");
+    } finally {
+      knowledgePollingRef.current = false;
+    }
+  }
+
   async function generateKnowledgeNote() {
     if (!requireMemberAction("AI生成知识图", generateKnowledgeNote, "知识图生成会调用AI图片与讲解能力，需要会员权限。")) return;
     if (knowledgeAiStatus === "loading") return;
@@ -3515,35 +3583,13 @@ function App() {
         method: "POST",
         body: JSON.stringify(requestBody),
       });
-      let result = data;
       if (data.jobId) {
-        setAiNotice({ page: activePage, message: "知识图已进入后台生成，页面会自动刷新结果，请先不要重复点击。" });
-        for (let attempt = 0; attempt < 120; attempt += 1) {
-          await new Promise((resolve) => window.setTimeout(resolve, 5000));
-          const job = await apiRequest(`/ai/knowledge-note/jobs/${data.jobId}`);
-          if (job.status === "completed") {
-            result = job.result || {};
-            break;
-          }
-          if (job.status === "failed") {
-            const jobError = job.error || {};
-            const detail = jobError.detail && jobError.detail !== jobError.message ? `；详情：${jobError.detail}` : "";
-            throw new Error(`${jobError.message || "知识图生成失败"}${detail}`);
-          }
-        }
-      }
-      if (result.imageBase64) {
-        setKnowledgeNote({
-          title: knowledgeQuestion,
-          subtitle: "AI生成知识图",
-          points: [],
-          svg: `<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254"><image href="data:image/png;base64,${result.imageBase64}" width="1254" height="1254"/></svg>`,
-          prompt: result.note?.prompt || "",
-        });
-        setKnowledgeAiStatus("done");
-        clearAiNotice();
+        const savedInput = data.input || requestBody;
+        writeDraftValue("knowledgeJob", { jobId: data.jobId, topic: savedInput.topic || knowledgeQuestion, startedAt: Date.now() });
+        await pollKnowledgeJob(data.jobId, savedInput.topic || knowledgeQuestion);
         return;
       }
+      if (applyKnowledgeJobResult(data, knowledgeQuestion)) return;
       throw new Error("知识图后台任务暂未返回图片，请稍后重试。");
     } catch (error) {
       showAiError(error, "服务器知识图生成暂时不可用，已使用前端知识图。");

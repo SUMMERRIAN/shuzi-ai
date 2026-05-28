@@ -1634,6 +1634,27 @@ app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
     const payload = req.body || {};
     const topic = String(payload.topic || "").trim();
     if (!topic) return res.status(400).json({ error: "TOPIC_REQUIRED" });
+    const activeJob = (
+      await query(
+        `SELECT id, status, input, created_at
+         FROM ai_generation_jobs
+         WHERE user_id = $1
+           AND feature = 'knowledge-note'
+           AND status IN ('queued', 'processing')
+           AND created_at > now() - interval '30 minutes'
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [req.user.id]
+      )
+    ).rows[0];
+    if (activeJob) {
+      return res.status(202).json({
+        jobId: activeJob.id,
+        status: activeJob.status,
+        input: activeJob.input || {},
+        message: "已有知识图正在后台生成，已继续等待原任务，避免重复扣费。",
+      });
+    }
     const job = (
       await query(
         `INSERT INTO ai_generation_jobs (user_id, student_id, feature, status, input)
@@ -1646,6 +1667,40 @@ app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
       void processKnowledgeNoteJob(job.id, req.user.id, student.id, { ...payload, topic });
     }, 0);
     res.status(202).json({ jobId: job.id, status: job.status, message: "知识图已进入后台生成，请稍候。" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/ai/knowledge-note/jobs/active", requireAuth, async (req, res, next) => {
+  try {
+    const job = (
+      await query(
+        `SELECT id, feature, status, input, result, error, created_at, updated_at, completed_at
+         FROM ai_generation_jobs
+         WHERE user_id = $1
+           AND feature = 'knowledge-note'
+           AND status IN ('queued', 'processing')
+           AND created_at > now() - interval '30 minutes'
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [req.user.id]
+      )
+    ).rows[0];
+    res.json({
+      job: job
+        ? {
+            jobId: job.id,
+            status: job.status,
+            input: job.input || {},
+            result: job.result || {},
+            error: job.error || {},
+            createdAt: job.created_at,
+            updatedAt: job.updated_at,
+            completedAt: job.completed_at,
+          }
+        : null,
+    });
   } catch (error) {
     next(error);
   }
