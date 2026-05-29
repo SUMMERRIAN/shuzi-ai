@@ -5105,6 +5105,32 @@ audio {
   background: #f0f7ea;
 }
 
+.mistake-quality-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #68736b;
+  font-weight: 800;
+}
+
+.mistake-quality-actions button {
+  min-height: 34px;
+  border: 1px solid #dfe5da;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #344039;
+  font-weight: 900;
+  padding: 0 14px;
+}
+
+.mistake-quality-actions button.is-active {
+  border-color: #008653;
+  background: #0b1f18;
+  color: #ffffff;
+}
+
 .mistake-result-panel,
 .mistake-archive-toolbar,
 .mistake-archive-detail {
@@ -5235,7 +5261,7 @@ audio {
 
 .mistake-teacher-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 12px;
 }
 
