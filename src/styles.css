@@ -5197,6 +5197,13 @@ audio {
   color: #344039;
 }
 
+.mistake-report-view section > p,
+.mistake-teacher-grid p,
+.mistake-step-list p,
+.mistake-teacher-summary p {
+  white-space: pre-wrap;
+}
+
 .mistake-teacher-card {
   display: grid;
   gap: 16px;

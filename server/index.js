@@ -165,13 +165,69 @@ function normalizeTextList(value) {
   return [];
 }
 
+const mistakeReportHeadings = [
+  "题目识别",
+  "题目在问什么",
+  "考点定位",
+  "知识点",
+  "条件整理",
+  "已知条件",
+  "解题目标",
+  "核心思路",
+  "核心模型",
+  "核心模型分析",
+  "模型分析",
+  "标准步骤",
+  "解题步骤",
+  "第一问解析",
+  "第1问解析",
+  "第一问",
+  "第二问解析",
+  "第2问解析",
+  "第二问",
+  "第三问解析",
+  "第3问解析",
+  "第三问",
+  "分问解析",
+  "详细解析",
+  "标准证明",
+  "明确答案",
+  "最终答案",
+  "标准答案",
+  "类似题",
+  "试卷分析",
+  "错题清单",
+  "优先处理顺序",
+];
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function extractHeadingBlock(text, heading) {
   const source = String(text || "");
-  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const headingPattern = `(?:【${escaped}】|#{1,4}\\s*${escaped}|${escaped}[：:])`;
-  const nextHeadingPattern = "(?:【[^】]+】|#{1,4}\\s*[^\\n]+|\\n\\s*(?:题目识别|考点定位|条件整理|解题目标|核心思路|标准步骤|明确答案|类似题|试卷分析|错题清单|优先处理顺序)[：:])";
+  const escaped = escapeRegExp(heading);
+  const stopPattern = mistakeReportHeadings.map(escapeRegExp).join("|");
+  const headingPattern = `(?:^|\\n)\\s*(?:【\\s*${escaped}[^】]*】|#{1,4}\\s*${escaped}[^\\n]*|${escaped}[^\\n]{0,40}[：:])`;
+  const nextHeadingPattern = `(?:\\n\\s*(?:【\\s*(?:${stopPattern})[^】]*】|#{1,4}\\s*(?:${stopPattern})[^\\n]*|(?:${stopPattern})[^\\n]{0,40}[：:]))`;
   const match = source.match(new RegExp(`${headingPattern}\\s*([\\s\\S]*?)(?=${nextHeadingPattern}|$)`, "i"));
   return match ? match[1].trim() : "";
+}
+
+function extractFirstHeadingBlock(text, headings) {
+  for (const heading of headings) {
+    const block = extractHeadingBlock(text, heading);
+    if (block) return block;
+  }
+  return "";
+}
+
+function compactReportSummary(...values) {
+  const text = values
+    .map((value) => String(value || "").replace(/\s+/g, " ").trim())
+    .find(Boolean);
+  if (!text) return "";
+  return text.length > 180 ? `${text.slice(0, 180)}...` : text;
 }
 
 function splitTeacherSteps(block) {
@@ -197,15 +253,25 @@ function normalizeMistakePlainTextReport(reportText, fallback = {}) {
     throw createHttpError(502, "GEMINI_EMPTY_REPORT", "Gemini没有识别出题目内容，请换一张更清晰的图片或补充题干文字。");
   }
   const title = fallback.title && fallback.title !== "新上传学习材料" ? fallback.title : "错题分析";
-  const questionRestate = extractHeadingBlock(text, "题目识别") || extractHeadingBlock(text, "题目在问什么");
-  const testPoint = extractHeadingBlock(text, "考点定位") || extractHeadingBlock(text, "知识点");
-  const conditionsBlock = extractHeadingBlock(text, "条件整理") || extractHeadingBlock(text, "已知条件");
+  const questionRestate = extractFirstHeadingBlock(text, ["题目识别", "题目在问什么"]);
+  const testPoint = extractFirstHeadingBlock(text, ["考点定位", "知识点"]);
+  const conditionsBlock = extractFirstHeadingBlock(text, ["条件整理", "已知条件"]);
   const target = extractHeadingBlock(text, "解题目标");
-  const coreIdea = extractHeadingBlock(text, "核心思路");
-  const stepsBlock = extractHeadingBlock(text, "标准步骤") || extractHeadingBlock(text, "解题步骤");
-  const finalAnswer = extractHeadingBlock(text, "明确答案") || extractHeadingBlock(text, "最终答案");
+  const modelAnalysis = extractFirstHeadingBlock(text, ["核心模型分析", "核心模型", "模型分析"]);
+  const coreIdea = extractFirstHeadingBlock(text, ["核心思路"]) || compactReportSummary(modelAnalysis);
+  const stepsBlock = extractFirstHeadingBlock(text, ["标准步骤", "解题步骤", "标准证明"]);
+  const finalAnswer = extractFirstHeadingBlock(text, ["明确答案", "最终答案", "标准答案"]);
   const standardSteps = splitTeacherSteps(stepsBlock);
-  if (!questionRestate && !testPoint && !coreIdea && !standardSteps.length && !finalAnswer) {
+  const sections = [
+    { title: "核心模型", content: modelAnalysis },
+    { title: "第一问解析", content: extractFirstHeadingBlock(text, ["第一问解析", "第1问解析", "第一问"]) },
+    { title: "第二问解析", content: extractFirstHeadingBlock(text, ["第二问解析", "第2问解析", "第二问"]) },
+    { title: "第三问解析", content: extractFirstHeadingBlock(text, ["第三问解析", "第3问解析", "第三问"]) },
+    { title: "分问解析", content: extractHeadingBlock(text, "分问解析") },
+    { title: "详细解析", content: extractHeadingBlock(text, "详细解析") },
+  ].filter((section) => section.content && !/^无[。.]?$/.test(section.content.trim()));
+  if (stepsBlock && !standardSteps.length) sections.push({ title: "标准步骤", content: stepsBlock });
+  if (!questionRestate && !testPoint && !coreIdea && !standardSteps.length && !finalAnswer && !sections.length) {
     return {
       title,
       summary: "AI已返回讲解，但未能拆成标准栏目。请查看下方原文，或补充题干文字后重新生成。",
@@ -227,7 +293,7 @@ function normalizeMistakePlainTextReport(reportText, fallback = {}) {
   }
   return {
     title,
-    summary: [testPoint, coreIdea].filter(Boolean).join("；") || "AI已完成错题分析。",
+    summary: compactReportSummary(testPoint, modelAnalysis, coreIdea) || "AI已完成错题分析。",
     teacher_explanation: {
       question_restate: questionRestate,
       test_point: testPoint,
@@ -239,7 +305,7 @@ function normalizeMistakePlainTextReport(reportText, fallback = {}) {
       standard_steps: standardSteps,
       final_answer: finalAnswer,
     },
-    sections: [],
+    sections,
     extracted_questions: [
       {
         id: "mistake-1",
@@ -337,16 +403,20 @@ function buildMistakeWorkflowPrompt({ taskType, taskText, subject, grade, title,
     ].join("\n");
   }
   return [
-    "你现在只做“错题分析”，不要生成类似题，不要分析整张试卷，不要写后续训练建议。",
-    "请严格按照下面7个中文标题输出，每个标题都要保留，标题格式必须是【标题名】：",
-    "【题目识别】：先把图片里的题目内容复述出来；如果局部看不清，要明确说明哪一处看不清。",
-    "【考点定位】：说明这道题主要考查的知识点。",
-    "【条件整理】：逐条列出题目给出的条件、图形关系和已知量。",
-    "【解题目标】：说明这道题要求求什么、证明什么或判断什么。",
-    "【核心思路】：说明应该从哪条定理、性质或关系切入。",
-    "【标准步骤】：按“第1步、第2步、第3步……”讲清楚，每一步都解释为什么这样做。",
-    "【明确答案】：给出最后答案；如果图片信息不足，写“暂无法确认”，并说明还缺什么信息。",
-    "不要输出易错点、同类题方法、后续训练建议。",
+    "你现在只做“错题分析”，不要生成类似题，不要分析整张试卷，不要写易错点、同类题方法、后续训练建议。",
+    "你要像一位有经验的老师一样讲题：先把图片题目识别清楚，再找到核心模型，然后按小问逐问讲解到明确答案。不要只给结论，不要只写空泛模板。",
+    "请严格按照下面中文标题输出，标题格式必须是【标题名】：",
+    "【题目识别】：先完整复述图片里的题目内容；如果局部看不清，只说明具体看不清的位置，不要影响其他可识别部分的分析。",
+    "【考点定位】：说明这道题主要考查的知识点、常见模型或方法入口。",
+    "【条件整理】：逐条列出题目给出的条件、图形关系、数量关系和隐含条件。",
+    "【解题目标】：说明每个小问分别要求求什么、证明什么或判断什么。",
+    "【核心模型】：用老师讲课的方式说明本题的关键模型。几何题要优先识别全等、相似、旋转、手拉手、一线三直角、角平分线、中点、面积等模型；代数题要说明方程、函数、数形结合或分类讨论入口。",
+    "【第一问解析】：如果有第一问，按“思路分析 → 详细证明/计算 → 本问结论”讲清楚；每一步要说明为什么能这样做。",
+    "【第二问解析】：如果有第二问，按同样格式讲清楚；如果题目没有第二问，可以写“无”。",
+    "【第三问解析】：如果有第三问，必须分类讨论或列式推导到结果；如果题目没有第三问，可以写“无”。",
+    "【标准步骤】：把完整做题过程压缩成学生可以抄进错题本的步骤，按“第1步、第2步、第3步……”输出。",
+    "【明确答案】：给出最终答案、证明结论或结果范围；如果图片信息确实不足，写“暂无法确认”，并说明还缺什么信息。",
+    "重要要求：输出必须是中文自然语言，可以使用数学符号；不要输出JSON；不要出现 title、summary、teacher_explanation 等英文字段名。",
     ...common,
   ].join("\n");
 }
