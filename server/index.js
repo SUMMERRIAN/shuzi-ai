@@ -165,6 +165,99 @@ function normalizeTextList(value) {
   return [];
 }
 
+function extractHeadingBlock(text, heading) {
+  const source = String(text || "");
+  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const headingPattern = `(?:【${escaped}】|#{1,4}\\s*${escaped}|${escaped}[：:])`;
+  const nextHeadingPattern = "(?:【[^】]+】|#{1,4}\\s*[^\\n]+|\\n\\s*(?:题目识别|考点定位|条件整理|解题目标|核心思路|标准步骤|明确答案|类似题|试卷分析|错题清单|优先处理顺序)[：:])";
+  const match = source.match(new RegExp(`${headingPattern}\\s*([\\s\\S]*?)(?=${nextHeadingPattern}|$)`, "i"));
+  return match ? match[1].trim() : "";
+}
+
+function splitTeacherSteps(block) {
+  const clean = String(block || "").trim();
+  if (!clean) return [];
+  const lines = clean
+    .split(/\r?\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const sourceLines = lines.length > 1 ? lines : clean.split(/(?=(?:第?\d+[步、.．:]|\d+[、.．]))/).map((line) => line.trim()).filter(Boolean);
+  return sourceLines
+    .map((line, index) => {
+      const cleaned = line.replace(/^(?:第?(\d+)[步、.．:]|\d+[、.．])\s*/, "").trim();
+      return { step: `第${index + 1}步`, explanation: cleaned || line };
+    })
+    .filter((item) => item.explanation)
+    .slice(0, 8);
+}
+
+function normalizeMistakePlainTextReport(reportText, fallback = {}) {
+  const text = String(reportText || "").trim();
+  if (!text) {
+    throw createHttpError(502, "GEMINI_EMPTY_REPORT", "Gemini没有识别出题目内容，请换一张更清晰的图片或补充题干文字。");
+  }
+  const title = fallback.title && fallback.title !== "新上传学习材料" ? fallback.title : "错题分析";
+  const questionRestate = extractHeadingBlock(text, "题目识别") || extractHeadingBlock(text, "题目在问什么");
+  const testPoint = extractHeadingBlock(text, "考点定位") || extractHeadingBlock(text, "知识点");
+  const conditionsBlock = extractHeadingBlock(text, "条件整理") || extractHeadingBlock(text, "已知条件");
+  const target = extractHeadingBlock(text, "解题目标");
+  const coreIdea = extractHeadingBlock(text, "核心思路");
+  const stepsBlock = extractHeadingBlock(text, "标准步骤") || extractHeadingBlock(text, "解题步骤");
+  const finalAnswer = extractHeadingBlock(text, "明确答案") || extractHeadingBlock(text, "最终答案");
+  const standardSteps = splitTeacherSteps(stepsBlock);
+  if (!questionRestate && !testPoint && !coreIdea && !standardSteps.length && !finalAnswer) {
+    return {
+      title,
+      summary: "AI已返回讲解，但未能拆成标准栏目。请查看下方原文，或补充题干文字后重新生成。",
+      teacher_explanation: {
+        question_restate: "",
+        test_point: "",
+        known_conditions: [],
+        target: "",
+        core_idea: "",
+        standard_steps: [],
+        final_answer: "",
+      },
+      sections: [{ title: "AI讲解原文", content: text }],
+      extracted_questions: [],
+      similar_questions: [],
+      archive_note: "",
+      meta: { provider: fallback.provider || "gemini", model: fallback.model || "", taskType: fallback.taskType || "", normalized: true, source: "plain_text_fallback" },
+    };
+  }
+  return {
+    title,
+    summary: [testPoint, coreIdea].filter(Boolean).join("；") || "AI已完成错题分析。",
+    teacher_explanation: {
+      question_restate: questionRestate,
+      test_point: testPoint,
+      known_conditions: conditionsBlock
+        ? conditionsBlock.split(/\r?\n|；|;/).map((item) => item.replace(/^[-*•\d.、\s]+/, "").trim()).filter(Boolean)
+        : [],
+      target,
+      core_idea: coreIdea,
+      standard_steps: standardSteps,
+      final_answer: finalAnswer,
+    },
+    sections: [],
+    extracted_questions: [
+      {
+        id: "mistake-1",
+        title,
+        question_content: questionRestate,
+        subject: fallback.subject || "",
+        knowledge_points: testPoint ? [testPoint] : [],
+        correction_steps: standardSteps.map((item) => item.explanation),
+        standard_answer: finalAnswer,
+        is_likely_wrong: true,
+      },
+    ],
+    similar_questions: [],
+    archive_note: "",
+    meta: { provider: fallback.provider || "gemini", model: fallback.model || "", taskType: fallback.taskType || "", normalized: true, source: "plain_text" },
+  };
+}
+
 function normalizeMistakeWorkflowReport(reportText, fallback = {}) {
   const parsed = parseJsonText(reportText, {});
   const rawText = parsed.rawText || (!Object.keys(parsed).length ? String(reportText || "").trim() : "");
@@ -216,7 +309,7 @@ function normalizeMistakeWorkflowReport(reportText, fallback = {}) {
 function buildMistakeWorkflowPrompt({ taskType, taskText, subject, grade, title, source, prompt, archiveSnapshot, documentText }) {
   const common = [
     "你是树子AI错题专项老师。请严格根据上传材料和学生补充来处理，不要编造看不清的题干。",
-    "所有输出必须是可解析JSON，不要Markdown，不要代码块，不要英文键名以外的英文说明。",
+    "请使用中文自然语言输出，不要输出JSON，不要输出Markdown表格，不要出现英文字段名。",
     `任务类型：${taskText}`,
     `科目：${subject || "未指定"}`,
     `题目所属年级：${grade || "未指定"}`,
@@ -245,10 +338,15 @@ function buildMistakeWorkflowPrompt({ taskType, taskText, subject, grade, title,
   }
   return [
     "你现在只做“错题分析”，不要生成类似题，不要分析整张试卷，不要写后续训练建议。",
-    jsonInstruction("{title:string, summary:string, teacher_explanation:{question_restate:string, test_point:string, known_conditions:[string], target:string, core_idea:string, standard_steps:[{step:string, explanation:string}], final_answer:string}, extracted_questions:[{id:string,title:string,question_content:string,subject:string,knowledge_points:[string],correction_steps:[string],standard_answer:string,is_likely_wrong:boolean}], archive_note:string}"),
-    "标准讲解只包含以下栏目：题目识别、考点定位、条件整理、解题目标、核心思路、标准步骤、明确答案。",
+    "请严格按照下面7个中文标题输出，每个标题都要保留，标题格式必须是【标题名】：",
+    "【题目识别】：先把图片里的题目内容复述出来；如果局部看不清，要明确说明哪一处看不清。",
+    "【考点定位】：说明这道题主要考查的知识点。",
+    "【条件整理】：逐条列出题目给出的条件、图形关系和已知量。",
+    "【解题目标】：说明这道题要求求什么、证明什么或判断什么。",
+    "【核心思路】：说明应该从哪条定理、性质或关系切入。",
+    "【标准步骤】：按“第1步、第2步、第3步……”讲清楚，每一步都解释为什么这样做。",
+    "【明确答案】：给出最后答案；如果图片信息不足，写“暂无法确认”，并说明还缺什么信息。",
     "不要输出易错点、同类题方法、后续训练建议。",
-    "standard_steps 至少3步，最多6步，每一步都要像老师板书一样解释为什么这样做。",
     ...common,
   ].join("\n");
 }
@@ -1773,14 +1871,30 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
           archiveSnapshot,
           documentText,
         });
-        const reportText = await generateGeminiText({ model: geminiModel, prompt: geminiPrompt, files, responseMimeType: "application/json" });
-        const report = normalizeMistakeWorkflowReport(reportText, {
-          title,
-          provider: "gemini",
+        const reportText = await generateGeminiText({
           model: geminiModel,
-          taskType,
-          qualityMode: normalizedQualityMode,
+          prompt: geminiPrompt,
+          files,
+          temperature: taskType === "analyzeMistake" ? 0.1 : 0.25,
+          responseMimeType: taskType === "analyzeMistake" ? "" : "application/json",
         });
+        const report =
+          taskType === "analyzeMistake"
+            ? normalizeMistakePlainTextReport(reportText, {
+                title,
+                subject,
+                provider: "gemini",
+                model: geminiModel,
+                taskType,
+                qualityMode: normalizedQualityMode,
+              })
+            : normalizeMistakeWorkflowReport(reportText, {
+                title,
+                provider: "gemini",
+                model: geminiModel,
+                taskType,
+                qualityMode: normalizedQualityMode,
+              });
         const saved = await withTransaction(async (client) => {
           const fileRows = await saveUploadedFiles(client, req.user, student, "mistake", files);
           const row = (
