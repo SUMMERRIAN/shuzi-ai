@@ -1601,33 +1601,6 @@ Octane Render 渲染风格，
 视觉化学习设计，
 教育海报美学。`;
 
-const defaultMistakes = [
-  {
-    id: "mistake-1",
-    title: "数学二次函数综合题",
-    subject: "数学",
-    source: "月考试卷",
-    fileName: "月考数学错题.jpg",
-    type: "图片",
-    reason: "函数图像与几何条件结合时，关键点坐标没有先列出来。",
-    method: "先画图，标关键点，再列函数表达式和几何关系。",
-    date: "今天",
-    previewUrl: "",
-  },
-  {
-    id: "mistake-2",
-    title: "英语阅读长难句",
-    subject: "英语",
-    source: "周练阅读",
-    fileName: "英语阅读错题.pdf",
-    type: "PDF",
-    reason: "句子主干没有先找出来，导致选项判断靠感觉。",
-    method: "先划主谓宾，再看修饰成分和转折词。",
-    date: "昨天",
-    previewUrl: "",
-  },
-];
-
 function escapeSvgText(text) {
   return String(text)
     .replaceAll("&", "&amp;")
@@ -1967,7 +1940,6 @@ function App() {
   const [weeklyDiscussionDraft, setWeeklyDiscussionDraft] = useState(() => createWeeklyDiscussionDraft(savedPlanDraft?.weeklyDiscussionDraft));
   const dailyReflectionArchive = useMemo(() => collectDailyReflections(dailyReflectionDraft), [dailyReflectionDraft]);
   const weeklyDiscussionArchive = useMemo(() => collectWeeklyDiscussions(weeklyDiscussionDraft), [weeklyDiscussionDraft]);
-  const [mistakes, setMistakes] = useState(defaultMistakes);
   const [mistakeDraft, setMistakeDraft] = useState({
     title: "新上传学习材料",
     subject: "数学",
@@ -1980,14 +1952,10 @@ function App() {
     previewUrl: "",
     files: [],
   });
-  const [mistakeWorkspaceTab, setMistakeWorkspaceTab] = useState("ai");
   const [mistakePrompt, setMistakePrompt] = useState("");
   const [mistakeTaskType, setMistakeTaskType] = useState("");
   const [mistakeQuestionScope, setMistakeQuestionScope] = useState("auto");
   const [mistakeResult, setMistakeResult] = useState(null);
-  const [selectedArchiveMistakeIds, setSelectedArchiveMistakeIds] = useState([]);
-  const [mistakeArchiveSubject, setMistakeArchiveSubject] = useState("全部");
-  const [selectedMistakeId, setSelectedMistakeId] = useState(defaultMistakes[0].id);
   const [mistakeAiStatus, setMistakeAiStatus] = useState("idle");
   const [knowledgeQuestion, setKnowledgeQuestion] = useState("");
   const [knowledgeNote, setKnowledgeNote] = useState(createEmptyKnowledgeNote);
@@ -3429,7 +3397,7 @@ function App() {
   }
 
   async function handleMistakeFile(event) {
-    if (!requireMemberAction("上传学习材料到错题专项", null, "上传的错题、作业或试卷会进入学生个人错题档案，后续用于AI分析和训练，需要会员权限。")) {
+    if (!requireMemberAction("上传学习材料到错题专项", null, "上传的错题、作业或试卷会用于AI分析和训练，需要会员权限。")) {
       event.target.value = "";
       return;
     }
@@ -3474,53 +3442,12 @@ function App() {
     const task = mistakeQuickTasks[taskType];
     if (!task) return;
     setMistakeTaskType(taskType);
-    setMistakeWorkspaceTab("ai");
-  }
-
-  function normalizeMistakeResultToArchive(report, savedId) {
-    const teacher = report?.teacher_explanation || {};
-    const extracted = Array.isArray(report?.extracted_questions) && report.extracted_questions.length
-      ? report.extracted_questions
-      : [
-          {
-            title: report?.title || mistakeDraft.title || "AI整理结果",
-            question_content: teacher.question_restate || report?.summary || "",
-            subject: mistakeDraft.subject,
-            error_type: teacher.error_diagnosis || report?.analysis?.error_reason || report?.error_reason || "等待确认",
-            knowledge_points: report?.analysis?.knowledge_points || report?.knowledge_points || [],
-            method_gap: teacher.core_idea || report?.analysis?.method_gap || report?.method_gap || "",
-            correction_steps: Array.isArray(teacher.standard_steps)
-              ? teacher.standard_steps.map((step) => `${step.step || ""} ${step.explanation || ""}`.trim())
-              : report?.analysis?.correction_steps || report?.correction_steps || "",
-            suggestion: Array.isArray(report?.analysis?.training_suggestions)
-              ? report.analysis.training_suggestions.join("；")
-              : teacher.method_summary || report?.analysis?.training_suggestions || report?.review_schedule || "",
-          },
-        ];
-
-    return extracted.map((question, index) => ({
-      id: `${savedId || "mistake"}-${Date.now()}-${index}`,
-      title: question.title || `错题 ${index + 1}`,
-      subject: question.subject || mistakeDraft.subject,
-      grade: mistakeDraft.grade,
-      source: mistakeDraft.source || "错题专项",
-      fileName: mistakeDraft.fileName || "未上传文件",
-      type: mistakeQuickTasks[mistakeTaskType]?.label || "AI处理",
-      reason: question.error_type || report?.analysis?.error_reason || "等待补充错因。",
-      method: question.method_gap || question.correction_steps || report?.analysis?.method_gap || "等待补充解题方法或思路。",
-      date: "刚刚",
-      previewUrl: mistakeDraft.previewUrl,
-      content: question.question_content || "",
-      knowledgePoints: question.knowledge_points || [],
-      suggestion: question.suggestion || report?.analysis?.review_schedule || "",
-      report,
-    }));
   }
 
   async function runMistakeWorkspaceAi() {
     const activeMistakeTaskType = mistakeTaskType || "custom";
     const taskLabel = mistakeQuickTasks[mistakeTaskType]?.label || "AI处理错题";
-    if (!requireMemberAction(taskLabel, runMistakeWorkspaceAi, "错题专项会调用AI分析材料并写入学生个人错题档案，需要登录并开通会员。")) return;
+    if (!requireMemberAction(taskLabel, runMistakeWorkspaceAi, "错题专项会调用AI分析材料并生成学习报告，需要登录并开通会员。")) return;
     if (mistakeAiStatus === "loading") return;
     if (!mistakePrompt.trim() && !(mistakeDraft.files || []).length) {
       setAiNotice({ page: activePage, message: "请先上传材料，或者在输入框里写清楚你想让AI处理什么。" });
@@ -3577,29 +3504,13 @@ function App() {
         aiJobIntervalMs: 5000,
       });
       const report = data.report || {};
-      const nextItems = normalizeMistakeResultToArchive(report, data.saved?.id);
       setMistakeResult(report);
-      setMistakes((prev) => {
-        const nextKeys = new Set(nextItems.map((item) => `${item.subject}|${item.title}|${item.fileName}`));
-        return [...nextItems, ...prev.filter((item) => !nextKeys.has(`${item.subject}|${item.title}|${item.fileName}`))];
-      });
-      setSelectedMistakeId(nextItems[0]?.id || selectedMistakeId);
       setMistakeAiStatus("done");
       clearAiNotice();
     } catch (error) {
       showAiError(error, "AI处理暂时不可用，请稍后再试。");
       setMistakeAiStatus("idle");
     }
-  }
-
-  function toggleArchiveMistake(mistakeId) {
-    setSelectedArchiveMistakeIds((prev) =>
-      prev.includes(mistakeId) ? prev.filter((id) => id !== mistakeId) : [...prev, mistakeId]
-    );
-  }
-
-  function selectAllArchiveMistakes(items) {
-    setSelectedArchiveMistakeIds(items.map((item) => item.id));
   }
 
   function downloadMistakePdf() {
@@ -3641,16 +3552,6 @@ function App() {
       </html>`);
     win.document.close();
     recordDownload("下载错题分析PDF", title, window.location.href);
-  }
-
-  function downloadSelectedMistakesPdf(visibleItems) {
-    if (!requireMemberAction("打包下载错题PDF", () => downloadSelectedMistakesPdf(visibleItems), "错题档案打包下载需要登录并开通会员。")) return;
-    const selectedItems = visibleItems.filter((item) => selectedArchiveMistakeIds.includes(item.id));
-    if (!selectedItems.length) {
-      setAiNotice({ page: activePage, message: "请先在错题档案里选择至少一道错题。" });
-      return;
-    }
-    printPage("打包下载错题PDF", "系统会把你选择的错题整理为打印版；在打印窗口中选择“另存为PDF”。");
   }
 
   async function generateKnowledgeNote() {
@@ -4246,10 +4147,7 @@ function App() {
 
         {activePage === "mistakes" && (
           <MistakeSpecialPage
-            mistakes={mistakes}
             mistakeDraft={mistakeDraft}
-            mistakeWorkspaceTab={mistakeWorkspaceTab}
-            setMistakeWorkspaceTab={setMistakeWorkspaceTab}
             mistakePrompt={mistakePrompt}
             setMistakePrompt={setMistakePrompt}
             mistakeTaskType={mistakeTaskType}
@@ -4257,20 +4155,12 @@ function App() {
             setMistakeQuestionScope={setMistakeQuestionScope}
             applyMistakeQuickTask={applyMistakeQuickTask}
             mistakeResult={mistakeResult}
-            selectedArchiveMistakeIds={selectedArchiveMistakeIds}
-            mistakeArchiveSubject={mistakeArchiveSubject}
-            setMistakeArchiveSubject={setMistakeArchiveSubject}
             updateMistakeDraft={updateMistakeDraft}
             handleMistakeFile={handleMistakeFile}
             removeMistakeUpload={removeMistakeUpload}
             runMistakeWorkspaceAi={runMistakeWorkspaceAi}
-            selectedMistakeId={selectedMistakeId}
-            setSelectedMistakeId={setSelectedMistakeId}
             mistakeAiStatus={mistakeAiStatus}
-            toggleArchiveMistake={toggleArchiveMistake}
-            selectAllArchiveMistakes={selectAllArchiveMistakes}
             downloadMistakePdf={downloadMistakePdf}
-            downloadSelectedMistakesPdf={downloadSelectedMistakesPdf}
           />
         )}
 
@@ -7360,10 +7250,7 @@ function ReflectionDiscussionSection({
 }
 
 function MistakeSpecialPage({
-  mistakes,
   mistakeDraft,
-  mistakeWorkspaceTab,
-  setMistakeWorkspaceTab,
   mistakePrompt,
   setMistakePrompt,
   mistakeTaskType,
@@ -7371,246 +7258,141 @@ function MistakeSpecialPage({
   setMistakeQuestionScope,
   applyMistakeQuickTask,
   mistakeResult,
-  selectedArchiveMistakeIds,
-  mistakeArchiveSubject,
-  setMistakeArchiveSubject,
   updateMistakeDraft,
   handleMistakeFile,
   removeMistakeUpload,
   runMistakeWorkspaceAi,
-  selectedMistakeId,
-  setSelectedMistakeId,
   mistakeAiStatus,
-  toggleArchiveMistake,
-  selectAllArchiveMistakes,
   downloadMistakePdf,
-  downloadSelectedMistakesPdf,
 }) {
-  const selected = mistakes.find((item) => item.id === selectedMistakeId) || mistakes[0];
-  const uniqueMistakes = [];
-  const seenMistakes = new Set();
-  mistakes.forEach((mistake) => {
-    const key = `${mistake.subject}|${mistake.title}|${mistake.fileName}`;
-    if (!seenMistakes.has(key)) {
-      seenMistakes.add(key);
-      uniqueMistakes.push(mistake);
-    }
-  });
-  const visibleMistakes =
-    mistakeArchiveSubject === "全部" ? uniqueMistakes : uniqueMistakes.filter((item) => item.subject === mistakeArchiveSubject);
-  const selectedArchiveItems = visibleMistakes.filter((item) => selectedArchiveMistakeIds.includes(item.id));
-
   return (
     <section className="stack mistake-workspace">
-      <div className="mistake-tabs">
-        <button type="button" className={mistakeWorkspaceTab === "ai" ? "is-active" : ""} onClick={() => setMistakeWorkspaceTab("ai")}>
-          AI错题处理
-        </button>
-        <button type="button" className={mistakeWorkspaceTab === "archive" ? "is-active" : ""} onClick={() => setMistakeWorkspaceTab("archive")}>
-          错题档案
-          <span>{uniqueMistakes.length}</span>
-        </button>
-      </div>
-
-      {mistakeWorkspaceTab === "ai" ? (
-        <section className="mistake-ai-stage">
-          <div className="mistake-chat-shell">
-            <div className="mistake-upload-strip">
-              {(mistakeDraft.files || []).length ? (
-                mistakeDraft.files.map((item) => (
-                  <article key={item.id}>
-                    {item.previewUrl ? <img src={item.previewUrl} alt={item.name} /> : <FileText size={20} />}
-                    <div>
-                      <strong>{item.name}</strong>
-                      <span>{Math.max(1, Math.round(item.size / 1024))} KB</span>
-                    </div>
-                    <button type="button" onClick={() => removeMistakeUpload(item.id)} aria-label="移除文件">
-                      <Trash2 size={15} />
-                    </button>
-                  </article>
-                ))
-              ) : (
-                <p>可以上传图片、PDF、Word、Excel，也可以只输入问题。</p>
-              )}
-            </div>
-
-            <div className="mistake-meta-row">
-              <label>
-                <span>科目</span>
-                <select value={mistakeDraft.subject} onChange={(event) => updateMistakeDraft("subject", event.target.value)}>
-                  {mistakeSubjects.map((subject) => (
-                    <option key={subject} value={subject}>
-                      {subject}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>题目所属年级</span>
-                <select value={mistakeDraft.grade} onChange={(event) => updateMistakeDraft("grade", event.target.value)}>
-                  {mistakeGradeOptions.map((grade) => (
-                    <option key={grade} value={grade}>
-                      {grade}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>标题</span>
-                <input value={mistakeDraft.title} onChange={(event) => updateMistakeDraft("title", event.target.value)} />
-              </label>
-            </div>
-
-            <div className="mistake-prompt-box">
-              <label className="mistake-plus-button">
-                <Plus size={22} />
-                <input
-                  type="file"
-                  multiple
-                  accept="image/*,.pdf,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
-                  onChange={handleMistakeFile}
-                />
-              </label>
-              <textarea
-                value={mistakePrompt}
-                onChange={(event) => setMistakePrompt(event.target.value)}
-                placeholder="有问题，尽管问。也可以先点下面的快捷任务，再补充自己的要求。"
-              />
-              <button type="button" className="mistake-send-button" onClick={runMistakeWorkspaceAi} disabled={mistakeAiStatus === "loading"}>
-                {mistakeAiStatus === "loading" ? <Loader2 className="spin" size={20} /> : <Send size={20} />}
-              </button>
-            </div>
-
-            <div className="mistake-scope-actions">
-              <span>处理范围</span>
-              <div>
-                {mistakeQuestionScopes.map((scope) => (
-                  <button
-                    key={scope.id}
-                    type="button"
-                    className={mistakeQuestionScope === scope.id ? "is-active" : ""}
-                    onClick={() => setMistakeQuestionScope(scope.id)}
-                  >
-                    {scope.label}
+      <section className="mistake-ai-stage">
+        <div className="mistake-chat-shell">
+          <div className="mistake-upload-strip">
+            {(mistakeDraft.files || []).length ? (
+              mistakeDraft.files.map((item) => (
+                <article key={item.id}>
+                  {item.previewUrl ? <img src={item.previewUrl} alt={item.name} /> : <FileText size={20} />}
+                  <div>
+                    <strong>{item.name}</strong>
+                    <span>{Math.max(1, Math.round(item.size / 1024))} KB</span>
+                  </div>
+                  <button type="button" onClick={() => removeMistakeUpload(item.id)} aria-label="移除文件">
+                    <Trash2 size={15} />
                   </button>
-                ))}
-              </div>
-              <p>生成类似题会参考当前范围，并严格按所选年级出题。</p>
-            </div>
-
-            <div className="mistake-quick-actions">
-              {Object.entries(mistakeQuickTasks).map(([key, task]) => (
-                <button
-                  key={key}
-                  type="button"
-                  className={mistakeTaskType === key ? "is-active" : ""}
-                  onClick={() => applyMistakeQuickTask(key)}
-                >
-                  <Sparkles size={16} />
-                  {task.label}
-                </button>
-              ))}
-            </div>
+                </article>
+              ))
+            ) : (
+              <p>可以上传图片、PDF、Word、Excel，也可以只输入问题。</p>
+            )}
           </div>
 
-          <article className="mistake-result-panel">
-            <div className="panel-heading">
-              <div>
-                <span className="eyebrow">AI输出</span>
-                <h2>{mistakeResult?.title || "分析完成后，这里会生成干净完整的学习报告"}</h2>
-              </div>
-              <button type="button" className="ghost-action" onClick={downloadMistakePdf} disabled={!mistakeResult}>
-                <FileDown size={17} />
-                下载PDF
-              </button>
-            </div>
-            {mistakeResult ? (
-              <MistakeReportView report={mistakeResult} />
-            ) : mistakeAiStatus === "loading" ? (
-              <div className="mistake-empty-result">
-                <Loader2 className="spin" size={28} />
-                <p>高质量分析排队中。系统会等待高级模型并自动重试，请不要重复点击。</p>
-              </div>
-            ) : (
-              <div className="mistake-empty-result">
-                <Sparkles size={28} />
-                <p>上传材料后，点击快捷任务，确认发送。AI会把结果整理成适合学生阅读的报告，并自动沉淀到错题档案。</p>
-              </div>
-            )}
-          </article>
-        </section>
-      ) : (
-        <section className="mistake-archive-stage">
-          <article className="panel mistake-archive-toolbar">
-            <div>
-              <span className="eyebrow">个人错题库</span>
-              <h2>选择错题，打包成PDF下载</h2>
-            </div>
-            <div className="mistake-archive-actions">
-              <select value={mistakeArchiveSubject} onChange={(event) => setMistakeArchiveSubject(event.target.value)}>
-                <option value="全部">全部科目</option>
+          <div className="mistake-meta-row">
+            <label>
+              <span>科目</span>
+              <select value={mistakeDraft.subject} onChange={(event) => updateMistakeDraft("subject", event.target.value)}>
                 {mistakeSubjects.map((subject) => (
                   <option key={subject} value={subject}>
                     {subject}
                   </option>
                 ))}
               </select>
-              <button type="button" className="ghost-action" onClick={() => selectAllArchiveMistakes(visibleMistakes)}>
-                <CheckCircle2 size={17} />
-                全选
-              </button>
-              <button type="button" className="primary-action" onClick={() => downloadSelectedMistakesPdf(visibleMistakes)}>
-                <FileDown size={17} />
-                下载PDF
-              </button>
-            </div>
-          </article>
+            </label>
+            <label>
+              <span>题目所属年级</span>
+              <select value={mistakeDraft.grade} onChange={(event) => updateMistakeDraft("grade", event.target.value)}>
+                {mistakeGradeOptions.map((grade) => (
+                  <option key={grade} value={grade}>
+                    {grade}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>标题</span>
+              <input value={mistakeDraft.title} onChange={(event) => updateMistakeDraft("title", event.target.value)} />
+            </label>
+          </div>
 
-          <div className="mistake-archive-layout">
-            <div className="mistake-archive-list">
-              {visibleMistakes.map((mistake) => (
-                <article
-                  key={mistake.id}
-                  className={selectedMistakeId === mistake.id ? "mistake-archive-card is-active" : "mistake-archive-card"}
+          <div className="mistake-prompt-box">
+            <label className="mistake-plus-button">
+              <Plus size={22} />
+              <input
+                type="file"
+                multiple
+                accept="image/*,.pdf,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+                onChange={handleMistakeFile}
+              />
+            </label>
+            <textarea
+              value={mistakePrompt}
+              onChange={(event) => setMistakePrompt(event.target.value)}
+              placeholder="有问题，尽管问。也可以先点下面的快捷任务，再补充自己的要求。"
+            />
+            <button type="button" className="mistake-send-button" onClick={runMistakeWorkspaceAi} disabled={mistakeAiStatus === "loading"}>
+              {mistakeAiStatus === "loading" ? <Loader2 className="spin" size={20} /> : <Send size={20} />}
+            </button>
+          </div>
+
+          <div className="mistake-scope-actions">
+            <span>处理范围</span>
+            <div>
+              {mistakeQuestionScopes.map((scope) => (
+                <button
+                  key={scope.id}
+                  type="button"
+                  className={mistakeQuestionScope === scope.id ? "is-active" : ""}
+                  onClick={() => setMistakeQuestionScope(scope.id)}
                 >
-                  <input
-                    type="checkbox"
-                    checked={selectedArchiveMistakeIds.includes(mistake.id)}
-                    onChange={() => toggleArchiveMistake(mistake.id)}
-                    aria-label={`选择${mistake.title}`}
-                  />
-                  <button type="button" onClick={() => setSelectedMistakeId(mistake.id)}>
-                    <span>{mistake.subject} · {mistake.date}</span>
-                    <strong>{mistake.title}</strong>
-                    <p>{mistake.reason}</p>
-                  </button>
-                </article>
+                  {scope.label}
+                </button>
               ))}
             </div>
-            <article className="panel mistake-archive-detail">
-              {selected ? (
-                <>
-                  <span className="eyebrow">错题详情</span>
-                  <h2>{selected.title}</h2>
-                  <p><strong>科目：</strong>{selected.subject}</p>
-                  <p><strong>题目所属年级：</strong>{selected.grade || "未标注"}</p>
-                  <p><strong>来源：</strong>{selected.source}</p>
-                  <p><strong>错因：</strong>{selected.reason}</p>
-                  <p><strong>方法：</strong>{selected.method}</p>
-                  {selected.knowledgePoints?.length ? <p><strong>知识点：</strong>{selected.knowledgePoints.join("、")}</p> : null}
-                  {selected.suggestion ? <p><strong>训练建议：</strong>{selected.suggestion}</p> : null}
-                  <p className="section-helper">已选择 {selectedArchiveItems.length} 道错题用于打包下载。</p>
-                </>
-              ) : (
-                <div className="mistake-empty-result">
-                  <Library size={28} />
-                  <p>错题档案为空。先在AI错题处理页上传材料并完成分析。</p>
-                </div>
-              )}
-            </article>
+            <p>生成类似题会参考当前范围，并严格按所选年级出题。</p>
           </div>
-        </section>
-      )}
+
+          <div className="mistake-quick-actions">
+            {Object.entries(mistakeQuickTasks).map(([key, task]) => (
+              <button
+                key={key}
+                type="button"
+                className={mistakeTaskType === key ? "is-active" : ""}
+                onClick={() => applyMistakeQuickTask(key)}
+              >
+                <Sparkles size={16} />
+                {task.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <article className="mistake-result-panel">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">AI输出</span>
+              <h2>{mistakeResult?.title || "分析完成后，这里会生成干净完整的学习报告"}</h2>
+            </div>
+            <button type="button" className="ghost-action" onClick={downloadMistakePdf} disabled={!mistakeResult}>
+              <FileDown size={17} />
+              下载PDF
+            </button>
+          </div>
+          {mistakeResult ? (
+            <MistakeReportView report={mistakeResult} />
+          ) : mistakeAiStatus === "loading" ? (
+            <div className="mistake-empty-result">
+              <Loader2 className="spin" size={28} />
+              <p>高质量分析排队中。系统会等待高级模型并自动重试，请不要重复点击。</p>
+            </div>
+          ) : (
+            <div className="mistake-empty-result">
+              <Sparkles size={28} />
+              <p>上传材料后，点击快捷任务，确认发送。AI会把结果整理成适合学生阅读的报告。</p>
+            </div>
+          )}
+        </article>
+      </section>
     </section>
   );
 }

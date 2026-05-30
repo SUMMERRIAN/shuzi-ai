@@ -4872,51 +4872,6 @@ audio {
   margin-top: 8px;
 }
 
-.mistake-tabs {
-  display: inline-flex;
-  width: fit-content;
-  gap: 8px;
-  padding: 6px;
-  border: 1px solid #dfe5da;
-  border-radius: 10px;
-  background: #ffffff;
-}
-
-.mistake-tabs button {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 40px;
-  padding: 0 18px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: #344039;
-  font-weight: 900;
-  cursor: pointer;
-}
-
-.mistake-tabs button.is-active {
-  background: #10221b;
-  color: #ffffff;
-}
-
-.mistake-tabs span {
-  display: inline-grid;
-  min-width: 22px;
-  height: 22px;
-  place-items: center;
-  border-radius: 999px;
-  background: rgba(0, 134, 83, 0.12);
-  color: #008653;
-  font-size: 12px;
-}
-
-.mistake-tabs button.is-active span {
-  background: rgba(255, 255, 255, 0.2);
-  color: #ffffff;
-}
-
 .mistake-ai-stage {
   display: grid;
   grid-template-columns: minmax(340px, 0.42fr) minmax(0, 1fr);
