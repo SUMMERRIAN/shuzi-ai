@@ -317,9 +317,13 @@ function normalizeMistakePlainTextReport(reportText, fallback = {}) {
     throw createHttpError(502, "GEMINI_EMPTY_REPORT", "Gemini没有识别出题目内容，请换一张更清晰的图片或补充题干文字。");
   }
   const title = fallback.title && fallback.title !== "新上传学习材料" ? fallback.title : "错题分析";
+  const recognitionText = compactRepeatedMistakeText(normalizeStudentMathText(fallback.recognitionText || ""));
+  const sections = [];
+  if (recognitionText) sections.push({ title: "AI识别到的题目", content: recognitionText });
+  sections.push({ title: "AI讲解", content: text });
   return {
     title,
-    summary: "AI已完成错题讲解。",
+    summary: recognitionText ? "AI已先识别题目，再完成错题讲解。" : "AI已完成错题讲解。",
     teacher_explanation: {
       question_restate: "",
       test_point: "",
@@ -329,11 +333,17 @@ function normalizeMistakePlainTextReport(reportText, fallback = {}) {
       standard_steps: [],
       final_answer: "",
     },
-    sections: [{ title: "AI讲解", content: text }],
+    sections,
     extracted_questions: [],
     similar_questions: [],
     archive_note: "",
-    meta: { provider: fallback.provider || "gemini", model: fallback.model || "", taskType: fallback.taskType || "", normalized: true, source: "plain_text_raw" },
+    meta: {
+      provider: fallback.provider || "gemini",
+      model: fallback.model || "",
+      taskType: fallback.taskType || "",
+      normalized: true,
+      source: recognitionText ? "two_stage_plain_text" : "plain_text_raw",
+    },
   };
 }
 
@@ -428,6 +438,46 @@ function buildMistakeWorkflowPrompt({ taskType, taskText, subject, grade, title,
     "请使用中文自然语言，可以使用普通数学符号，例如 △ABC、∠ACB=90°、CA=CB、△BCD≌△EFB。",
     "不要使用Markdown格式，不要使用LaTeX公式，不要写 $...$、\\triangle、\\angle、\\frac 这一类代码。不要输出JSON，不要输出英文字段名。",
     ...common,
+  ].join("\n");
+}
+
+function buildMistakeRecognitionPrompt({ subject, grade, title, prompt, documentText }) {
+  return [
+    "你现在只做第一步：识别题目。",
+    "请根据上传的图片、PDF或文字材料，整理出题目本身，不要讲解，不要求解，不要猜答案。",
+    "如果有几何图，请尽量识别点、线、角、相等关系、垂直或平行关系、动点位置和每一问的要求。",
+    "如果图片有看不清的地方，请直接写明“看不清：……”，不要编造。",
+    "输出使用中文自然语言，按下面四项写：",
+    "题干：",
+    "已知条件：",
+    "要求：",
+    "看不清或不确定：",
+    `科目：${subject || "未指定"}`,
+    `题目所属年级：${grade || "未指定"}`,
+    `标题：${title || "错题"}`,
+    `学生补充：${prompt || "无"}`,
+    `文档文字摘录：\n${documentText || "无可提取文档文字；请主要结合附件内容识别。"}`,
+  ].join("\n");
+}
+
+function buildMistakeExplanationPrompt({ taskText, subject, grade, title, prompt, archiveSnapshot, recognitionText }) {
+  const studentGrade = grade || "学生当前年级";
+  const subjectText = subject || "未指定科目";
+  return [
+    "你现在只做第二步：根据已经识别出的题目讲解。",
+    `请帮一名${studentGrade}学生讲解这道${subjectText}题，目标是让学生听懂。`,
+    "请像老师讲题一样输出：先说核心思路，再按小问讲关键步骤，最后给出答案或结论。",
+    "如果题目涉及多种位置、多种情况或分类讨论，请给出清楚的分类框架；每一种情况都要有必要推导、关键关系和结论，但不要重复已经证明过的内容。",
+    "每一问只保留一种最清楚的解法。不要反复否定自己，不要罗列多套备选方法，不要边讲边推翻前文。",
+    "如果识别结果不完整，或某一步确实无法判断，请直接说明哪里不确定；不要硬编条件、过程或答案。",
+    "内容完整优先，整体控制在2500字以内。请使用中文自然语言和普通数学符号，不要输出JSON，不要输出Markdown表格，不要使用LaTeX代码。",
+    `任务类型：${taskText}`,
+    `科目：${subjectText}`,
+    `题目所属年级：${grade || "未指定"}`,
+    `标题：${title || "错题"}`,
+    `学生补充要求：${prompt || "无"}`,
+    `学生档案摘要：${archiveSnapshot || "{}"}`,
+    `第一步识别到的题目：\n${recognitionText || "未识别到题目。请说明无法讲解。"}`,
   ].join("\n");
 }
 
@@ -1942,28 +1992,59 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
       startAiJob(job.id, async () => {
         await assertTokenBalance(req.user.id, tokenCost);
         const documentText = await makeDocumentTextSummary(files);
-        const geminiPrompt = buildMistakeWorkflowPrompt({
-          taskType,
-          taskText: taskMap[taskType] || taskMap.analyzeMistake,
-          subject,
-          grade,
-          title,
-          source,
-          prompt,
-          archiveSnapshot,
-          documentText,
-        });
-        const reportText = await generateGeminiText({
-          model: geminiModel,
-          prompt: geminiPrompt,
-          files,
-          temperature: usePlainMistakeText ? 0.1 : 0.25,
-          responseMimeType: usePlainMistakeText ? "" : "application/json",
-          thinkingBudget:
-            usePlainMistakeText
-              ? Number(process.env.GEMINI_MISTAKE_THINKING_BUDGET || (normalizedQualityMode === "high" ? 2048 : 1024))
-              : undefined,
-        });
+        let recognitionText = "";
+        let reportText = "";
+        if (usePlainMistakeText) {
+          if (files.length) {
+            recognitionText = await generateGeminiText({
+              model: geminiModel,
+              prompt: buildMistakeRecognitionPrompt({ subject, grade, title, prompt, documentText }),
+              files,
+              temperature: 0.05,
+              responseMimeType: "",
+              thinkingBudget: Number(process.env.GEMINI_MISTAKE_RECOGNITION_THINKING_BUDGET || 512),
+            });
+          } else {
+            recognitionText = [prompt, documentText].filter((item) => String(item || "").trim()).join("\n\n");
+          }
+          recognitionText = compactRepeatedMistakeText(normalizeStudentMathText(recognitionText));
+          reportText = await generateGeminiText({
+            model: geminiModel,
+            prompt: buildMistakeExplanationPrompt({
+              taskText: taskMap[taskType] || taskMap.analyzeMistake,
+              subject,
+              grade,
+              title,
+              prompt,
+              archiveSnapshot,
+              recognitionText,
+            }),
+            files: [],
+            temperature: 0.15,
+            responseMimeType: "",
+            thinkingBudget: Number(process.env.GEMINI_MISTAKE_THINKING_BUDGET || (normalizedQualityMode === "high" ? 2048 : 1024)),
+          });
+        } else {
+          const geminiPrompt = buildMistakeWorkflowPrompt({
+            taskType,
+            taskText: taskMap[taskType] || taskMap.analyzeMistake,
+            subject,
+            grade,
+            title,
+            source,
+            prompt,
+            archiveSnapshot,
+            documentText,
+          });
+          reportText = await generateGeminiText({
+            model: geminiModel,
+            prompt: geminiPrompt,
+            files,
+            temperature: 0.25,
+            responseMimeType: "application/json",
+            thinkingBudget: undefined,
+          });
+        }
         const report =
           usePlainMistakeText
             ? normalizeMistakePlainTextReport(reportText, {
@@ -1973,6 +2054,7 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
                 model: geminiModel,
                 taskType,
                 qualityMode: normalizedQualityMode,
+                recognitionText,
               })
             : normalizeMistakeWorkflowReport(reportText, {
                 title,
