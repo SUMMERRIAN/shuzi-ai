@@ -253,74 +253,23 @@ function normalizeMistakePlainTextReport(reportText, fallback = {}) {
     throw createHttpError(502, "GEMINI_EMPTY_REPORT", "Gemini没有识别出题目内容，请换一张更清晰的图片或补充题干文字。");
   }
   const title = fallback.title && fallback.title !== "新上传学习材料" ? fallback.title : "错题分析";
-  const questionRestate = extractFirstHeadingBlock(text, ["题目识别", "题目在问什么"]);
-  const testPoint = extractFirstHeadingBlock(text, ["考点定位", "知识点"]);
-  const conditionsBlock = extractFirstHeadingBlock(text, ["条件整理", "已知条件"]);
-  const target = extractHeadingBlock(text, "解题目标");
-  const modelAnalysis = extractFirstHeadingBlock(text, ["核心模型分析", "核心模型", "模型分析"]);
-  const coreIdea = extractFirstHeadingBlock(text, ["核心思路"]) || compactReportSummary(modelAnalysis);
-  const stepsBlock = extractFirstHeadingBlock(text, ["标准步骤", "解题步骤", "标准证明"]);
-  const finalAnswer = extractFirstHeadingBlock(text, ["明确答案", "最终答案", "标准答案"]);
-  const standardSteps = splitTeacherSteps(stepsBlock);
-  const sections = [
-    { title: "核心模型", content: modelAnalysis },
-    { title: "第一问解析", content: extractFirstHeadingBlock(text, ["第一问解析", "第1问解析", "第一问"]) },
-    { title: "第二问解析", content: extractFirstHeadingBlock(text, ["第二问解析", "第2问解析", "第二问"]) },
-    { title: "第三问解析", content: extractFirstHeadingBlock(text, ["第三问解析", "第3问解析", "第三问"]) },
-    { title: "分问解析", content: extractHeadingBlock(text, "分问解析") },
-    { title: "详细解析", content: extractHeadingBlock(text, "详细解析") },
-  ].filter((section) => section.content && !/^无[。.]?$/.test(section.content.trim()));
-  if (stepsBlock && !standardSteps.length) sections.push({ title: "标准步骤", content: stepsBlock });
-  if (!questionRestate && !testPoint && !coreIdea && !standardSteps.length && !finalAnswer && !sections.length) {
-    return {
-      title,
-      summary: "AI已返回讲解，但未能拆成标准栏目。请查看下方原文，或补充题干文字后重新生成。",
-      teacher_explanation: {
-        question_restate: "",
-        test_point: "",
-        known_conditions: [],
-        target: "",
-        core_idea: "",
-        standard_steps: [],
-        final_answer: "",
-      },
-      sections: [{ title: "AI讲解原文", content: text }],
-      extracted_questions: [],
-      similar_questions: [],
-      archive_note: "",
-      meta: { provider: fallback.provider || "gemini", model: fallback.model || "", taskType: fallback.taskType || "", normalized: true, source: "plain_text_fallback" },
-    };
-  }
   return {
     title,
-    summary: compactReportSummary(testPoint, modelAnalysis, coreIdea) || "AI已完成错题分析。",
+    summary: "AI已完成错题讲解。",
     teacher_explanation: {
-      question_restate: questionRestate,
-      test_point: testPoint,
-      known_conditions: conditionsBlock
-        ? conditionsBlock.split(/\r?\n|；|;/).map((item) => item.replace(/^[-*•\d.、\s]+/, "").trim()).filter(Boolean)
-        : [],
-      target,
-      core_idea: coreIdea,
-      standard_steps: standardSteps,
-      final_answer: finalAnswer,
+      question_restate: "",
+      test_point: "",
+      known_conditions: [],
+      target: "",
+      core_idea: "",
+      standard_steps: [],
+      final_answer: "",
     },
-    sections,
-    extracted_questions: [
-      {
-        id: "mistake-1",
-        title,
-        question_content: questionRestate,
-        subject: fallback.subject || "",
-        knowledge_points: testPoint ? [testPoint] : [],
-        correction_steps: standardSteps.map((item) => item.explanation),
-        standard_answer: finalAnswer,
-        is_likely_wrong: true,
-      },
-    ],
+    sections: [{ title: "AI讲解原文", content: text }],
+    extracted_questions: [],
     similar_questions: [],
     archive_note: "",
-    meta: { provider: fallback.provider || "gemini", model: fallback.model || "", taskType: fallback.taskType || "", normalized: true, source: "plain_text" },
+    meta: { provider: fallback.provider || "gemini", model: fallback.model || "", taskType: fallback.taskType || "", normalized: true, source: "plain_text_raw" },
   };
 }
 
@@ -403,20 +352,11 @@ function buildMistakeWorkflowPrompt({ taskType, taskText, subject, grade, title,
     ].join("\n");
   }
   return [
-    "你现在只做“错题分析”，不要生成类似题，不要分析整张试卷，不要写易错点、同类题方法、后续训练建议。",
-    "你要像一位有经验的老师一样讲题：先把图片题目识别清楚，再找到核心模型，然后按小问逐问讲解到明确答案。不要只给结论，不要只写空泛模板。",
-    "请严格按照下面中文标题输出，标题格式必须是【标题名】：",
-    "【题目识别】：先完整复述图片里的题目内容；如果局部看不清，只说明具体看不清的位置，不要影响其他可识别部分的分析。",
-    "【考点定位】：说明这道题主要考查的知识点、常见模型或方法入口。",
-    "【条件整理】：逐条列出题目给出的条件、图形关系、数量关系和隐含条件。",
-    "【解题目标】：说明每个小问分别要求求什么、证明什么或判断什么。",
-    "【核心模型】：用老师讲课的方式说明本题的关键模型。几何题要优先识别全等、相似、旋转、手拉手、一线三直角、角平分线、中点、面积等模型；代数题要说明方程、函数、数形结合或分类讨论入口。",
-    "【第一问解析】：如果有第一问，按“思路分析 → 详细证明/计算 → 本问结论”讲清楚；每一步要说明为什么能这样做。",
-    "【第二问解析】：如果有第二问，按同样格式讲清楚；如果题目没有第二问，可以写“无”。",
-    "【第三问解析】：如果有第三问，必须分类讨论或列式推导到结果；如果题目没有第三问，可以写“无”。",
-    "【标准步骤】：把完整做题过程压缩成学生可以抄进错题本的步骤，按“第1步、第2步、第3步……”输出。",
-    "【明确答案】：给出最终答案、证明结论或结果范围；如果图片信息确实不足，写“暂无法确认”，并说明还缺什么信息。",
-    "重要要求：输出必须是中文自然语言，可以使用数学符号；不要输出JSON；不要出现 title、summary、teacher_explanation 等英文字段名。",
+    "请帮学生讲解这道题目。你可以先判断题目大致属于哪个年级和知识点，然后像老师上课一样自然讲解。",
+    "请先尽量读出图片中的题目；如果有看不清的地方，只说明看不清的位置，然后基于能看清的信息继续讲。",
+    "讲解时请包含：这道题在问什么、核心思路或模型、每一问怎么想、关键证明或计算步骤、最后答案。",
+    "如果题目有多个小问，请按小问分别讲解。不要只复述题目，也不要只给结论。",
+    "请使用中文自然语言，可以使用数学符号。不要输出JSON，不要输出英文字段名。",
     ...common,
   ].join("\n");
 }

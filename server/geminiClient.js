@@ -2,7 +2,7 @@ import fs from "node:fs";
 
 const geminiEndpoint = "https://generativelanguage.googleapis.com/v1beta/models";
 const geminiTimeoutMs = Math.max(15000, Number(process.env.GEMINI_TIMEOUT_MS || 120000));
-const geminiMaxOutputTokens = Math.max(1024, Number(process.env.GEMINI_MAX_OUTPUT_TOKENS || 4096));
+const geminiMaxOutputTokens = Math.max(1024, Number(process.env.GEMINI_MAX_OUTPUT_TOKENS || 8192));
 
 export function ensureGeminiKey() {
   if (!process.env.GEMINI_API_KEY) {
