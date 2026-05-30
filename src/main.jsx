@@ -88,7 +88,10 @@ const aiJobFeatureLabels = {
   "free-ask": "AI自由问",
 };
 
-function aiJobStatusLabel(status = "") {
+function aiJobStatusLabel(status = "", job = {}) {
+  if (job.feature === "mistake-workflow" && ["queued", "processing"].includes(status)) {
+    return status === "queued" ? "高质量分析排队中" : "高质量分析处理中";
+  }
   if (status === "queued") return "排队中";
   if (status === "processing") return "生成中";
   if (status === "completed") return "已完成";
@@ -3383,14 +3386,46 @@ function App() {
     setMistakeDraft((prev) => ({ ...prev, [field]: value }));
   }
 
-  function handleMistakeFile(event) {
+  async function compressMistakeImage(file) {
+    if (!(file.type || "").startsWith("image/")) return file;
+    if (file.size <= 900 * 1024) return file;
+    const imageUrl = URL.createObjectURL(file);
+    try {
+      const image = await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = imageUrl;
+      });
+      const maxSide = 1800;
+      const scale = Math.min(1, maxSide / Math.max(image.width || maxSide, image.height || maxSide));
+      const width = Math.max(1, Math.round((image.width || maxSide) * scale));
+      const height = Math.max(1, Math.round((image.height || maxSide) * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      context.drawImage(image, 0, 0, width, height);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.86));
+      if (!blob || blob.size >= file.size) return file;
+      const cleanName = file.name.replace(/\.[^.]+$/, "");
+      return new File([blob], `${cleanName}.jpg`, { type: "image/jpeg", lastModified: Date.now() });
+    } catch {
+      return file;
+    } finally {
+      URL.revokeObjectURL(imageUrl);
+    }
+  }
+
+  async function handleMistakeFile(event) {
     if (!requireMemberAction("上传学习材料到错题专项", null, "上传的错题、作业或试卷会进入学生个人错题档案，后续用于AI分析和训练，需要会员权限。")) {
       event.target.value = "";
       return;
     }
     const files = Array.from(event.target.files || []);
     if (!files.length) return;
-    const normalizedFiles = files.map((file) => ({
+    const preparedFiles = await Promise.all(files.map(compressMistakeImage));
+    const normalizedFiles = preparedFiles.map((file) => ({
       id: `${file.name}-${file.size}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       file,
       name: file.name,
@@ -3487,6 +3522,10 @@ function App() {
     setMistakeAiStatus("loading");
     try {
       clearAiNotice();
+      setAiNotice({
+        page: activePage,
+        message: "高质量分析已进入后台队列。如果高级模型繁忙，系统会自动等待并重试，不会生成低质量讲解。",
+      });
       const formData = new FormData();
       const taskPrompt =
         mistakeTaskType && typeof mistakeQuickTasks[mistakeTaskType]?.prompt === "function"
@@ -3521,6 +3560,8 @@ function App() {
       const data = await apiRequest("/ai/mistakes/workflow", {
         method: "POST",
         body: formData,
+        aiJobAttempts: 180,
+        aiJobIntervalMs: 5000,
       });
       const report = data.report || {};
       const nextItems = normalizeMistakeResultToArchive(report, data.saved?.id);
@@ -3531,6 +3572,7 @@ function App() {
       });
       setSelectedMistakeId(nextItems[0]?.id || selectedMistakeId);
       setMistakeAiStatus("done");
+      clearAiNotice();
     } catch (error) {
       showAiError(error, "AI处理暂时不可用，请稍后再试。");
       setMistakeAiStatus("idle");
@@ -4048,7 +4090,7 @@ function App() {
                   <article key={job.jobId} className="ai-job-row">
                     <div>
                       <strong>{aiJobFeatureLabels[job.feature] || "AI任务"}</strong>
-                      <span>{aiJobStatusLabel(job.status)} · {job.provider || "AI"} · {job.mode || "后台处理"}</span>
+                      <span>{aiJobStatusLabel(job.status, job)} · {job.provider || "AI"} · {job.mode || "后台处理"}</span>
                     </div>
                     <button type="button" onClick={() => cancelAiJob(job.jobId)}>
                       <MinusCircle size={16} />
@@ -7450,6 +7492,11 @@ function MistakeSpecialPage({
             </div>
             {mistakeResult ? (
               <MistakeReportView report={mistakeResult} />
+            ) : mistakeAiStatus === "loading" ? (
+              <div className="mistake-empty-result">
+                <Loader2 className="spin" size={28} />
+                <p>高质量分析排队中。系统会等待高级模型并自动重试，请不要重复点击。</p>
+              </div>
             ) : (
               <div className="mistake-empty-result">
                 <Sparkles size={28} />

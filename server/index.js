@@ -165,6 +165,18 @@ function getGeminiModelCooldownMs() {
   return Math.max(60000, Number(process.env.GEMINI_MODEL_COOLDOWN_MS || 10 * 60 * 1000));
 }
 
+function getGeminiMistakeRetryDelaysMs() {
+  const configured = String(process.env.GEMINI_MISTAKE_RETRY_DELAYS_MS || "")
+    .split(",")
+    .map((item) => Number(item.trim()))
+    .filter((item) => Number.isFinite(item) && item >= 0);
+  return configured.length ? configured : [30000, 90000, 180000];
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function isGeminiCapacityError(error) {
   if (!error || error.provider !== "gemini") return false;
   const text = [
@@ -185,6 +197,14 @@ function isGeminiModelOnCooldown(model) {
   if (until > Date.now()) return true;
   if (until) geminiModelCooldowns.delete(model);
   return false;
+}
+
+function getGeminiModelCooldownRemainingMs(model) {
+  const until = geminiModelCooldowns.get(model) || 0;
+  const remaining = until - Date.now();
+  if (remaining > 0) return remaining;
+  if (until) geminiModelCooldowns.delete(model);
+  return 0;
 }
 
 function putGeminiModelOnCooldown(model, error) {
@@ -244,6 +264,48 @@ async function generateMistakeGeminiTextWithFallback({
   }
 
   throw toFriendlyGeminiError(lastError || createHttpError(503, "GEMINI_MODEL_BUSY", "Gemini模型当前繁忙，请稍后再试。"), false);
+}
+
+async function generateMistakeGeminiTextWithRetry({
+  model,
+  stage = "mistake",
+  retryDelaysMs = getGeminiMistakeRetryDelaysMs(),
+  ...options
+}) {
+  const primaryModel = model || getMistakeGeminiModel("high");
+  let lastError = null;
+  const attempts = Math.max(1, retryDelaysMs.length + 1);
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const cooldownRemaining = getGeminiModelCooldownRemainingMs(primaryModel);
+    if (cooldownRemaining > 0) {
+      const waitMs = Math.min(cooldownRemaining, retryDelaysMs[Math.min(attempt, retryDelaysMs.length - 1)] || cooldownRemaining);
+      console.warn(`Gemini model ${primaryModel} is cooling down before ${stage}; waiting ${waitMs}ms.`);
+      await sleep(waitMs);
+    }
+    try {
+      const text = await generateGeminiText({ ...options, model: primaryModel });
+      return { text, model: primaryModel, usedFallback: false, retried: attempt > 0, attempts: attempt + 1, stage };
+    } catch (error) {
+      lastError = error;
+      if (!isGeminiCapacityError(error)) throw error;
+      const delayMs = retryDelaysMs[attempt];
+      putGeminiModelOnCooldown(primaryModel, error);
+      if (delayMs === undefined) break;
+      console.warn(`Gemini model ${primaryModel} busy during ${stage}; retrying after ${delayMs}ms.`);
+      await sleep(delayMs);
+    }
+  }
+
+  const friendly = createHttpError(
+    503,
+    "GEMINI_HIGH_MODEL_BUSY",
+    "高质量分析模型当前繁忙，系统已经自动排队重试但仍未成功。请稍后继续，不会生成低质量讲解。"
+  );
+  friendly.provider = "gemini";
+  friendly.model = primaryModel;
+  friendly.detail = lastError?.detail || lastError?.message || "";
+  throw friendly;
 }
 
 function normalizeTextList(value) {
@@ -2074,6 +2136,7 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
     };
     const geminiMode = normalizedQualityMode;
     const geminiModel = getMistakeGeminiModel(normalizedQualityMode);
+    const recognitionGeminiModel = process.env.GEMINI_MODEL_MISTAKE_RECOGNITION || getMistakeGeminiModel("fast");
     const fallbackGeminiModel = getMistakeGeminiModel("fast");
     const usePlainMistakeText = !["generateSimilar", "analyzePaper"].includes(taskType);
     const { job, reused } = await createAiJob({
@@ -2095,9 +2158,8 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
         let usedFallback = false;
         if (usePlainMistakeText) {
           if (files.length) {
-            const recognitionResult = await generateMistakeGeminiTextWithFallback({
-              model: geminiModel,
-              fallbackModel: fallbackGeminiModel,
+            const recognitionResult = await generateMistakeGeminiTextWithRetry({
+              model: recognitionGeminiModel,
               stage: "recognition",
               prompt: buildMistakeRecognitionPrompt({ subject, grade, title, prompt, documentText }),
               files,
@@ -2114,9 +2176,8 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
             recognitionText = [prompt, documentText].filter((item) => String(item || "").trim()).join("\n\n");
           }
           recognitionText = compactRepeatedMistakeText(normalizeStudentMathText(recognitionText));
-          const explanationResult = await generateMistakeGeminiTextWithFallback({
+          const explanationResult = await generateMistakeGeminiTextWithRetry({
             model: geminiModel,
-            fallbackModel: fallbackGeminiModel,
             stage: "explanation",
             prompt: buildMistakeExplanationPrompt({
               taskText: taskMap[taskType] || taskMap.analyzeMistake,
@@ -2136,7 +2197,7 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
           });
           reportText = explanationResult.text;
           modelTrace.push(explanationResult);
-          usedFallback ||= explanationResult.usedFallback;
+          usedFallback ||= false;
         } else {
           const geminiPrompt = buildMistakeWorkflowPrompt({
             taskType,
@@ -2256,9 +2317,8 @@ app.post("/api/ai/mistakes/analyze", requireAuth, upload.array("files", 6), asyn
           `标题：${title}`,
           `学生补充：${note}`,
         ].join("\n");
-        const analysisResult = await generateMistakeGeminiTextWithFallback({
+        const analysisResult = await generateMistakeGeminiTextWithRetry({
           model: mistakeGeminiModel,
-          fallbackModel: getMistakeGeminiModel("fast"),
           stage: "legacy-analyze",
           prompt,
           files,
@@ -2284,7 +2344,7 @@ app.post("/api/ai/mistakes/analyze", requireAuth, upload.array("files", 6), asyn
           );
           return row;
         });
-        await recordTokenUsage(req.user.id, analysisResult.usedFallback ? 8 : 12, "AI错题识别", { feature: "mistake-analyze", provider: "gemini", model: effectiveModel, usedFallback: analysisResult.usedFallback, mistakeId: saved.id, jobId: job.id });
+        await recordTokenUsage(req.user.id, 12, "AI错题识别", { feature: "mistake-analyze", provider: "gemini", model: effectiveModel, retried: analysisResult.retried, mistakeId: saved.id, jobId: job.id });
         return { analysis, saved };
       });
     }
