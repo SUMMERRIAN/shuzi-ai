@@ -5197,6 +5197,43 @@ audio {
   gap: 8px;
 }
 
+.mistake-recognition-detail {
+  border: 1px solid #dfe5da;
+  border-radius: 8px;
+  background: #fbfcfa;
+  overflow: hidden;
+}
+
+.mistake-recognition-detail summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.mistake-recognition-detail summary::-webkit-details-marker {
+  display: none;
+}
+
+.mistake-recognition-detail summary span {
+  color: #008653;
+  font-weight: 900;
+}
+
+.mistake-recognition-detail summary em {
+  color: #68736b;
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.mistake-recognition-detail .structured-mistake-text {
+  padding: 0 14px 14px;
+}
+
 .mistake-report-view h3 {
   margin: 0;
   color: #111820;

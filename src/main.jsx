@@ -7661,10 +7661,20 @@ function MistakeReportView({ report }) {
         </section>
       )}
       {sections.map((section, index) => (
-        <section key={`${section.title}-${index}`}>
-          <h3>{section.title}</h3>
-          <StructuredMistakeText text={section.content} />
-        </section>
+        section.title === "AI识别到的题目" ? (
+          <details className="mistake-recognition-detail" key={`${section.title}-${index}`}>
+            <summary>
+              <span>{section.title}</span>
+              <em>展开核对题干</em>
+            </summary>
+            <StructuredMistakeText text={section.content} />
+          </details>
+        ) : (
+          <section key={`${section.title}-${index}`}>
+            <h3>{section.title}</h3>
+            <StructuredMistakeText text={section.content} />
+          </section>
+        )
       ))}
       {extracted.length > 0 && !hasTeacherReport && (
         <section>
