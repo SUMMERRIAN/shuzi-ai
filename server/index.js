@@ -230,6 +230,38 @@ function compactReportSummary(...values) {
   return text.length > 180 ? `${text.slice(0, 180)}...` : text;
 }
 
+function normalizeStudentMathText(value) {
+  let text = String(value || "");
+  text = text
+    .replace(/\r\n/g, "\n")
+    .replace(/\*\*([^*\n]+)\*\*/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\$\$([\s\S]*?)\$\$/g, "$1")
+    .replace(/\$([^$\n]+)\$/g, "$1")
+    .replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, "$1/$2")
+    .replace(/\\triangle\s*([A-Za-z0-9]+)/g, "△$1")
+    .replace(/\\angle\s*([A-Za-z0-9]+)/g, "∠$1")
+    .replace(/\\cong/g, "≌")
+    .replace(/\\perp/g, "⟂")
+    .replace(/\\parallel/g, "∥")
+    .replace(/\\circ/g, "°")
+    .replace(/\\neq/g, "≠")
+    .replace(/\\leq/g, "≤")
+    .replace(/\\geq/g, "≥")
+    .replace(/\\times/g, "×")
+    .replace(/\\cdot/g, "·")
+    .replace(/\\Rightarrow/g, "⇒")
+    .replace(/\\rightarrow/g, "→")
+    .replace(/\\left/g, "")
+    .replace(/\\right/g, "")
+    .replace(/\\[a-zA-Z]+/g, "")
+    .replace(/[{}]/g, "")
+    .replace(/^[ \t]*-{3,}[ \t]*$/gm, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n");
+  return text.trim();
+}
+
 function splitTeacherSteps(block) {
   const clean = String(block || "").trim();
   if (!clean) return [];
@@ -248,7 +280,7 @@ function splitTeacherSteps(block) {
 }
 
 function normalizeMistakePlainTextReport(reportText, fallback = {}) {
-  const text = String(reportText || "").trim();
+  const text = normalizeStudentMathText(reportText);
   if (!text) {
     throw createHttpError(502, "GEMINI_EMPTY_REPORT", "Gemini没有识别出题目内容，请换一张更清晰的图片或补充题干文字。");
   }
@@ -265,7 +297,7 @@ function normalizeMistakePlainTextReport(reportText, fallback = {}) {
       standard_steps: [],
       final_answer: "",
     },
-    sections: [{ title: "AI讲解原文", content: text }],
+    sections: [{ title: "AI讲解", content: text }],
     extracted_questions: [],
     similar_questions: [],
     archive_note: "",
@@ -356,7 +388,8 @@ function buildMistakeWorkflowPrompt({ taskType, taskText, subject, grade, title,
     "请先尽量读出图片中的题目；如果有看不清的地方，只说明看不清的位置，然后基于能看清的信息继续讲。",
     "讲解时请包含：这道题在问什么、核心思路或模型、每一问怎么想、关键证明或计算步骤、最后答案。",
     "如果题目有多个小问，请按小问分别讲解。不要只复述题目，也不要只给结论。",
-    "请使用中文自然语言，可以使用数学符号。不要输出JSON，不要输出英文字段名。",
+    "请使用中文自然语言，可以使用普通数学符号，例如 △ABC、∠ACB=90°、CA=CB、△BCD≌△EFB。",
+    "不要使用Markdown格式，不要使用LaTeX公式，不要写 $...$、\\triangle、\\angle、\\frac 这一类代码。不要输出JSON，不要输出英文字段名。",
     ...common,
   ].join("\n");
 }
@@ -1887,6 +1920,10 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
           files,
           temperature: taskType === "analyzeMistake" ? 0.1 : 0.25,
           responseMimeType: taskType === "analyzeMistake" ? "" : "application/json",
+          thinkingBudget:
+            taskType === "analyzeMistake"
+              ? Number(process.env.GEMINI_MISTAKE_THINKING_BUDGET || (normalizedQualityMode === "high" ? 2048 : 1024))
+              : undefined,
         });
         const report =
           taskType === "analyzeMistake"

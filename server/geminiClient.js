@@ -2,7 +2,9 @@ import fs from "node:fs";
 
 const geminiEndpoint = "https://generativelanguage.googleapis.com/v1beta/models";
 const geminiTimeoutMs = Math.max(15000, Number(process.env.GEMINI_TIMEOUT_MS || 120000));
-const geminiMaxOutputTokens = Math.max(1024, Number(process.env.GEMINI_MAX_OUTPUT_TOKENS || 8192));
+const geminiMaxOutputTokens = Math.max(1024, Number(process.env.GEMINI_MAX_OUTPUT_TOKENS || 16384));
+const defaultGeminiThinkingBudget =
+  process.env.GEMINI_THINKING_BUDGET === undefined ? 1024 : Number(process.env.GEMINI_THINKING_BUDGET);
 
 export function ensureGeminiKey() {
   if (!process.env.GEMINI_API_KEY) {
@@ -40,11 +42,24 @@ export function getGeminiText(data) {
     .trim();
 }
 
-export async function generateGeminiText({ model, prompt, files = [], temperature = 0.25, responseMimeType = "" }) {
+function normalizeThinkingBudget(value) {
+  const budget = Number(value);
+  return Number.isFinite(budget) ? Math.trunc(budget) : undefined;
+}
+
+export async function generateGeminiText({
+  model,
+  prompt,
+  files = [],
+  temperature = 0.25,
+  responseMimeType = "",
+  thinkingBudget = defaultGeminiThinkingBudget,
+}) {
   ensureGeminiKey();
   const parts = [{ text: prompt }, ...files.map(toGeminiPart).filter(Boolean)];
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), geminiTimeoutMs);
+  const normalizedThinkingBudget = normalizeThinkingBudget(thinkingBudget);
   let response;
   try {
     response = await fetch(`${geminiEndpoint}/${encodeURIComponent(model)}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
@@ -57,6 +72,9 @@ export async function generateGeminiText({ model, prompt, files = [], temperatur
           temperature,
           candidateCount: 1,
           maxOutputTokens: geminiMaxOutputTokens,
+          ...(normalizedThinkingBudget !== undefined
+            ? { thinkingConfig: { thinkingBudget: normalizedThinkingBudget } }
+            : {}),
           ...(responseMimeType ? { responseMimeType } : {}),
         },
       }),
