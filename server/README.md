@@ -35,12 +35,13 @@ GEMINI_MODEL_MISTAKE=gemini-2.5-flash
 GEMINI_MODEL_MISTAKE_HIGH=gemini-2.5-pro
 GEMINI_TIMEOUT_MS=120000
 GEMINI_MAX_OUTPUT_TOKENS=4096
+GEMINI_MODEL_COOLDOWN_MS=600000
 GEMINI_MISTAKE_RECOGNITION_MAX_OUTPUT_TOKENS=2048
 GEMINI_MISTAKE_EXPLANATION_MAX_OUTPUT_TOKENS=4096
 UPLOAD_DIR=/var/www/shuzi-ai/uploads
 ```
 
-知识图和自由问中的图片生成通过 OpenAI Image API 使用 `OPENAI_MODEL_IMAGE`。错题专项默认使用思考模型 `GEMINI_MODEL_MISTAKE_HIGH`，并使用 `temperature=0`、`topP=0.1` 的严谨参数；`GEMINI_MODEL_MISTAKE` 仅作为后续特殊低成本任务的备用配置。
+知识图和自由问中的图片生成通过 OpenAI Image API 使用 `OPENAI_MODEL_IMAGE`。错题专项默认使用思考模型 `GEMINI_MODEL_MISTAKE_HIGH`，并使用 `temperature=0`、`topP=0.1` 的严谨参数；如果高质量模型返回高需求或临时不可用，后端会把该模型短暂冷却并自动切换到 `GEMINI_MODEL_MISTAKE`，避免学生反复点击时持续失败。
 
 ## 启动
 
