@@ -1558,7 +1558,8 @@ const mistakeQuickTasks = {
   },
   analyzePaper: {
     label: "AI分析试卷",
-    prompt: (grade) => `这是一份${grade || "当前年级"}的试卷或作业，请帮助学生做试卷分析，让他知道有哪些优点和补足，以及接下来做什么比较好。`,
+    prompt: (grade) =>
+      `这是一份${grade || "当前年级"}的试卷或作业，请根据可见题号、作答痕迹、批改痕迹和分数做试卷分析，整理问题线索、可能原因、确认方式、优先处理顺序和下一步训练建议。看不清或没有证据的地方请说明需要确认。`,
   },
 };
 
@@ -7618,6 +7619,7 @@ function MistakeReportView({ report }) {
   const sections = Array.isArray(report.sections) ? report.sections : [];
   const extracted = Array.isArray(report.extracted_questions) ? report.extracted_questions : [];
   const similar = Array.isArray(report.similar_questions) ? report.similar_questions : [];
+  const isPaperReport = report?.meta?.taskType === "analyzePaper";
   const teacher = report.teacher_explanation || {};
   const hasTeacherReport = Boolean(
     teacher.question_restate ||
@@ -7711,15 +7713,19 @@ function MistakeReportView({ report }) {
       ))}
       {extracted.length > 0 && !hasTeacherReport && (
         <section>
-          <h3>错题清单</h3>
+          <h3>{isPaperReport ? "需要关注的题目或题组" : "错题清单"}</h3>
           <div className="mistake-report-list">
             {extracted.map((item, index) => (
               <article key={item.id || index}>
                 <strong>{index + 1}. {item.title}</strong>
                 {item.question_content && <p>{item.question_content}</p>}
-                <p>知识点：{Array.isArray(item.knowledge_points) ? item.knowledge_points.join("、") : item.knowledge_points || "待确认"}</p>
-                <p>错因：{item.error_type || "待确认"}</p>
-                <p>方法缺口：{item.method_gap || "待确认"}</p>
+                <p>{isPaperReport ? "相关知识/题型" : "知识点"}：{Array.isArray(item.knowledge_points) ? item.knowledge_points.join("、") : item.knowledge_points || "待确认"}</p>
+                <p>{isPaperReport ? "可见线索" : "错因"}：{item.error_type || "待确认"}</p>
+                <p>{isPaperReport ? "可能原因（需确认）" : "方法缺口"}：{item.method_gap || "待确认"}</p>
+                {isPaperReport && item.correction_steps && (
+                  <p>确认方式：{Array.isArray(item.correction_steps) ? item.correction_steps.join("；") : item.correction_steps}</p>
+                )}
+                {isPaperReport && item.suggestion && <p>训练建议：{item.suggestion}</p>}
               </article>
             ))}
           </div>
@@ -7868,6 +7874,7 @@ function renderMistakeReportHtml(report) {
   const sections = Array.isArray(report.sections) ? report.sections : [];
   const extracted = Array.isArray(report.extracted_questions) ? report.extracted_questions : [];
   const similar = Array.isArray(report.similar_questions) ? report.similar_questions : [];
+  const isPaperReport = report?.meta?.taskType === "analyzePaper";
   const teacher = report.teacher_explanation || {};
   const knownConditions = Array.isArray(teacher.known_conditions) ? teacher.known_conditions : [];
   const standardSteps = Array.isArray(teacher.standard_steps) ? teacher.standard_steps : [];
@@ -7885,7 +7892,7 @@ function renderMistakeReportHtml(report) {
       <h3>明确答案</h3><p>${escape(teacher.final_answer || "")}</p>
     ` : ""}
     ${sections.map((section) => `<h2>${escape(section.title)}</h2>${renderStructuredHtml(section.content)}`).join("")}
-    ${extracted.length ? `<h2>错题清单</h2>${extracted.map((item, index) => `<h3>${index + 1}. ${escape(item.title)}</h3><p>${escape(item.question_content || "")}</p><p>知识点：${escape(Array.isArray(item.knowledge_points) ? item.knowledge_points.join("、") : item.knowledge_points || "")}</p><p>错因：${escape(item.error_type || "")}</p><p>方法缺口：${escape(item.method_gap || "")}</p>`).join("")}` : ""}
+    ${extracted.length ? `<h2>${isPaperReport ? "需要关注的题目或题组" : "错题清单"}</h2>${extracted.map((item, index) => `<h3>${index + 1}. ${escape(item.title)}</h3><p>${escape(item.question_content || "")}</p><p>${isPaperReport ? "相关知识/题型" : "知识点"}：${escape(Array.isArray(item.knowledge_points) ? item.knowledge_points.join("、") : item.knowledge_points || "")}</p><p>${isPaperReport ? "可见线索" : "错因"}：${escape(item.error_type || "")}</p><p>${isPaperReport ? "可能原因（需确认）" : "方法缺口"}：${escape(item.method_gap || "")}</p>${isPaperReport && item.correction_steps ? `<p>确认方式：${escape(Array.isArray(item.correction_steps) ? item.correction_steps.join("；") : item.correction_steps || "")}</p>` : ""}${isPaperReport && item.suggestion ? `<p>训练建议：${escape(item.suggestion || "")}</p>` : ""}`).join("")}` : ""}
     ${similar.length ? `<h2>同类训练题</h2>${similar.map((item, index) => `<h3>${escape(item.title || `训练题 ${index + 1}`)}</h3><p>${escape(item.question || "")}</p><p>答案：${escape(item.answer || "")}</p><p>解析：${escape(Array.isArray(item.solution_steps) ? item.solution_steps.join("；") : item.solution_steps || "")}</p>`).join("")}` : ""}
   `;
 }

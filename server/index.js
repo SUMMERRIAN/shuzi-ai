@@ -655,7 +655,12 @@ function buildMistakeWorkflowPrompt({ taskType, taskText, subject, grade, title,
     return [
       "你现在只做“分析试卷/作业”，不要给单题做长篇讲解，不要生成类似题。",
       jsonInstruction("{title:string, summary:string, sections:[{title:string, content:string}], extracted_questions:[{id:string,title:string,question_content:string,subject:string,error_type:string,knowledge_points:[string],method_gap:string,correction_steps:[string],standard_answer:string,suggestion:string,is_likely_wrong:boolean}], priority_order:[string], archive_note:string}"),
-      "要求：整理错题清单、薄弱知识点、方法缺口和优先处理顺序；每条建议要具体，但不要写完整周计划。",
+      "试卷分析的目标是形成学习诊断报告，不是批量讲题。你只能根据图片、PDF、作答痕迹、批改痕迹、分数、题号和学生补充做分析；看不清或没有证据的地方必须说“需要确认”，不要猜测。",
+      "请区分“可见线索”和“可能原因”：不能直接给学生贴标签，不能说粗心、不认真、基础差；要写成“从第几题/哪类题的可见表现看，可能存在……，需要通过……确认”。",
+      "sections请固定输出这些板块：1.试卷整体判断；2.可见问题线索；3.可能原因与待确认点；4.优先处理顺序；5.下一步训练建议。",
+      "extracted_questions用于整理需要关注的题目或题组。字段含义请按试卷分析理解：error_type写“可见线索”，method_gap写“可能原因（需确认）”，correction_steps写“确认方式或下一步动作”，suggestion写“具体训练建议”。",
+      "每条问题必须尽量绑定题号、题组、分数、批改痕迹或学生作答痕迹；如果看不清题号或作答，请明确标注“题号/作答不清，需要补充”。",
+      "priority_order只写优先处理顺序，不要写完整周计划。顺序应体现：先处理证据最明确、影响最大、最容易提分的问题，再处理需要长期训练的问题。",
       ...common,
     ].join("\n");
   }
@@ -2250,7 +2255,7 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
       custom: "学生自定义要求：根据上传材料和学生输入回答。",
       analyzeMistake: "AI分析错题：给学生讲解题目，给出清楚框架和答案。",
       generateSimilar: "AI生成类似题：根据上传或选择的错题生成1-3道解题方法类似、思路结构相近的训练题，包含答案、步骤和训练目的。",
-      analyzePaper: "AI分析试卷：整理试卷/作业中的错题清单、薄弱知识点、错误类型、优先训练顺序和复习建议。",
+      analyzePaper: "AI分析试卷：根据可见证据整理试卷问题线索、可能原因、确认方式、优先处理顺序和训练建议。",
     };
     const geminiMode = normalizedQualityMode;
     const geminiModel = getMistakeGeminiModel(normalizedQualityMode);
