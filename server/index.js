@@ -262,6 +262,38 @@ function normalizeStudentMathText(value) {
   return text.trim();
 }
 
+function compactRepeatedMistakeText(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const lines = text.split(/\n/);
+  const seen = new Map();
+  const output = [];
+  let truncated = false;
+
+  for (const line of lines) {
+    const key = line
+      .replace(/\s+/g, "")
+      .replace(/[，。；：、,.!！?？\-_*`#()[\]{}（）【】]/g, "")
+      .trim();
+    const shouldTrack = key.length >= 16;
+    const count = shouldTrack ? seen.get(key) || 0 : 0;
+    if (shouldTrack && count >= 2) {
+      truncated = true;
+      break;
+    }
+    if (shouldTrack) seen.set(key, count + 1);
+    output.push(line);
+  }
+
+  let compacted = output.join("\n").trim();
+  if (compacted.length > 9000) {
+    compacted = `${compacted.slice(0, 9000).trim()}\n\n【系统提示】AI讲解内容过长，已保留前面的主要内容。建议重新生成时补充“请更简洁”。`;
+  } else if (truncated) {
+    compacted = `${compacted}\n\n【系统提示】AI输出出现重复，已自动截断。建议重新生成，或改用高质量分析。`;
+  }
+  return compacted;
+}
+
 function splitTeacherSteps(block) {
   const clean = String(block || "").trim();
   if (!clean) return [];
@@ -280,7 +312,7 @@ function splitTeacherSteps(block) {
 }
 
 function normalizeMistakePlainTextReport(reportText, fallback = {}) {
-  const text = normalizeStudentMathText(reportText);
+  const text = compactRepeatedMistakeText(normalizeStudentMathText(reportText));
   if (!text) {
     throw createHttpError(502, "GEMINI_EMPTY_REPORT", "Gemini没有识别出题目内容，请换一张更清晰的图片或补充题干文字。");
   }
@@ -354,13 +386,15 @@ function normalizeMistakeWorkflowReport(reportText, fallback = {}) {
 }
 
 function buildMistakeWorkflowPrompt({ taskType, taskText, subject, grade, title, source, prompt, archiveSnapshot, documentText }) {
+  const studentGrade = grade || "学生当前年级";
+  const subjectText = subject || "未指定科目";
   const common = [
     "你是树子AI错题专项老师。请严格根据上传材料和学生补充来处理，不要编造看不清的题干。",
     "请使用中文自然语言输出，不要输出JSON，不要输出Markdown表格，不要出现英文字段名。",
     `任务类型：${taskText}`,
-    `科目：${subject || "未指定"}`,
+    `科目：${subjectText}`,
     `题目所属年级：${grade || "未指定"}`,
-    `讲解约束：优先使用“${grade || "学生当前年级"}”对应的知识范围、术语和解题方法。`,
+    `讲解对象：对面是一名${studentGrade}学生，请围绕${subjectText}学习，用这个年级能听懂的语言、知识范围和解题方法来讲。`,
     `标题：${title}`,
     `来源：${source}`,
     `学生补充要求：${prompt}`,
@@ -384,12 +418,13 @@ function buildMistakeWorkflowPrompt({ taskType, taskText, subject, grade, title,
     ].join("\n");
   }
   return [
-    "请帮学生讲解这道题目。你可以先判断题目大致属于哪个年级和知识点，然后像老师上课一样自然讲解。",
+    `请帮一名${studentGrade}学生讲解这道${subjectText}题。先判断题目大致考查的知识点，然后像老师上课一样自然讲解，目标是让学生听懂。`,
     "请先尽量读出图片中的题目；如果有看不清的地方，只说明看不清的位置，然后基于能看清的信息继续讲。",
-    "讲解时请包含：这道题在问什么、核心思路或模型、每一问的大致解题框架、关键证明或计算步骤、最后答案。",
-    "如果题目情况很多，只给学生一个清楚的分类讨论框架和关键结论，不要把每一种细枝末节都完全展开。",
+    "讲解时请包含：这道题在问什么、核心思路或模型、每一问的解题框架、关键证明或计算步骤、最后答案。",
+    "如果题目涉及多种位置、多种情况或分类讨论，请给出清楚的分类框架；每一种情况都要有必要推导、关键关系和结论，但不要重复已经证明过的内容。",
     "每一问只保留一种最清楚的解法；不要重复讲解，不要反复推翻自己的思路，不要罗列多套备选方法。",
-    "如果题目有多个小问，请按小问分别讲解。不要只复述题目，也不要只给结论。整体篇幅要克制，适合学生阅读。",
+    "如果题目有多个小问，请按小问分别讲解。不要只复述题目，也不要只给结论。内容完整优先，但整体控制在2500字以内。",
+    "如果某一步确实无法判断、图片条件不足或做不出来，请明确说明哪里不确定，不要硬编条件、过程或答案。",
     "请使用中文自然语言，可以使用普通数学符号，例如 △ABC、∠ACB=90°、CA=CB、△BCD≌△EFB。",
     "不要使用Markdown格式，不要使用LaTeX公式，不要写 $...$、\\triangle、\\angle、\\frac 这一类代码。不要输出JSON，不要输出英文字段名。",
     ...common,
