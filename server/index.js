@@ -314,6 +314,69 @@ function normalizeTextList(value) {
   return [];
 }
 
+function getMistakeQuestionScopeText(questionScope = "auto") {
+  const scope = String(questionScope || "auto").toLowerCase();
+  if (scope === "q1") return "只讲第1问。如果题目没有小问，就讲整道题。";
+  if (scope === "q2") return "只讲第2问。可以极简引用第1问结论，但不要重讲第1问。";
+  if (scope === "q3") return "只讲第3问。可以极简引用前面结论；如果涉及分类讨论，只保留必要分类和结论。";
+  if (scope === "all") return "讲全题，但每一问只保留一条最清楚的主线，避免过长。";
+  return "自动判断。若题目有多问且学生没有指定，先给全题框架，再重点讲第1问，并提示可以选择其他小问继续。";
+}
+
+function getMistakeKnowledgeBoundary({ subject, grade }) {
+  const subjectText = String(subject || "");
+  const gradeText = String(grade || "");
+  if (!subjectText.includes("数学")) {
+    return `必须按${gradeText || "所选年级"}学生已经学习过的${subjectText || "本科目"}知识讲解；不要使用明显超出当前年级的术语和方法。`;
+  }
+  if (/小学/.test(gradeText)) {
+    return "知识边界：使用小学数学方法讲解，例如数形结合、算术关系、简单方程和基础几何；不要使用初中/高中术语作为主方法。";
+  }
+  if (/初中一年级|初一/.test(gradeText)) {
+    return "知识边界：按初一学生讲解，主方法只能使用线段与角、平行/垂直、三角形基本性质、等腰/直角三角形、全等三角形和一元一次方程等已学内容。不要把相似三角形、勾股定理、二次函数、三角函数、圆、导数、向量作为主解法；若题目确实更适合高年级方法，只能提醒“这是高年级方法”，不能用它完成主讲解。";
+  }
+  if (/初中二年级|初二/.test(gradeText)) {
+    return "知识边界：按初二学生讲解，优先使用全等、轴对称、一次函数、方程和初二范围内的几何性质；不要把二次函数、三角函数、圆、高中导数或向量作为主解法。";
+  }
+  if (/初中三年级|初三|中考/.test(gradeText)) {
+    return "知识边界：按初三/中考范围讲解，可以使用相似、圆、二次函数等初中内容，但不要使用高中导数、向量、解析几何的高级方法作为主解法。";
+  }
+  if (/高中|高一|高二|高三|高考/.test(gradeText)) {
+    return "知识边界：按高中教材和高考规范讲解，可以使用高中范围内的函数、解析几何、立体几何、数列、导数等方法；不要使用大学数学方法作为主解法。";
+  }
+  return "知识边界：严格按照学生选择的年级讲解；如果某个更高级方法更短，只能作为提醒，不能替代当前年级能理解的主解法。";
+}
+
+function getForbiddenKnowledgeTerms({ subject, grade }) {
+  if (!String(subject || "").includes("数学")) return [];
+  const gradeText = String(grade || "");
+  if (/小学/.test(gradeText)) return ["全等三角形", "相似三角形", "勾股定理", "二次函数", "三角函数", "导数", "向量"];
+  if (/初中一年级|初一/.test(gradeText)) return ["相似三角形", "勾股定理", "二次函数", "三角函数", "圆周角", "切线", "导数", "向量"];
+  if (/初中二年级|初二/.test(gradeText)) return ["二次函数", "三角函数", "圆周角", "切线", "导数", "向量"];
+  if (/初中三年级|初三|中考/.test(gradeText)) return ["导数", "向量", "复数", "数列", "立体几何"];
+  if (/高中|高一|高二|高三|高考/.test(gradeText)) return ["微积分", "矩阵", "群论"];
+  return [];
+}
+
+function auditMistakeExplanation(text, { subject, grade }) {
+  const source = String(text || "").trim();
+  const problems = [];
+  if (!source) problems.push("讲解为空");
+  if (!/题目在考什么/.test(source)) problems.push("缺少“题目在考什么”");
+  if (!/解题思路/.test(source)) problems.push("缺少“解题思路”");
+  if (!/(具体解题过程|规范解答|解题过程)/.test(source)) problems.push("缺少具体解题过程");
+  if (!/(最后答案|最终答案|答案[：:]|结论[：:]|所以.{0,30}(成立|相等|得|为|是|=|≌))/.test(source)) problems.push("缺少结论或答案");
+  if (/这个思路错了|换个思路|看起来不通|重新思考|试试看|可能哪里没发现|这个不好用|不太好/.test(source)) {
+    problems.push("出现草稿推理或自我否定语气");
+  }
+  if (/\\triangle|\\angle|\\frac|\$/.test(source)) problems.push("包含不适合学生阅读的 LaTeX 代码");
+  const forbiddenTerms = getForbiddenKnowledgeTerms({ subject, grade }).filter((term) => source.includes(term));
+  if (forbiddenTerms.length) problems.push(`使用了超出${grade || "当前年级"}的知识点：${forbiddenTerms.join("、")}`);
+  const looksCutOff = !/[。！？.!?）)]$/.test(source) || /[,，、；;：:]$/.test(source);
+  if (looksCutOff) problems.push("讲解疑似没有讲完");
+  return { ok: problems.length === 0, problems };
+}
+
 const mistakeReportHeadings = [
   "题目识别",
   "题目在问什么",
@@ -609,7 +672,7 @@ function buildMistakeRecognitionPrompt({ subject, grade, title, prompt, document
   ].join("\n");
 }
 
-function buildMistakeExplanationPrompt({ subject, grade, title, prompt, recognitionText }) {
+function buildMistakeExplanationPrompt({ subject, grade, title, prompt, recognitionText, questionScope }) {
   const studentGrade = grade || "学生当前年级";
   const subjectText = subject || "未指定科目";
   return [
@@ -617,6 +680,8 @@ function buildMistakeExplanationPrompt({ subject, grade, title, prompt, recognit
     `请像一位有经验的${subjectText}老师，给一名${studentGrade}学生讲清楚这道题。目标是让学生听懂思路，并知道考试时怎么写。`,
     "你不是在展示解题探索过程，而是在输出一份给学生看的最终讲解稿。",
     "请先在内部完整解题并检查一遍，但不要输出内部思考过程、草稿推理、错误尝试或自我否定。",
+    getMistakeKnowledgeBoundary({ subject, grade }),
+    `讲解范围：${getMistakeQuestionScopeText(questionScope)}`,
     "如果题目条件识别不完整，先说明缺少哪一处；能合理继续就基于明确假设继续，不能合理继续就直接说明需要补充材料，不要硬编。",
     "最终输出只能包含下面四个板块，板块标题请照写：",
     "## 1. 题目在考什么",
@@ -646,6 +711,29 @@ function buildMistakeExplanationPrompt({ subject, grade, title, prompt, recognit
     `标题：${title || "错题"}`,
     `学生补充要求：${prompt || "无"}`,
     `第一步识别到的题目：\n${recognitionText || "未识别到题目。请说明无法讲解。"}`,
+  ].join("\n");
+}
+
+function buildMistakeRepairPrompt({ subject, grade, title, prompt, recognitionText, questionScope, previousText, auditProblems }) {
+  const subjectText = subject || "未指定科目";
+  const studentGrade = grade || "学生当前年级";
+  return [
+    "上一版讲解没有通过产品自检，请你重写一版最终讲解稿。不要解释为什么重写。",
+    `对象：${studentGrade}学生；科目：${subjectText}。`,
+    getMistakeKnowledgeBoundary({ subject, grade }),
+    `讲解范围：${getMistakeQuestionScopeText(questionScope)}`,
+    `自检发现的问题：${(auditProblems || []).join("；")}`,
+    "必须修正：不要使用超出当前年级的主方法；不要输出草稿推理；不要重复；必须有结论或答案；整体不要超过2500字。",
+    "输出板块只能是：",
+    "## 1. 题目在考什么",
+    "## 2. 解题思路",
+    "## 3. 具体解题过程",
+    "## 4. 易错提醒",
+    "具体解题过程按小问写，每一问使用：目标、关键关系、推导过程、结论。",
+    `标题：${title || "错题"}`,
+    `学生补充要求：${prompt || "无"}`,
+    `题目识别结果：\n${recognitionText || "未识别到题目。"}`,
+    `上一版讲解：\n${String(previousText || "").slice(0, 5000)}`,
   ].join("\n");
 }
 
@@ -2132,6 +2220,7 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
       title = "错题专项处理",
       source = "",
       archiveSnapshot = "{}",
+      questionScope = "auto",
     } = req.body || {};
     const normalizedQualityMode = "high";
     const tokenCost = taskType === "generateSimilar" ? 6 : normalizedQualityMode === "high" ? 14 : 8;
@@ -2155,7 +2244,7 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
       provider: "gemini",
       mode: geminiMode,
       tokenCost,
-      input: { taskType, prompt, subject, grade, title, source, archiveSnapshot, fileCount: files.length, qualityMode: normalizedQualityMode },
+      input: { taskType, prompt, subject, grade, title, source, archiveSnapshot, questionScope, fileCount: files.length, qualityMode: normalizedQualityMode },
     });
     if (!reused) {
       startAiJob(job.id, async () => {
@@ -2165,6 +2254,7 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
         let reportText = "";
         const modelTrace = [];
         let usedFallback = false;
+        let finalAudit = null;
         if (usePlainMistakeText) {
           if (files.length) {
             const recognitionResult = await generateMistakeGeminiTextWithRetry({
@@ -2194,6 +2284,7 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
               title,
               prompt,
               recognitionText,
+              questionScope,
             }),
             files: [],
             temperature: 0,
@@ -2202,8 +2293,35 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
             thinkingBudget: Number(process.env.GEMINI_MISTAKE_THINKING_BUDGET || (normalizedQualityMode === "high" ? 2048 : 1024)),
             maxOutputTokens: Number(process.env.GEMINI_MISTAKE_EXPLANATION_MAX_OUTPUT_TOKENS || 4096),
           });
-          reportText = explanationResult.text;
+          reportText = compactRepeatedMistakeText(normalizeStudentMathText(explanationResult.text));
           modelTrace.push(explanationResult);
+          let audit = auditMistakeExplanation(reportText, { subject, grade, questionScope });
+          if (!audit.ok) {
+            const repairResult = await generateMistakeGeminiTextWithRetry({
+              model: geminiModel,
+              stage: "explanation_repair",
+              prompt: buildMistakeRepairPrompt({
+                subject,
+                grade,
+                title,
+                prompt,
+                recognitionText,
+                questionScope,
+                previousText: reportText,
+                auditProblems: audit.problems,
+              }),
+              files: [],
+              temperature: 0,
+              topP: 0.1,
+              responseMimeType: "",
+              thinkingBudget: Number(process.env.GEMINI_MISTAKE_REPAIR_THINKING_BUDGET || 1024),
+              maxOutputTokens: Number(process.env.GEMINI_MISTAKE_EXPLANATION_MAX_OUTPUT_TOKENS || 4096),
+            });
+            reportText = compactRepeatedMistakeText(normalizeStudentMathText(repairResult.text));
+            modelTrace.push(repairResult);
+            audit = auditMistakeExplanation(reportText, { subject, grade, questionScope });
+          }
+          finalAudit = audit;
           usedFallback ||= false;
         } else {
           const geminiPrompt = buildMistakeWorkflowPrompt({
@@ -2254,7 +2372,7 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
                 qualityMode: normalizedQualityMode,
                 usedFallback,
               });
-        report.meta = { ...(report.meta || {}), usedFallback, modelTrace };
+        report.meta = { ...(report.meta || {}), usedFallback, modelTrace, audit: finalAudit, questionScope };
         const chargedTokenCost = usedFallback && tokenCost > 8 ? 8 : tokenCost;
         const saved = await withTransaction(async (client) => {
           const fileRows = await saveUploadedFiles(client, req.user, student, "mistake", files);

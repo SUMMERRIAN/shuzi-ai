@@ -5091,6 +5091,41 @@ audio {
   gap: 10px;
 }
 
+.mistake-scope-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.mistake-scope-actions span {
+  color: #68736b;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.mistake-scope-actions div {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.mistake-scope-actions button {
+  min-height: 34px;
+  padding: 0 8px;
+  border: 1px solid #dfe5da;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #344039;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.mistake-scope-actions button.is-active,
+.mistake-scope-actions button:hover {
+  border-color: #008653;
+  background: #0b1f18;
+  color: #ffffff;
+}
+
 .mistake-quick-actions button {
   display: flex;
   align-items: center;

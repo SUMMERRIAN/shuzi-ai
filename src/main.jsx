@@ -1561,6 +1561,14 @@ const mistakeQuickTasks = {
   },
 };
 
+const mistakeQuestionScopes = [
+  { id: "auto", label: "自动" },
+  { id: "q1", label: "第1问" },
+  { id: "q2", label: "第2问" },
+  { id: "q3", label: "第3问" },
+  { id: "all", label: "全题" },
+];
+
 const defaultKnowledgePromptTemplate = `超精细教育信息图 [SUBJECT]，
 科学教科书插画风格，
 干净的学术学习版式，
@@ -1973,6 +1981,7 @@ function App() {
   const [mistakeWorkspaceTab, setMistakeWorkspaceTab] = useState("ai");
   const [mistakePrompt, setMistakePrompt] = useState("");
   const [mistakeTaskType, setMistakeTaskType] = useState("");
+  const [mistakeQuestionScope, setMistakeQuestionScope] = useState("auto");
   const [mistakeResult, setMistakeResult] = useState(null);
   const [selectedArchiveMistakeIds, setSelectedArchiveMistakeIds] = useState([]);
   const [mistakeArchiveSubject, setMistakeArchiveSubject] = useState("全部");
@@ -3536,6 +3545,7 @@ function App() {
       formData.append("prompt", combinedPrompt);
       formData.append("subject", mistakeDraft.subject);
       formData.append("grade", mistakeDraft.grade);
+      formData.append("questionScope", mistakeQuestionScope);
       formData.append("title", mistakeDraft.title);
       formData.append("source", mistakeDraft.source);
       formData.append(
@@ -3547,6 +3557,7 @@ function App() {
             payload: {
               taskType: mistakeTaskType,
               prompt: combinedPrompt,
+              questionScope: mistakeQuestionScope,
               subject: mistakeDraft.subject,
               grade: mistakeDraft.grade,
               title: mistakeDraft.title,
@@ -4240,6 +4251,8 @@ function App() {
             mistakePrompt={mistakePrompt}
             setMistakePrompt={setMistakePrompt}
             mistakeTaskType={mistakeTaskType}
+            mistakeQuestionScope={mistakeQuestionScope}
+            setMistakeQuestionScope={setMistakeQuestionScope}
             applyMistakeQuickTask={applyMistakeQuickTask}
             mistakeResult={mistakeResult}
             selectedArchiveMistakeIds={selectedArchiveMistakeIds}
@@ -7352,6 +7365,8 @@ function MistakeSpecialPage({
   mistakePrompt,
   setMistakePrompt,
   mistakeTaskType,
+  mistakeQuestionScope,
+  setMistakeQuestionScope,
   applyMistakeQuickTask,
   mistakeResult,
   selectedArchiveMistakeIds,
@@ -7462,6 +7477,22 @@ function MistakeSpecialPage({
               <button type="button" className="mistake-send-button" onClick={runMistakeWorkspaceAi} disabled={mistakeAiStatus === "loading"}>
                 {mistakeAiStatus === "loading" ? <Loader2 className="spin" size={20} /> : <Send size={20} />}
               </button>
+            </div>
+
+            <div className="mistake-scope-actions">
+              <span>讲解范围</span>
+              <div>
+                {mistakeQuestionScopes.map((scope) => (
+                  <button
+                    key={scope.id}
+                    type="button"
+                    className={mistakeQuestionScope === scope.id ? "is-active" : ""}
+                    onClick={() => setMistakeQuestionScope(scope.id)}
+                  >
+                    {scope.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="mistake-quick-actions">
