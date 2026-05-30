@@ -386,8 +386,10 @@ function buildMistakeWorkflowPrompt({ taskType, taskText, subject, grade, title,
   return [
     "请帮学生讲解这道题目。你可以先判断题目大致属于哪个年级和知识点，然后像老师上课一样自然讲解。",
     "请先尽量读出图片中的题目；如果有看不清的地方，只说明看不清的位置，然后基于能看清的信息继续讲。",
-    "讲解时请包含：这道题在问什么、核心思路或模型、每一问怎么想、关键证明或计算步骤、最后答案。",
-    "如果题目有多个小问，请按小问分别讲解。不要只复述题目，也不要只给结论。",
+    "讲解时请包含：这道题在问什么、核心思路或模型、每一问的大致解题框架、关键证明或计算步骤、最后答案。",
+    "如果题目情况很多，只给学生一个清楚的分类讨论框架和关键结论，不要把每一种细枝末节都完全展开。",
+    "每一问只保留一种最清楚的解法；不要重复讲解，不要反复推翻自己的思路，不要罗列多套备选方法。",
+    "如果题目有多个小问，请按小问分别讲解。不要只复述题目，也不要只给结论。整体篇幅要克制，适合学生阅读。",
     "请使用中文自然语言，可以使用普通数学符号，例如 △ABC、∠ACB=90°、CA=CB、△BCD≌△EFB。",
     "不要使用Markdown格式，不要使用LaTeX公式，不要写 $...$、\\triangle、\\angle、\\frac 这一类代码。不要输出JSON，不要输出英文字段名。",
     ...common,
@@ -1884,12 +1886,14 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
     await assertTokenBalance(req.user.id, tokenCost);
     if (!prompt.trim() && !files.length) return res.status(400).json({ error: "PROMPT_OR_FILE_REQUIRED" });
     const taskMap = {
-      analyzeMistake: "AI分析错题：识别题目内容、考点、条件、目标、核心思路、标准步骤和明确答案。",
+      custom: "学生自定义要求：根据上传材料和学生输入回答。",
+      analyzeMistake: "AI分析错题：给学生讲解题目，给出清楚框架和答案。",
       generateSimilar: "AI生成类似题：根据上传或选择的错题生成1-3道同类型训练题，包含答案、步骤和训练目的。",
       analyzePaper: "AI分析试卷：整理试卷/作业中的错题清单、薄弱知识点、错误类型、优先训练顺序和复习建议。",
     };
     const geminiMode = normalizedQualityMode;
     const geminiModel = getMistakeGeminiModel(normalizedQualityMode);
+    const usePlainMistakeText = !["generateSimilar", "analyzePaper"].includes(taskType);
     const { job, reused } = await createAiJob({
       userId: req.user.id,
       studentId: student.id,
@@ -1918,15 +1922,15 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
           model: geminiModel,
           prompt: geminiPrompt,
           files,
-          temperature: taskType === "analyzeMistake" ? 0.1 : 0.25,
-          responseMimeType: taskType === "analyzeMistake" ? "" : "application/json",
+          temperature: usePlainMistakeText ? 0.1 : 0.25,
+          responseMimeType: usePlainMistakeText ? "" : "application/json",
           thinkingBudget:
-            taskType === "analyzeMistake"
+            usePlainMistakeText
               ? Number(process.env.GEMINI_MISTAKE_THINKING_BUDGET || (normalizedQualityMode === "high" ? 2048 : 1024))
               : undefined,
         });
         const report =
-          taskType === "analyzeMistake"
+          usePlainMistakeText
             ? normalizeMistakePlainTextReport(reportText, {
                 title,
                 subject,
