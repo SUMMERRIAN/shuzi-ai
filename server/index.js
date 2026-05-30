@@ -153,8 +153,8 @@ function getGeminiModel(mode = "fast") {
   return normalizeAiMode(mode) === "thinking" ? geminiThinkingModel : geminiFastModel;
 }
 
-function getMistakeGeminiModel(qualityMode = "fast") {
-  return String(qualityMode).toLowerCase() === "high"
+function getMistakeGeminiModel(qualityMode = "high") {
+  return String(qualityMode).toLowerCase() !== "fast"
     ? process.env.GEMINI_MODEL_MISTAKE_HIGH || geminiThinkingModel
     : process.env.GEMINI_MODEL_MISTAKE || geminiFastModel;
 }
@@ -289,7 +289,7 @@ function compactRepeatedMistakeText(value) {
   if (compacted.length > 9000) {
     compacted = `${compacted.slice(0, 9000).trim()}\n\n【系统提示】AI讲解内容过长，已保留前面的主要内容。建议重新生成时补充“请更简洁”。`;
   } else if (truncated) {
-    compacted = `${compacted}\n\n【系统提示】AI输出出现重复，已自动截断。建议重新生成，或改用高质量分析。`;
+    compacted = `${compacted}\n\n【系统提示】AI输出出现重复，已自动截断。建议补充更清晰的题目材料后重新生成。`;
   }
   return compacted;
 }
@@ -351,7 +351,7 @@ function normalizeMistakeWorkflowReport(reportText, fallback = {}) {
   const parsed = parseJsonText(reportText, {});
   const rawText = parsed.rawText || (!Object.keys(parsed).length ? String(reportText || "").trim() : "");
   if (rawText) {
-    throw createHttpError(502, "GEMINI_JSON_PARSE_FAILED", "Gemini返回的结构化结果不完整，请重新生成或改用高质量分析。");
+    throw createHttpError(502, "GEMINI_JSON_PARSE_FAILED", "Gemini返回的结构化结果不完整，请补充更清晰的题目材料后重新生成。");
   }
   const extractedQuestions = Array.isArray(parsed.extracted_questions) ? parsed.extracted_questions : [];
   const firstQuestion = extractedQuestions[0] || {};
@@ -1964,9 +1964,8 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
       title = "错题专项处理",
       source = "",
       archiveSnapshot = "{}",
-      qualityMode = "fast",
     } = req.body || {};
-    const normalizedQualityMode = String(qualityMode).toLowerCase() === "high" ? "high" : "fast";
+    const normalizedQualityMode = "high";
     const tokenCost = taskType === "generateSimilar" ? 6 : normalizedQualityMode === "high" ? 14 : 8;
     await assertTokenBalance(req.user.id, tokenCost);
     if (!prompt.trim() && !files.length) return res.status(400).json({ error: "PROMPT_OR_FILE_REQUIRED" });

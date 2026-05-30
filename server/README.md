@@ -38,7 +38,7 @@ GEMINI_MAX_OUTPUT_TOKENS=4096
 UPLOAD_DIR=/var/www/shuzi-ai/uploads
 ```
 
-知识图和自由问中的图片生成通过 OpenAI Image API 使用 `OPENAI_MODEL_IMAGE`。错题专项统一使用通用模型 `GEMINI_MODEL_MISTAKE`，默认 `gemini-2.5-flash`，避免 Pro 模型成本和等待时间过高。
+知识图和自由问中的图片生成通过 OpenAI Image API 使用 `OPENAI_MODEL_IMAGE`。错题专项默认使用思考模型 `GEMINI_MODEL_MISTAKE_HIGH`，仅保留 `GEMINI_MODEL_MISTAKE` 作为后续特殊低成本任务的备用配置。
 
 ## 启动
 

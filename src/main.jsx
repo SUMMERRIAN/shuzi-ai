@@ -1971,7 +1971,6 @@ function App() {
   const [mistakePrompt, setMistakePrompt] = useState("");
   const [mistakeTaskType, setMistakeTaskType] = useState("");
   const [mistakeResult, setMistakeResult] = useState(null);
-  const [mistakeQualityMode, setMistakeQualityMode] = useState("fast");
   const [selectedArchiveMistakeIds, setSelectedArchiveMistakeIds] = useState([]);
   const [mistakeArchiveSubject, setMistakeArchiveSubject] = useState("全部");
   const [selectedMistakeId, setSelectedMistakeId] = useState(defaultMistakes[0].id);
@@ -3496,7 +3495,6 @@ function App() {
       const combinedPrompt = [taskPrompt, mistakePrompt.trim()].filter(Boolean).join("\n");
       formData.append("taskType", activeMistakeTaskType);
       formData.append("prompt", combinedPrompt);
-      formData.append("qualityMode", mistakeQualityMode);
       formData.append("subject", mistakeDraft.subject);
       formData.append("grade", mistakeDraft.grade);
       formData.append("title", mistakeDraft.title);
@@ -3509,7 +3507,6 @@ function App() {
             answers,
             payload: {
               taskType: mistakeTaskType,
-              qualityMode: mistakeQualityMode,
               prompt: combinedPrompt,
               subject: mistakeDraft.subject,
               grade: mistakeDraft.grade,
@@ -4201,8 +4198,6 @@ function App() {
             mistakePrompt={mistakePrompt}
             setMistakePrompt={setMistakePrompt}
             mistakeTaskType={mistakeTaskType}
-            mistakeQualityMode={mistakeQualityMode}
-            setMistakeQualityMode={setMistakeQualityMode}
             applyMistakeQuickTask={applyMistakeQuickTask}
             mistakeResult={mistakeResult}
             selectedArchiveMistakeIds={selectedArchiveMistakeIds}
@@ -7315,8 +7310,6 @@ function MistakeSpecialPage({
   mistakePrompt,
   setMistakePrompt,
   mistakeTaskType,
-  mistakeQualityMode,
-  setMistakeQualityMode,
   applyMistakeQuickTask,
   mistakeResult,
   selectedArchiveMistakeIds,
@@ -7442,25 +7435,6 @@ function MistakeSpecialPage({
                 </button>
               ))}
             </div>
-            {mistakeTaskType === "analyzeMistake" && (
-              <div className="mistake-quality-actions" aria-label="错题分析质量">
-                <span>分析质量</span>
-                <button
-                  type="button"
-                  className={mistakeQualityMode === "fast" ? "is-active" : ""}
-                  onClick={() => setMistakeQualityMode("fast")}
-                >
-                  普通分析
-                </button>
-                <button
-                  type="button"
-                  className={mistakeQualityMode === "high" ? "is-active" : ""}
-                  onClick={() => setMistakeQualityMode("high")}
-                >
-                  高质量分析
-                </button>
-              </div>
-            )}
           </div>
 
           <article className="mistake-result-panel">
