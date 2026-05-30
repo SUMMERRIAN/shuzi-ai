@@ -7481,7 +7481,7 @@ function MistakeSpecialPage({
             </div>
 
             <div className="mistake-scope-actions">
-              <span>讲解范围</span>
+              <span>处理范围</span>
               <div>
                 {mistakeQuestionScopes.map((scope) => (
                   <button
@@ -7494,6 +7494,7 @@ function MistakeSpecialPage({
                   </button>
                 ))}
               </div>
+              <p>生成类似题会参考当前范围，并严格按所选年级出题。</p>
             </div>
 
             <div className="mistake-quick-actions">

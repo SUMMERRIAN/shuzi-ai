@@ -323,6 +323,15 @@ function getMistakeQuestionScopeText(questionScope = "auto") {
   return "自动判断。若题目有多问且学生没有指定，先给全题框架，再重点讲第1问，并提示可以选择其他小问继续。";
 }
 
+function getMistakeSimilarScopeText(questionScope = "auto") {
+  const scope = String(questionScope || "auto").toLowerCase();
+  if (scope === "q1") return "只参考原题第1问，生成解题方法类似、思路结构相近的训练题；不要围绕其他小问生成。";
+  if (scope === "q2") return "只参考原题第2问，生成解题方法类似、思路结构相近的训练题；可以极简引用第1问结论，但不要围绕第1问生成。";
+  if (scope === "q3") return "只参考原题第3问，生成解题方法类似、思路结构相近的训练题；可以极简引用前面结论，但训练目标必须落在第3问的方法上。";
+  if (scope === "all") return "参考整道题的综合解题方法生成训练题；如果原题有多个小问，训练题也可以有递进小问，但不要过长。";
+  return "自动判断原题最值得训练的一问或核心方法，并围绕这个方法生成训练题；不要同时铺开太多方法。";
+}
+
 function getMistakeKnowledgeBoundary({ subject, grade }) {
   const subjectText = String(subject || "");
   const gradeText = String(grade || "");
@@ -607,9 +616,10 @@ function normalizeMistakeWorkflowReport(reportText, fallback = {}) {
   };
 }
 
-function buildMistakeWorkflowPrompt({ taskType, taskText, subject, grade, title, source, prompt, archiveSnapshot, documentText }) {
+function buildMistakeWorkflowPrompt({ taskType, taskText, subject, grade, title, source, prompt, archiveSnapshot, documentText, questionScope }) {
   const studentGrade = grade || "学生当前年级";
   const subjectText = subject || "未指定科目";
+  const knowledgeBoundary = getMistakeKnowledgeBoundary({ subject, grade });
   const common = [
     "你是树子AI错题专项老师。请严格根据上传材料和学生补充来处理，不要编造看不清的题干。",
     "请使用中文自然语言输出，不要输出JSON，不要输出Markdown表格，不要出现英文字段名。",
@@ -627,10 +637,13 @@ function buildMistakeWorkflowPrompt({ taskType, taskText, subject, grade, title,
     return [
       "你现在只做“生成类似题”，不要分析原题错因，不要分析整张试卷。",
       jsonInstruction("{title:string, summary:string, similar_questions:[{title:string, question:string, answer:string, solution_steps:[string], training_goal:string, difficulty:string}]}"),
+      `生成范围：${getMistakeSimilarScopeText(questionScope)}`,
+      `年级硬性限制：所有训练题必须是${studentGrade}学生可以学习和完成的${subjectText}题；题干、知识点、解法和答案步骤都不能超出这个年级常规知识范围。`,
+      knowledgeBoundary,
       "请先在心里判断原题的核心解题方法、关键模型和突破口，再生成1到3道训练题。",
       "生成标准：解题方法类似、思路结构相近、关键突破口相同；不要只是改数字，也不要只生成同知识点但方法不同的题。",
       "每道题必须包含题目、答案、简要步骤和训练目的；训练目的要明确指出它训练的是哪一种解题方法或思路模型。",
-      "题目难度、表达方式和使用知识必须适合当前年级；如果原题看不清或条件不足，请说明无法准确生成，并请求学生重新上传更清楚的题目。",
+      "如果原题本身疑似超出当前年级，请把训练题降到当前年级可掌握的同类方法；如果原题看不清或条件不足，请说明无法准确生成，并请求学生重新上传更清楚的题目。",
       ...common,
     ].join("\n");
   }
@@ -2337,6 +2350,7 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
             prompt,
             archiveSnapshot,
             documentText,
+            questionScope,
           });
           const structuredResult = await generateMistakeGeminiTextWithFallback({
             model: geminiModel,

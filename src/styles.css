@@ -5102,6 +5102,13 @@ audio {
   font-weight: 900;
 }
 
+.mistake-scope-actions p {
+  margin: -2px 0 0;
+  color: #7c877f;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .mistake-scope-actions div {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
