@@ -627,7 +627,10 @@ function buildMistakeWorkflowPrompt({ taskType, taskText, subject, grade, title,
     return [
       "你现在只做“生成类似题”，不要分析原题错因，不要分析整张试卷。",
       jsonInstruction("{title:string, summary:string, similar_questions:[{title:string, question:string, answer:string, solution_steps:[string], training_goal:string, difficulty:string}]}"),
-      "要求：生成1到3道同类型训练题；每道题必须有题目、答案、步骤和训练目的；题目难度适合当前年级。",
+      "请先在心里判断原题的核心解题方法、关键模型和突破口，再生成1到3道训练题。",
+      "生成标准：解题方法类似、思路结构相近、关键突破口相同；不要只是改数字，也不要只生成同知识点但方法不同的题。",
+      "每道题必须包含题目、答案、简要步骤和训练目的；训练目的要明确指出它训练的是哪一种解题方法或思路模型。",
+      "题目难度、表达方式和使用知识必须适合当前年级；如果原题看不清或条件不足，请说明无法准确生成，并请求学生重新上传更清楚的题目。",
       ...common,
     ].join("\n");
   }
@@ -2229,7 +2232,7 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
     const taskMap = {
       custom: "学生自定义要求：根据上传材料和学生输入回答。",
       analyzeMistake: "AI分析错题：给学生讲解题目，给出清楚框架和答案。",
-      generateSimilar: "AI生成类似题：根据上传或选择的错题生成1-3道同类型训练题，包含答案、步骤和训练目的。",
+      generateSimilar: "AI生成类似题：根据上传或选择的错题生成1-3道解题方法类似、思路结构相近的训练题，包含答案、步骤和训练目的。",
       analyzePaper: "AI分析试卷：整理试卷/作业中的错题清单、薄弱知识点、错误类型、优先训练顺序和复习建议。",
     };
     const geminiMode = normalizedQualityMode;
