@@ -609,33 +609,31 @@ function buildMistakeRecognitionPrompt({ subject, grade, title, prompt, document
   ].join("\n");
 }
 
-function buildMistakeExplanationPrompt({ taskText, subject, grade, title, prompt, archiveSnapshot, recognitionText }) {
+function buildMistakeExplanationPrompt({ subject, grade, title, prompt, recognitionText }) {
   const studentGrade = grade || "学生当前年级";
   const subjectText = subject || "未指定科目";
   return [
-    "你现在只做第二步：根据已经识别出的题目讲解。",
-    `你是一位熟悉中国大陆K12教材、考试命题规律和阅卷标准的一线教师。请帮一名${studentGrade}学生讲解这道${subjectText}题，目标是让学生听懂并知道考试如何写。`,
-    "由于你的回答会影响学生得分，必须极端严谨。请在内部先完整解题并检查答案；不要输出内部思考过程，只输出学生需要看的讲解。",
-    "如果题目识别不完整、缺少关键条件或图片不清楚，请在开头委婉指出，并基于最合理的假设继续；如果无法合理作答，请明确说明需要补充什么，不要硬编。",
-    "必须使用中国大陆教材和考试中的标准术语；解答题步骤要符合踩点得分原则，步骤清楚、逻辑严密，严禁跳步。",
-    "如果题目涉及多种位置、多种情况或分类讨论，请给出清楚的分类框架；每一种情况都要有必要推导、关键关系和结论，但不要重复已经证明过的内容。",
-    "每一问只保留一种最清楚的解法。不要反复否定自己，不要罗列多套备选方法，不要边讲边推翻前文。",
-    "最终输出必须且只能包含下面四个Markdown板块：",
-    "### 🎯 核心考点",
-    "50字以内，指出本题考查的教材章节、具体知识点、公式或题型。",
-    "### 🧭 题目解构",
-    "分析已知条件、隐藏条件、陷阱；几何题说明关键辅助线或核心模型；应用题说明设什么未知数。",
-    "### ✍️ 规范详解",
-    "严格按照中国大陆中高考阅卷标准分步书写。每一步后面可以用括号简短说明原因或公式。多小问按小问分别讲。",
-    "### 💡 提分大招（名师总结）",
-    "总结这类题型的套路、易错点、检查方法或一句好记的口诀。不要空泛鼓励。",
-    "内容完整优先，整体控制在2500字以内。请使用中文自然语言和普通数学符号，不要输出JSON，不要输出Markdown表格，不要使用LaTeX代码。",
-    `任务类型：${taskText}`,
+    "你现在只做第二步：讲解题目。第一步已经识别了题目，你不要重新识别图片，也不要额外猜题。",
+    `请像一位有经验的${subjectText}老师，给一名${studentGrade}学生讲清楚这道题。目标是让学生听懂思路，并知道考试时怎么写。`,
+    "请先在内部完整解题并检查一遍，但不要输出内部思考过程。",
+    "如果题目条件识别不完整，先说明缺少哪一处；能合理继续就基于明确假设继续，不能合理继续就直接说明需要补充材料，不要硬编。",
+    "输出只需要四个自然段落标题：",
+    "1. 题目在考什么",
+    "2. 解题思路",
+    "3. 规范解答",
+    "4. 易错提醒",
+    "要求：",
+    "- 多小问按题目顺序讲；涉及分类讨论时，只列必要情况，每种情况给关键推导和结论。",
+    "- 每一问只保留一种最清楚的解法，不要反复尝试、不要推翻自己、不要重复已经证明过的内容。",
+    "- 讲解要适合所选年级，不要超出这个年级太多。",
+    "- 不要使用Markdown表格，不要输出JSON，不要出现英文字段名。",
+    "- 不要使用LaTeX代码，不要写 $...$、\\triangle、\\angle、\\frac；数学符号尽量用普通文字表达。",
+    "- 不要使用“∵”“∴”，请写“因为”“所以”。",
+    "- 整体控制在2500字以内。",
     `科目：${subjectText}`,
     `题目所属年级：${grade || "未指定"}`,
     `标题：${title || "错题"}`,
     `学生补充要求：${prompt || "无"}`,
-    `学生档案摘要：${archiveSnapshot || "{}"}`,
     `第一步识别到的题目：\n${recognitionText || "未识别到题目。请说明无法讲解。"}`,
   ].join("\n");
 }
@@ -2180,12 +2178,10 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
             model: geminiModel,
             stage: "explanation",
             prompt: buildMistakeExplanationPrompt({
-              taskText: taskMap[taskType] || taskMap.analyzeMistake,
               subject,
               grade,
               title,
               prompt,
-              archiveSnapshot,
               recognitionText,
             }),
             files: [],
