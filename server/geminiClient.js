@@ -52,14 +52,18 @@ export async function generateGeminiText({
   prompt,
   files = [],
   temperature = 0.25,
+  topP,
   responseMimeType = "",
   thinkingBudget = defaultGeminiThinkingBudget,
+  maxOutputTokens = geminiMaxOutputTokens,
 }) {
   ensureGeminiKey();
   const parts = [{ text: prompt }, ...files.map(toGeminiPart).filter(Boolean)];
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), geminiTimeoutMs);
   const normalizedThinkingBudget = normalizeThinkingBudget(thinkingBudget);
+  const normalizedTopP = Number(topP);
+  const normalizedMaxOutputTokens = Math.max(1024, Number(maxOutputTokens || geminiMaxOutputTokens));
   let response;
   try {
     response = await fetch(`${geminiEndpoint}/${encodeURIComponent(model)}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
@@ -70,8 +74,9 @@ export async function generateGeminiText({
         contents: [{ role: "user", parts }],
         generationConfig: {
           temperature,
+          ...(Number.isFinite(normalizedTopP) ? { topP: normalizedTopP } : {}),
           candidateCount: 1,
-          maxOutputTokens: geminiMaxOutputTokens,
+          maxOutputTokens: normalizedMaxOutputTokens,
           ...(normalizedThinkingBudget !== undefined
             ? { thinkingConfig: { thinkingBudget: normalizedThinkingBudget } }
             : {}),

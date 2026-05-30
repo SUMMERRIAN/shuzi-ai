@@ -5216,6 +5216,37 @@ audio {
   white-space: pre-wrap;
 }
 
+.structured-mistake-text {
+  display: grid;
+  gap: 12px;
+}
+
+.structured-mistake-text h4,
+.structured-mistake-text h5 {
+  margin: 6px 0 0;
+  color: #082318;
+  line-height: 1.35;
+}
+
+.structured-mistake-text h4 {
+  font-size: 18px;
+}
+
+.structured-mistake-text h5 {
+  font-size: 16px;
+}
+
+.structured-mistake-text p {
+  white-space: pre-wrap;
+}
+
+.structured-mistake-text ul {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding-left: 20px;
+}
+
 .mistake-teacher-card {
   display: grid;
   gap: 16px;

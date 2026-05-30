@@ -465,11 +465,21 @@ function buildMistakeExplanationPrompt({ taskText, subject, grade, title, prompt
   const subjectText = subject || "未指定科目";
   return [
     "你现在只做第二步：根据已经识别出的题目讲解。",
-    `请帮一名${studentGrade}学生讲解这道${subjectText}题，目标是让学生听懂。`,
-    "请像老师讲题一样输出：先说核心思路，再按小问讲关键步骤，最后给出答案或结论。",
+    `你是一位熟悉中国大陆K12教材、考试命题规律和阅卷标准的一线教师。请帮一名${studentGrade}学生讲解这道${subjectText}题，目标是让学生听懂并知道考试如何写。`,
+    "由于你的回答会影响学生得分，必须极端严谨。请在内部先完整解题并检查答案；不要输出内部思考过程，只输出学生需要看的讲解。",
+    "如果题目识别不完整、缺少关键条件或图片不清楚，请在开头委婉指出，并基于最合理的假设继续；如果无法合理作答，请明确说明需要补充什么，不要硬编。",
+    "必须使用中国大陆教材和考试中的标准术语；解答题步骤要符合踩点得分原则，步骤清楚、逻辑严密，严禁跳步。",
     "如果题目涉及多种位置、多种情况或分类讨论，请给出清楚的分类框架；每一种情况都要有必要推导、关键关系和结论，但不要重复已经证明过的内容。",
     "每一问只保留一种最清楚的解法。不要反复否定自己，不要罗列多套备选方法，不要边讲边推翻前文。",
-    "如果识别结果不完整，或某一步确实无法判断，请直接说明哪里不确定；不要硬编条件、过程或答案。",
+    "最终输出必须且只能包含下面四个Markdown板块：",
+    "### 🎯 核心考点",
+    "50字以内，指出本题考查的教材章节、具体知识点、公式或题型。",
+    "### 🧭 题目解构",
+    "分析已知条件、隐藏条件、陷阱；几何题说明关键辅助线或核心模型；应用题说明设什么未知数。",
+    "### ✍️ 规范详解",
+    "严格按照中国大陆中高考阅卷标准分步书写。每一步后面可以用括号简短说明原因或公式。多小问按小问分别讲。",
+    "### 💡 提分大招（名师总结）",
+    "总结这类题型的套路、易错点、检查方法或一句好记的口诀。不要空泛鼓励。",
     "内容完整优先，整体控制在2500字以内。请使用中文自然语言和普通数学符号，不要输出JSON，不要输出Markdown表格，不要使用LaTeX代码。",
     `任务类型：${taskText}`,
     `科目：${subjectText}`,
@@ -1999,9 +2009,11 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
               model: geminiModel,
               prompt: buildMistakeRecognitionPrompt({ subject, grade, title, prompt, documentText }),
               files,
-              temperature: 0.05,
+              temperature: 0,
+              topP: 0.1,
               responseMimeType: "",
               thinkingBudget: Number(process.env.GEMINI_MISTAKE_RECOGNITION_THINKING_BUDGET || 512),
+              maxOutputTokens: Number(process.env.GEMINI_MISTAKE_RECOGNITION_MAX_OUTPUT_TOKENS || 2048),
             });
           } else {
             recognitionText = [prompt, documentText].filter((item) => String(item || "").trim()).join("\n\n");
@@ -2019,9 +2031,11 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
               recognitionText,
             }),
             files: [],
-            temperature: 0.15,
+            temperature: 0,
+            topP: 0.1,
             responseMimeType: "",
             thinkingBudget: Number(process.env.GEMINI_MISTAKE_THINKING_BUDGET || (normalizedQualityMode === "high" ? 2048 : 1024)),
+            maxOutputTokens: Number(process.env.GEMINI_MISTAKE_EXPLANATION_MAX_OUTPUT_TOKENS || 4096),
           });
         } else {
           const geminiPrompt = buildMistakeWorkflowPrompt({
@@ -2039,9 +2053,11 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
             model: geminiModel,
             prompt: geminiPrompt,
             files,
-            temperature: 0.25,
+            temperature: 0,
+            topP: 0.1,
             responseMimeType: "application/json",
             thinkingBudget: undefined,
+            maxOutputTokens: Number(process.env.GEMINI_MISTAKE_STRUCTURED_MAX_OUTPUT_TOKENS || 4096),
           });
         }
         const report =

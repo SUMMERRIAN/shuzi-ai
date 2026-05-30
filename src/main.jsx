@@ -7616,7 +7616,7 @@ function MistakeReportView({ report }) {
       {sections.map((section, index) => (
         <section key={`${section.title}-${index}`}>
           <h3>{section.title}</h3>
-          <p>{section.content}</p>
+          <StructuredMistakeText text={section.content} />
         </section>
       ))}
       {extracted.length > 0 && !hasTeacherReport && (
@@ -7662,8 +7662,119 @@ function MistakeReportView({ report }) {
   );
 }
 
+function StructuredMistakeText({ text }) {
+  const lines = String(text || "").split(/\r?\n/);
+  const blocks = [];
+  let paragraph = [];
+  let list = [];
+
+  function flushParagraph() {
+    if (!paragraph.length) return;
+    blocks.push({ type: "p", text: paragraph.join("\n") });
+    paragraph = [];
+  }
+
+  function flushList() {
+    if (!list.length) return;
+    blocks.push({ type: "ul", items: list });
+    list = [];
+  }
+
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushParagraph();
+      flushList();
+      return;
+    }
+    const heading = trimmed.match(/^(#{2,4})\s*(.+)$/);
+    if (heading) {
+      flushParagraph();
+      flushList();
+      blocks.push({ type: heading[1].length <= 3 ? "h4" : "h5", text: heading[2] });
+      return;
+    }
+    const bullet = trimmed.match(/^[-*]\s+(.+)$/);
+    if (bullet) {
+      flushParagraph();
+      list.push(bullet[1]);
+      return;
+    }
+    const numbered = trimmed.match(/^(\d+[.、])\s+(.+)$/);
+    if (numbered) {
+      flushParagraph();
+      list.push(`${numbered[1]} ${numbered[2]}`);
+      return;
+    }
+    flushList();
+    paragraph.push(line);
+  });
+  flushParagraph();
+  flushList();
+
+  return (
+    <div className="structured-mistake-text">
+      {blocks.map((block, index) => {
+        if (block.type === "h4") return <h4 key={index}>{block.text}</h4>;
+        if (block.type === "h5") return <h5 key={index}>{block.text}</h5>;
+        if (block.type === "ul") {
+          return (
+            <ul key={index}>
+              {block.items.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}
+            </ul>
+          );
+        }
+        return <p key={index}>{block.text}</p>;
+      })}
+    </div>
+  );
+}
+
 function renderMistakeReportHtml(report) {
   const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+  const renderStructuredHtml = (value) => {
+    const lines = String(value || "").split(/\r?\n/);
+    let html = "";
+    let paragraph = [];
+    let list = [];
+    const flushParagraph = () => {
+      if (!paragraph.length) return;
+      html += `<p>${escape(paragraph.join("\n"))}</p>`;
+      paragraph = [];
+    };
+    const flushList = () => {
+      if (!list.length) return;
+      html += `<ul>${list.map((item) => `<li>${escape(item)}</li>`).join("")}</ul>`;
+      list = [];
+    };
+    lines.forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        flushParagraph();
+        flushList();
+        return;
+      }
+      const heading = trimmed.match(/^(#{2,4})\s*(.+)$/);
+      if (heading) {
+        flushParagraph();
+        flushList();
+        html += `<h3>${escape(heading[2])}</h3>`;
+        return;
+      }
+      const bullet = trimmed.match(/^[-*]\s+(.+)$/);
+      const numbered = trimmed.match(/^(\d+[.、])\s+(.+)$/);
+      if (bullet || numbered) {
+        flushParagraph();
+        list.push(bullet ? bullet[1] : `${numbered[1]} ${numbered[2]}`);
+        return;
+      }
+      flushList();
+      paragraph.push(line);
+    });
+    flushParagraph();
+    flushList();
+    return html;
+  };
   const sections = Array.isArray(report.sections) ? report.sections : [];
   const extracted = Array.isArray(report.extracted_questions) ? report.extracted_questions : [];
   const similar = Array.isArray(report.similar_questions) ? report.similar_questions : [];
@@ -7683,7 +7794,7 @@ function renderMistakeReportHtml(report) {
       <h3>标准解题步骤</h3>${standardSteps.map((item, index) => `<p><strong>${escape(item.step || `第${index + 1}步`)}</strong>：${escape(typeof item === "string" ? item : item.explanation || "")}</p>`).join("")}
       <h3>明确答案</h3><p>${escape(teacher.final_answer || "")}</p>
     ` : ""}
-    ${sections.map((section) => `<h2>${escape(section.title)}</h2><p>${escape(section.content)}</p>`).join("")}
+    ${sections.map((section) => `<h2>${escape(section.title)}</h2>${renderStructuredHtml(section.content)}`).join("")}
     ${extracted.length ? `<h2>错题清单</h2>${extracted.map((item, index) => `<h3>${index + 1}. ${escape(item.title)}</h3><p>${escape(item.question_content || "")}</p><p>知识点：${escape(Array.isArray(item.knowledge_points) ? item.knowledge_points.join("、") : item.knowledge_points || "")}</p><p>错因：${escape(item.error_type || "")}</p><p>方法缺口：${escape(item.method_gap || "")}</p>`).join("")}` : ""}
     ${similar.length ? `<h2>同类训练题</h2>${similar.map((item, index) => `<h3>${escape(item.title || `训练题 ${index + 1}`)}</h3><p>${escape(item.question || "")}</p><p>答案：${escape(item.answer || "")}</p><p>解析：${escape(Array.isArray(item.solution_steps) ? item.solution_steps.join("；") : item.solution_steps || "")}</p>`).join("")}` : ""}
   `;
