@@ -1236,11 +1236,11 @@ async function makeDocumentTextSummary(files) {
 }
 
 const freeAskMaterialLimits = {
-  maxFiles: 4,
-  maxImageFiles: 3,
-  maxImageBytes: 4 * 1024 * 1024,
-  maxDocumentChars: 16000,
-  maxCharsPerDocument: 6000,
+  maxFiles: Number(process.env.FREE_ASK_MAX_FILES || 8),
+  maxImageFiles: Number(process.env.FREE_ASK_MAX_IMAGE_FILES || 5),
+  maxImageBytes: Number(process.env.FREE_ASK_MAX_IMAGE_MB || 8) * 1024 * 1024,
+  maxDocumentChars: Number(process.env.FREE_ASK_MAX_DOCUMENT_CHARS || 32000),
+  maxCharsPerDocument: Number(process.env.FREE_ASK_MAX_CHARS_PER_DOCUMENT || 12000),
 };
 
 function isImageUpload(file) {
@@ -2819,7 +2819,7 @@ app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
   }
 });
 
-app.post("/api/ai/free-ask", requireAuth, upload.array("files", 6), async (req, res, next) => {
+app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, res, next) => {
   try {
     await assertPaidMember(req.user.id);
     const student = await getPrimaryStudent(req.user);

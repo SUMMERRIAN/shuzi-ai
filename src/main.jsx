@@ -193,6 +193,18 @@ const freeAskModelOptions = [
   { value: "gemini-thinking", provider: "gemini", mode: "thinking", label: "Gemini · 思考" },
 ];
 
+function detectFreeAskImageGenerationIntent(content = "") {
+  const text = String(content || "").replace(/\s+/g, "");
+  if (!text) return false;
+  const hasCreateVerb = /(生成|画|绘制|制作|设计|做成|做一张|出一张|转成|可视化成|帮我做|帮我画)/.test(text);
+  const hasImageTarget = /(图片|图像|知识图|示意图|结构图|流程图|思维导图|海报|信息图|可视化图|插画)/.test(text);
+  const analysisOnly =
+    /(分析|识别|看看|解读|读取|提取|总结|讲解|解释).{0,12}(图片|照片|截图|图中|图里|这张图|上传的图|文件)/.test(text) &&
+    !hasCreateVerb;
+  if (analysisOnly) return false;
+  return hasCreateVerb && hasImageTarget;
+}
+
 const libraryViews = [
   { id: "home", label: "首页", icon: Home },
   { id: "drive", label: "我的云端硬盘", icon: HardDrive },
@@ -3858,7 +3870,7 @@ function App() {
     setFreeAskStatus("loading");
     clearAiNotice();
     const selectedModel = freeAskModelOptions.find((option) => option.value === freeAskModelChoice) || freeAskModelOptions[0];
-    const wantsImage = /(图片|画图|生成图|知识图|示意图|结构图|图解|可视化|海报)/.test(content);
+    const wantsImage = detectFreeAskImageGenerationIntent(content);
     console.info(
       "AI自由问提示词",
       buildAgentPrompt(
@@ -8013,7 +8025,7 @@ function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile
           <div className="free-ask-guide-panel">
             <strong>使用提示</strong>
             <p>这里接入的是原生 AI API，相当于你直接与模型对话。请尽量把背景、目标、材料和你希望得到的结果说清楚，AI 才更容易给出准确、清晰的回答。</p>
-            <p>上传图片、PDF 或文档时，系统会先控制材料大小并整理可读取内容，再交给 AI 处理，避免一次性请求过大。</p>
+            <p>上传图片、PDF 或文档时，系统会优先整理可读取内容和关键图片，再交给 AI 处理；如果材料很多，建议先说明你最想让 AI 看哪一部分。</p>
           </div>
         )}
         <button type="button" onClick={() => setGuideOpen((prev) => !prev)} aria-expanded={guideOpen}>
