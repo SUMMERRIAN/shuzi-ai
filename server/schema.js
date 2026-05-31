@@ -231,6 +231,30 @@ export async function ensureSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS free_ask_conversations (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      student_id UUID REFERENCES students(id) ON DELETE CASCADE,
+      title TEXT NOT NULL DEFAULT '新的对话',
+      memory_summary TEXT NOT NULL DEFAULT '',
+      message_count INTEGER NOT NULL DEFAULT 0,
+      last_message_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      is_archived BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS free_ask_messages (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      conversation_id UUID NOT NULL REFERENCES free_ask_conversations(id) ON DELETE CASCADE,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+      content TEXT NOT NULL DEFAULT '',
+      attachments JSONB NOT NULL DEFAULT '[]'::jsonb,
+      meta JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS ai_generation_jobs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -286,6 +310,8 @@ export async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_forum_posts_created_at ON forum_posts(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_forum_replies_post_id ON forum_replies(post_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_ai_generation_jobs_user_feature ON ai_generation_jobs(user_id, feature, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_free_ask_conversations_user_last ON free_ask_conversations(user_id, is_archived, last_message_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_free_ask_messages_conversation_created ON free_ask_messages(conversation_id, created_at);
   `);
   await query(`ALTER TABLE ai_generation_jobs ADD COLUMN IF NOT EXISTS provider TEXT`);
   await query(`ALTER TABLE ai_generation_jobs ADD COLUMN IF NOT EXISTS mode TEXT`);

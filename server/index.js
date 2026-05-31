@@ -1300,6 +1300,286 @@ async function buildFreeAskMaterialContext(files = []) {
 const freeAskSystemPrompt =
   "你是树子AI的自由对话助手。用户可能是学生，也可能是家长。请直接回答用户当前问题；如果有上传材料，优先结合可读取材料和图片回答。保持中文表达，结构清楚，分段自然，便于学生和家长阅读。不要臆造看不清或没有提供的信息；材料不足时请说明需要补充什么。";
 
+const freeAskMemoryLimits = {
+  recentMessages: Number(process.env.FREE_ASK_RECENT_MESSAGES || 12),
+  maxStoredMessages: Number(process.env.FREE_ASK_MAX_STORED_MESSAGES || 80),
+  summarizeKeepMessages: Number(process.env.FREE_ASK_SUMMARIZE_KEEP_MESSAGES || 40),
+  maxSummaryChars: Number(process.env.FREE_ASK_MAX_SUMMARY_CHARS || 1800),
+  maxContextChars: Number(process.env.FREE_ASK_MAX_CONTEXT_CHARS || 12000),
+};
+
+function safeJsonValue(value, fallback) {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return fallback;
+    }
+  }
+  return value;
+}
+
+function toPublicFreeAskConversation(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    title: row.title || "新的对话",
+    memorySummary: row.memory_summary || "",
+    messageCount: Number(row.message_count || 0),
+    lastMessageAt: row.last_message_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toPublicFreeAskMessage(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    role: row.role,
+    content: row.content || "",
+    attachments: safeJsonValue(row.attachments, []),
+    meta: safeJsonValue(row.meta, {}),
+    createdAt: row.created_at,
+  };
+}
+
+function makeFreeAskTitle(question = "", files = []) {
+  const fromQuestion = String(question || "").replace(/\s+/g, " ").trim();
+  if (fromQuestion) return fromQuestion.slice(0, 28);
+  const firstFileName = files?.[0]?.originalname || "";
+  if (firstFileName) return firstFileName.replace(/\.[^.]+$/, "").slice(0, 28);
+  return "新的对话";
+}
+
+function makeFreeAskAttachmentMeta(files = []) {
+  return (files || []).map((file) => ({
+    name: file.originalname,
+    type: file.mimetype || "unknown",
+    size: Number(file.size || 0),
+  }));
+}
+
+async function ensureFreeAskConversation({ userId, studentId, conversationId, question, files }) {
+  if (conversationId) {
+    const existing = (
+      await query(
+        "SELECT * FROM free_ask_conversations WHERE id = $1 AND user_id = $2 AND is_archived = false",
+        [conversationId, userId]
+      )
+    ).rows[0];
+    if (existing) return existing;
+  }
+  return (
+    await query(
+      `INSERT INTO free_ask_conversations (user_id, student_id, title)
+       VALUES ($1, $2, $3)
+       RETURNING *`,
+      [userId, studentId || null, makeFreeAskTitle(question, files)]
+    )
+  ).rows[0];
+}
+
+async function insertFreeAskMessage({ conversationId, userId, role, content, attachments = [], meta = {} }) {
+  const message = (
+    await query(
+      `INSERT INTO free_ask_messages (conversation_id, user_id, role, content, attachments, meta)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [conversationId, userId, role, content || "", JSON.stringify(attachments || []), JSON.stringify(meta || {})]
+    )
+  ).rows[0];
+  await query(
+    `UPDATE free_ask_conversations
+     SET message_count = (
+       SELECT COUNT(*) FROM free_ask_messages WHERE conversation_id = $1
+     ),
+     last_message_at = now(),
+     updated_at = now()
+     WHERE id = $1`,
+    [conversationId]
+  );
+  return message;
+}
+
+function clipFreeAskText(value, maxLength) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) return text;
+  return text.slice(0, maxLength - 1) + "…";
+}
+
+async function buildFreeAskConversationContext(conversationId) {
+  if (!conversationId) return "";
+  const conversation = (await query("SELECT * FROM free_ask_conversations WHERE id = $1", [conversationId])).rows[0];
+  if (!conversation) return "";
+  const messages = (
+    await query(
+      `SELECT role, content, created_at
+       FROM free_ask_messages
+       WHERE conversation_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2`,
+      [conversationId, freeAskMemoryLimits.recentMessages]
+    )
+  ).rows.reverse();
+  const recent = messages
+    .map((message) => `${message.role === "user" ? "用户" : "AI"}：${clipFreeAskText(message.content, 900)}`)
+    .join("\n");
+  return [
+    conversation.memory_summary ? `历史压缩记忆：\n${conversation.memory_summary}` : "",
+    recent ? `最近对话：\n${recent}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+    .slice(0, freeAskMemoryLimits.maxContextChars);
+}
+
+function compactFreeAskMemoryText(existingSummary = "", oldMessages = []) {
+  const lines = oldMessages
+    .map((message) => `${message.role === "user" ? "用户" : "AI"}：${clipFreeAskText(message.content, 240)}`)
+    .filter(Boolean);
+  const combined = [existingSummary, lines.join("\n")].filter(Boolean).join("\n");
+  if (!combined) return "";
+  return combined.slice(Math.max(0, combined.length - freeAskMemoryLimits.maxSummaryChars));
+}
+
+async function pruneFreeAskConversationMemory(conversationId) {
+  const count = Number((await query("SELECT COUNT(*) AS count FROM free_ask_messages WHERE conversation_id = $1", [conversationId])).rows[0]?.count || 0);
+  if (count <= freeAskMemoryLimits.maxStoredMessages) return;
+  const rows = (
+    await query(
+      `SELECT id, role, content, created_at
+       FROM free_ask_messages
+       WHERE conversation_id = $1
+       ORDER BY created_at ASC`,
+      [conversationId]
+    )
+  ).rows;
+  const keepCount = Math.max(8, freeAskMemoryLimits.summarizeKeepMessages);
+  const oldMessages = rows.slice(0, Math.max(0, rows.length - keepCount));
+  const keepMessages = rows.slice(-keepCount);
+  const conversation = (await query("SELECT memory_summary FROM free_ask_conversations WHERE id = $1", [conversationId])).rows[0];
+  const nextSummary = compactFreeAskMemoryText(conversation?.memory_summary || "", oldMessages);
+  if (oldMessages.length) {
+    await query("DELETE FROM free_ask_messages WHERE id = ANY($1::uuid[])", [oldMessages.map((message) => message.id)]);
+  }
+  await query(
+    `UPDATE free_ask_conversations
+     SET memory_summary = $2,
+         message_count = $3,
+         updated_at = now()
+     WHERE id = $1`,
+    [conversationId, nextSummary, keepMessages.length]
+  );
+}
+
+function looksLikeFreeAskQuestionExplanation({ question = "", files = [] }) {
+  if (!files.length) return false;
+  const text = String(question || "");
+  if (!text.trim()) return true;
+  return /题|作业|试卷|讲解|解答|答案|步骤|数学|物理|化学|几何|函数|看不懂|不会|帮我看|分析/.test(text);
+}
+
+function inferFreeAskSubject(question = "", files = []) {
+  const text = `${question} ${(files || []).map((file) => file.originalname || "").join(" ")}`;
+  if (/物理|力学|电路|压强|浮力|速度|功率/.test(text)) return "物理";
+  if (/化学|方程式|溶液|酸|碱|盐|元素|分子|原子/.test(text)) return "化学";
+  if (/英语|English|语法|单词|作文/.test(text)) return "英语";
+  if (/语文|阅读|文言文|作文|古诗/.test(text)) return "语文";
+  return "数学";
+}
+
+function buildFreeAskCleanAnswer({ question, materialContext, conversationContext }) {
+  return [
+    freeAskSystemPrompt,
+    conversationContext ? `可参考的历史上下文：\n${conversationContext}` : "",
+    "请直接回答用户本轮问题。输出要干净、分段清楚，不要输出原始 LaTeX 代码、JSON 或英文内部字段名。",
+    "用户本轮问题：" + (question || "请根据附件回答。"),
+    "附件：" + materialContext.fileSummary,
+    materialContext.materialText ? "附件可读内容：\n" + materialContext.materialText : "",
+  ].filter(Boolean).join("\n\n");
+}
+
+async function generateFreeAskQuestionExplanation({ question, files, student, materialContext }) {
+  const subject = inferFreeAskSubject(question, files);
+  const grade = student?.grade || "";
+  const title = makeFreeAskTitle(question, files);
+  const recognitionResult = await generateMistakeGeminiTextWithRetry({
+    stage: "free-ask-recognition",
+    prompt: buildMistakeRecognitionPrompt({
+      subject,
+      grade,
+      title,
+      prompt: question,
+      documentText: materialContext.materialText,
+    }),
+    files: materialContext.safeImageFiles,
+    temperature: 0,
+    topP: 0.1,
+    maxOutputTokens: 2048,
+  });
+  const explanationResult = await generateMistakeGeminiTextWithRetry({
+    stage: "free-ask-explanation",
+    prompt: buildMistakeExplanationPrompt({
+      subject,
+      grade,
+      title,
+      prompt: question,
+      recognitionText: recognitionResult.text,
+      questionScope: "auto",
+    }),
+    files: [],
+    temperature: 0,
+    topP: 0.1,
+    maxOutputTokens: 4096,
+  });
+  const answer = [
+    "AI识别到的题目",
+    recognitionResult.text,
+    "",
+    "AI讲解",
+    explanationResult.text,
+  ].join("\n\n");
+  return {
+    answer: normalizeStudentMathText(answer),
+    provider: "gemini",
+    mode: "thinking",
+    model: explanationResult.model,
+    meta: {
+      usedQuestionWorkflow: true,
+      recognitionModel: recognitionResult.model,
+      explanationModel: explanationResult.model,
+      subject,
+      grade,
+    },
+  };
+}
+
+async function getFreeAskConversationWithMessages(userId, conversationId) {
+  const conversation = (
+    await query("SELECT * FROM free_ask_conversations WHERE id = $1 AND user_id = $2 AND is_archived = false", [
+      conversationId,
+      userId,
+    ])
+  ).rows[0];
+  if (!conversation) return null;
+  const messages = (
+    await query(
+      `SELECT * FROM free_ask_messages
+       WHERE conversation_id = $1
+       ORDER BY created_at ASC
+       LIMIT 120`,
+      [conversationId]
+    )
+  ).rows;
+  return {
+    conversation: toPublicFreeAskConversation(conversation),
+    messages: messages.map(toPublicFreeAskMessage),
+  };
+}
+
 function jsonInstruction(schemaDescription) {
   return `请只输出严格 JSON，不要 Markdown，不要额外解释。JSON结构：${schemaDescription}`;
 }
@@ -2819,50 +3099,158 @@ app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
   }
 });
 
+app.get("/api/ai/free-ask/conversations", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    const rows = (
+      await query(
+        `SELECT *
+         FROM free_ask_conversations
+         WHERE user_id = $1 AND is_archived = false
+         ORDER BY last_message_at DESC
+         LIMIT 60`,
+        [req.user.id]
+      )
+    ).rows;
+    res.json({ conversations: rows.map(toPublicFreeAskConversation) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/ai/free-ask/conversations", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    const student = await getPrimaryStudent(req.user);
+    const conversation = await ensureFreeAskConversation({
+      userId: req.user.id,
+      studentId: student.id,
+      conversationId: "",
+      question: req.body?.title || "",
+      files: [],
+    });
+    res.status(201).json({ conversation: toPublicFreeAskConversation(conversation), messages: [] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/ai/free-ask/conversations/:conversationId", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    const payload = await getFreeAskConversationWithMessages(req.user.id, req.params.conversationId);
+    if (!payload) return res.status(404).json({ error: "CONVERSATION_NOT_FOUND" });
+    res.json(payload);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/ai/free-ask/conversations/:conversationId", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    const { title, archived } = req.body || {};
+    const row = (
+      await query(
+        `UPDATE free_ask_conversations
+         SET title = COALESCE($3, title),
+             is_archived = COALESCE($4, is_archived),
+             updated_at = now()
+         WHERE id = $1 AND user_id = $2
+         RETURNING *`,
+        [req.params.conversationId, req.user.id, title ? String(title).slice(0, 40) : null, typeof archived === "boolean" ? archived : null]
+      )
+    ).rows[0];
+    if (!row) return res.status(404).json({ error: "CONVERSATION_NOT_FOUND" });
+    res.json({ conversation: toPublicFreeAskConversation(row) });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, res, next) => {
   try {
     await assertPaidMember(req.user.id);
     const student = await getPrimaryStudent(req.user);
-    const { question = "", wantsImage = "false", provider = "openai", mode = "fast" } = req.body || {};
+    const { question = "", wantsImage = "false", provider = "openai", mode = "fast", conversationId = "" } = req.body || {};
     const files = req.files || [];
     const aiProvider = normalizeAiProvider(provider);
     const aiMode = normalizeAiMode(mode);
     const shouldGenerateImage = wantsImage === "true";
-    const tokenCost = shouldGenerateImage ? 35 : aiMode === "thinking" ? 8 : 5;
+    const useQuestionWorkflow = !shouldGenerateImage && looksLikeFreeAskQuestionExplanation({ question, files });
+    const tokenCost = shouldGenerateImage ? 35 : useQuestionWorkflow || aiMode === "thinking" ? 8 : 5;
     await assertTokenBalance(req.user.id, tokenCost);
     if (!String(question).trim() && !files.length) {
       return res.status(400).json({ error: "QUESTION_REQUIRED", message: "Please enter a question or upload a file." });
     }
+    const conversation = await ensureFreeAskConversation({
+      userId: req.user.id,
+      studentId: student.id,
+      conversationId,
+      question,
+      files,
+    });
+    const conversationContext = await buildFreeAskConversationContext(conversation.id);
+    const attachmentMeta = makeFreeAskAttachmentMeta(files);
+    const userMessage = await insertFreeAskMessage({
+      conversationId: conversation.id,
+      userId: req.user.id,
+      role: "user",
+      content: question || (files.length ? `已上传 ${files.length} 个文件，请根据附件回答。` : ""),
+      attachments: attachmentMeta,
+      meta: { provider: aiProvider, mode: aiMode, wantsImage: shouldGenerateImage, useQuestionWorkflow },
+    });
+    if ((!conversation.title || conversation.title === "新的对话") && makeFreeAskTitle(question, files) !== "新的对话") {
+      await query("UPDATE free_ask_conversations SET title = $2, updated_at = now() WHERE id = $1", [
+        conversation.id,
+        makeFreeAskTitle(question, files),
+      ]);
+    }
     const materialContext = await buildFreeAskMaterialContext(files);
-    const promptText = [
-      "Student question: " + (question || "Please answer based on the attachments."),
-      "User wants an image: " + (shouldGenerateImage ? "yes" : "no"),
-      "Attachments: " + materialContext.fileSummary,
-      materialContext.materialText ? "Prepared attachment context:\n" + materialContext.materialText : "",
-    ].filter(Boolean).join("\n");
+    const promptText = buildFreeAskCleanAnswer({ question, materialContext, conversationContext });
 
     if (shouldGenerateImage || files.length) {
       const { job, reused } = await createAiJob({
         userId: req.user.id,
         studentId: student.id,
         feature: "free-ask",
-        provider: aiProvider,
-        mode: shouldGenerateImage ? "mixed-background" : `${aiMode}-background`,
+        provider: useQuestionWorkflow ? "gemini" : aiProvider,
+        mode: useQuestionWorkflow ? "question-background" : shouldGenerateImage ? "mixed-background" : `${aiMode}-background`,
         tokenCost,
-        input: { question, wantsImage: shouldGenerateImage, provider: aiProvider, mode: aiMode, fileCount: files.length },
+        input: {
+          conversationId: conversation.id,
+          userMessageId: userMessage.id,
+          question,
+          wantsImage: shouldGenerateImage,
+          provider: aiProvider,
+          mode: aiMode,
+          fileCount: files.length,
+          useQuestionWorkflow,
+        },
+        reuseActive: false,
       });
       if (!reused) {
         startAiJob(job.id, async ({ setExternalResponseId }) => {
           await assertTokenBalance(req.user.id, tokenCost);
           let answer = "";
           let model = "";
+          let responseProvider = aiProvider;
+          let responseMode = aiMode;
           let imageBase64 = "";
-          if (aiProvider === "gemini") {
+          let responseMeta = {};
+          if (useQuestionWorkflow) {
+            const result = await generateFreeAskQuestionExplanation({ question, files, student, materialContext });
+            answer = result.answer;
+            model = result.model;
+            responseProvider = result.provider;
+            responseMode = result.mode;
+            responseMeta = result.meta;
+          } else if (aiProvider === "gemini") {
             ensureGeminiKey();
             model = getGeminiModel(aiMode);
             answer = await generateGeminiText({
               model,
-              prompt: [freeAskSystemPrompt, promptText].join("\n"),
+              prompt: promptText,
               files: materialContext.safeImageFiles,
               temperature: aiMode === "thinking" ? 0.2 : 0.35,
             });
@@ -2899,8 +3287,24 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
             ].filter(Boolean).join("\n");
             imageBase64 = (await generateOpenAIImageBackground(imagePrompt, setExternalResponseId, imageQualityForRequest)) || "";
           }
-          answer = answer || "AI has read your question, but did not generate a valid answer. Please try asking in another way.";
-          const eventPayload = { question, answer, provider: aiProvider, mode: aiMode, model, imageModel: imageBase64 ? imageModel : null, hasImage: Boolean(imageBase64) };
+          answer = normalizeStudentMathText(answer || "AI has read your question, but did not generate a valid answer. Please try asking in another way.");
+          const assistantMessage = await insertFreeAskMessage({
+            conversationId: conversation.id,
+            userId: req.user.id,
+            role: "assistant",
+            content: answer,
+            attachments: imageBase64 ? [{ name: "AI-free-ask-image.png", type: "image/png", size: 0 }] : [],
+            meta: {
+              provider: responseProvider,
+              mode: responseMode,
+              model,
+              imageModel: imageBase64 ? imageModel : null,
+              hasImage: Boolean(imageBase64),
+              ...responseMeta,
+            },
+          });
+          await pruneFreeAskConversationMemory(conversation.id);
+          const eventPayload = { question, answer, provider: responseProvider, mode: responseMode, model, imageModel: imageBase64 ? imageModel : null, hasImage: Boolean(imageBase64) };
           if (files.length) {
             await withTransaction(async (client) => {
               const fileRows = await saveUploadedFiles(client, req.user, student, "free_ask", files);
@@ -2917,17 +3321,28 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
           }
           await recordTokenUsage(req.user.id, tokenCost, "AI free ask", {
             feature: "free-ask",
-            provider: aiProvider,
-            mode: aiMode,
+            provider: responseProvider,
+            mode: responseMode,
             model,
             imageModel: imageBase64 ? imageModel : null,
             hasImage: Boolean(imageBase64),
             jobId: job.id,
           });
-          return { answer, provider: aiProvider, mode: aiMode, model, imageBase64, imageModel: imageBase64 ? imageModel : null };
+          const latest = await getFreeAskConversationWithMessages(req.user.id, conversation.id);
+          return {
+            answer,
+            provider: responseProvider,
+            mode: responseMode,
+            model,
+            imageBase64,
+            imageModel: imageBase64 ? imageModel : null,
+            conversation: latest?.conversation || toPublicFreeAskConversation(conversation),
+            userMessage: toPublicFreeAskMessage(userMessage),
+            assistantMessage: toPublicFreeAskMessage(assistantMessage),
+          };
         });
       }
-      return res.status(202).json(publicJob(job));
+      return res.status(202).json({ ...publicJob(job), conversation: toPublicFreeAskConversation(conversation), userMessage: toPublicFreeAskMessage(userMessage) });
     }
 
     let answer = "";
@@ -2938,7 +3353,7 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
       model = getGeminiModel(aiMode);
       answer = await generateGeminiText({
         model,
-        prompt: [freeAskSystemPrompt, promptText].join("\n"),
+        prompt: promptText,
         files: materialContext.safeImageFiles,
         temperature: aiMode === "thinking" ? 0.2 : 0.35,
       });
@@ -2962,7 +3377,16 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
       answer = getResponseText(response);
     }
 
-    answer = answer || "AI has read your question, but did not generate a valid answer. Please try asking in another way.";
+    answer = normalizeStudentMathText(answer || "AI has read your question, but did not generate a valid answer. Please try asking in another way.");
+    const assistantMessage = await insertFreeAskMessage({
+      conversationId: conversation.id,
+      userId: req.user.id,
+      role: "assistant",
+      content: answer,
+      attachments: [],
+      meta: { provider: aiProvider, mode: aiMode, model, hasImage: false },
+    });
+    await pruneFreeAskConversationMemory(conversation.id);
     const eventPayload = { question, answer, provider: aiProvider, mode: aiMode, model, imageModel: imageBase64 ? imageModel : null, hasImage: Boolean(imageBase64) };
     if (files.length) {
       await withTransaction(async (client) => {
@@ -2986,7 +3410,18 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
       imageModel: imageBase64 ? imageModel : null,
       hasImage: Boolean(imageBase64),
     });
-    res.json({ answer, provider: aiProvider, mode: aiMode, model, imageBase64, imageModel: imageBase64 ? imageModel : null });
+    const latest = await getFreeAskConversationWithMessages(req.user.id, conversation.id);
+    res.json({
+      answer,
+      provider: aiProvider,
+      mode: aiMode,
+      model,
+      imageBase64,
+      imageModel: imageBase64 ? imageModel : null,
+      conversation: latest?.conversation || toPublicFreeAskConversation(conversation),
+      userMessage: toPublicFreeAskMessage(userMessage),
+      assistantMessage: toPublicFreeAskMessage(assistantMessage),
+    });
   } catch (error) {
     next(error);
   }

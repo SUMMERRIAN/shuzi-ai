@@ -1990,6 +1990,9 @@ function App() {
   const [freeAskStatus, setFreeAskStatus] = useState("idle");
   const [freeAskModelChoice, setFreeAskModelChoice] = useState("openai-fast");
   const [freeAskMessages, setFreeAskMessages] = useState([]);
+  const [freeAskConversations, setFreeAskConversations] = useState([]);
+  const [activeFreeAskConversationId, setActiveFreeAskConversationId] = useState("");
+  const [freeAskSidebarCollapsed, setFreeAskSidebarCollapsed] = useState(false);
   const [calendarEvents, setCalendarEvents] = useState([]);
   const [calendarCursor, setCalendarCursor] = useState(() => new Date());
   const [calendarEditor, setCalendarEditor] = useState(null);
@@ -3833,6 +3836,75 @@ function App() {
     }
   }
 
+  function upsertFreeAskConversation(conversation) {
+    if (!conversation?.id) return;
+    setFreeAskConversations((prev) => {
+      const next = [conversation, ...prev.filter((item) => item.id !== conversation.id)];
+      return next.sort((a, b) => new Date(b.lastMessageAt || b.updatedAt || 0) - new Date(a.lastMessageAt || a.updatedAt || 0));
+    });
+  }
+
+  function mapFreeAskServerMessage(message) {
+    return {
+      id: message.id,
+      role: message.role,
+      content: message.content || "",
+      attachments: (message.attachments || []).map((file, index) => ({
+        id: `${message.id || "server"}-${index}`,
+        name: file.name || "附件",
+        type: file.type || "unknown",
+        size: file.size || 0,
+        previewUrl: "",
+      })),
+      imageBase64: message.meta?.imageBase64 || "",
+      note: null,
+      createdAt: message.createdAt,
+    };
+  }
+
+  async function loadFreeAskConversation(conversationId) {
+    if (!conversationId) return;
+    try {
+      const data = await apiRequest(`/ai/free-ask/conversations/${conversationId}`);
+      setActiveFreeAskConversationId(data.conversation?.id || conversationId);
+      upsertFreeAskConversation(data.conversation);
+      setFreeAskMessages((data.messages || []).map(mapFreeAskServerMessage));
+    } catch (error) {
+      showAiError(error, "没有加载到这段历史对话，请稍后再试。");
+    }
+  }
+
+  async function loadFreeAskConversations({ selectLatest = false } = {}) {
+    try {
+      const data = await apiRequest("/ai/free-ask/conversations");
+      const conversations = data.conversations || [];
+      setFreeAskConversations(conversations);
+      if (selectLatest && conversations.length && !activeFreeAskConversationId) {
+        await loadFreeAskConversation(conversations[0].id);
+      }
+    } catch (error) {
+      if (member.isPaid) showAiError(error, "AI自由问历史记录暂时没有加载成功。");
+    }
+  }
+
+  async function createFreeAskConversation() {
+    try {
+      const data = await apiRequest("/ai/free-ask/conversations", { method: "POST", body: JSON.stringify({ title: "新的对话" }) });
+      setActiveFreeAskConversationId(data.conversation?.id || "");
+      upsertFreeAskConversation(data.conversation);
+      setFreeAskMessages([]);
+      setFreeAskInput("");
+      setFreeAskFiles([]);
+    } catch (error) {
+      showAiError(error, "新的对话没有创建成功，请稍后再试。");
+    }
+  }
+
+  useEffect(() => {
+    if (activePage !== "freeAsk" || !member.isPaid) return;
+    loadFreeAskConversations({ selectLatest: true });
+  }, [activePage, member.isPaid]);
+
   function handleFreeAskFiles(event) {
     const files = Array.from(event.target.files || []);
     if (!files.length) return;
@@ -3912,6 +3984,7 @@ function App() {
       formData.append("wantsImage", wantsImage ? "true" : "false");
       formData.append("provider", selectedModel.provider);
       formData.append("mode", selectedModel.mode);
+      if (activeFreeAskConversationId) formData.append("conversationId", activeFreeAskConversationId);
       freeAskFiles.forEach((file) => {
         if (file.rawFile) formData.append("files", file.rawFile);
       });
@@ -3919,6 +3992,10 @@ function App() {
         method: "POST",
         body: formData,
       });
+      if (data.conversation) {
+        setActiveFreeAskConversationId(data.conversation.id);
+        upsertFreeAskConversation(data.conversation);
+      }
       setFreeAskMessages((prev) =>
         prev.map((message) =>
           message.id === assistantId
@@ -4279,6 +4356,12 @@ function App() {
             status={freeAskStatus}
             modelChoice={freeAskModelChoice}
             setModelChoice={setFreeAskModelChoice}
+            conversations={freeAskConversations}
+            activeConversationId={activeFreeAskConversationId}
+            loadConversation={loadFreeAskConversation}
+            createConversation={createFreeAskConversation}
+            sidebarCollapsed={freeAskSidebarCollapsed}
+            setSidebarCollapsed={setFreeAskSidebarCollapsed}
           />
         )}
 
@@ -7840,8 +7923,39 @@ function ModernKnowledgeNotePage({
   );
 }
 
+function normalizeFreeAskDisplayText(value) {
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\\\((.*?)\\\)/g, "$1")
+    .replace(/\\\[(.*?)\\\]/gs, "$1")
+    .replace(/\$\$([\s\S]*?)\$\$/g, "$1")
+    .replace(/\$([^$\n]+)\$/g, "$1")
+    .replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, "$1/$2")
+    .replace(/\\dfrac\{([^{}]+)\}\{([^{}]+)\}/g, "$1/$2")
+    .replace(/\\sqrt\{([^{}]+)\}/g, "\u221a($1)")
+    .replace(/\\triangle/g, "\u25b3")
+    .replace(/\\angle/g, "\u2220")
+    .replace(/\\perp/g, "\u22a5")
+    .replace(/\\parallel/g, "\u2225")
+    .replace(/\\cong/g, "\u224c")
+    .replace(/\\sim/g, "\u223c")
+    .replace(/\\times/g, "\u00d7")
+    .replace(/\\cdot/g, "\u00b7")
+    .replace(/\\neq/g, "\u2260")
+    .replace(/\\leq/g, "\u2264")
+    .replace(/\\geq/g, "\u2265")
+    .replace(/\\circ/g, "\u00b0")
+    .replace(/\\text\{([^{}]+)\}/g, "$1")
+    .replace(/\\[a-zA-Z]+/g, "")
+    .replace(/\{([^{}]+)\}/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/[ \t]+\n/g, "\n")
+    .trim();
+}
+
 function FreeAskText({ content = "" }) {
-  const lines = String(content || "").split(/\n/);
+  const lines = normalizeFreeAskDisplayText(content).split(/\n/);
   const blocks = [];
   let paragraph = [];
   let list = [];
@@ -7871,21 +7985,22 @@ function FreeAskText({ content = "" }) {
       blocks.push({ type: "heading", level: Math.min(heading[1].length, 3), text: heading[2].trim() });
       return;
     }
-    const ordered = line.match(/^\d+[.、]\s+(.+)$/);
-    const unordered = line.match(/^[-*•]\s+(.+)$/);
-    if (ordered || unordered) {
-      flushParagraph();
-      list.push((ordered?.[1] || unordered?.[1] || "").trim());
-      return;
-    }
-    if (/^[一二三四五六七八九十]+[、.，]/.test(line) || /^[（(]\d+[）)]/.test(line)) {
+    const numberedHeading = line.match(/^([\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341]+[\u3001.\uff0e]|\(?\d+\)?[\u3001.\uff0e])\s*(.{2,})$/);
+    if (numberedHeading && numberedHeading[2].length <= 34) {
       flushParagraph();
       flushList();
       blocks.push({ type: "heading", level: 3, text: line });
       return;
     }
+    const ordered = line.match(/^\d+[.?)]\s+(.+)$/);
+    const unordered = line.match(/^[-*\u2022]\s+(.+)$/);
+    if (ordered || unordered) {
+      flushParagraph();
+      list.push((ordered?.[1] || unordered?.[1] || "").trim());
+      return;
+    }
     flushList();
-    paragraph.push(rawLine);
+    paragraph.push(line);
   });
   flushParagraph();
   flushList();
@@ -7913,25 +8028,86 @@ function FreeAskText({ content = "" }) {
   );
 }
 
-function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile, sendFreeAsk, status, modelChoice, setModelChoice }) {
-  const [guideOpen, setGuideOpen] = useState(false);
+function FreeAskPage({
+  messages,
+  input,
+  setInput,
+  files,
+  handleFiles,
+  removeFile,
+  sendFreeAsk,
+  status,
+  modelChoice,
+  setModelChoice,
+  conversations = [],
+  activeConversationId = "",
+  loadConversation,
+  createConversation,
+  sidebarCollapsed,
+  setSidebarCollapsed,
+}) {
   const text = {
     title: "\u4f60\u4eca\u5929\u5728\u60f3\u4e9b\u4ec0\u4e48\uff1f",
     user: "\u6211",
     assistant: "\u6811\u5b50AI",
     upload: "\u4e0a\u4f20\u6587\u4ef6\u6216\u56fe\u7247",
-    placeholder: "\u8f93\u5165\u95ee\u9898\uff0c\u4e5f\u53ef\u4ee5\u5148\u70b9\u5de6\u4fa7 + \u4e0a\u4f20\u56fe\u7247\u6216\u6587\u4ef6",
+    placeholder: "\u8f93\u5165\u95ee\u9898\uff0c\u4e5f\u53ef\u4ee5\u4e0a\u4f20\u56fe\u7247\u6216\u6587\u4ef6",
     modelLabel: "\u9009\u62e9AI\u6a21\u578b",
     send: "\u53d1\u9001\u95ee\u9898",
     remove: "\u79fb\u9664",
     downloadImage: "\u4e0b\u8f7d\u56fe\u7247",
     generatedImage: "AI\u751f\u6210\u56fe\u7247",
+    newChat: "\u65b0\u5bf9\u8bdd",
+    history: "\u5386\u53f2\u5bf9\u8bdd",
+    collapse: "\u6536\u8d77\u5386\u53f2",
+    expand: "\u5c55\u5f00\u5386\u53f2",
+    emptyHistory: "\u5f00\u59cb\u63d0\u95ee\u540e\uff0c\u8fd9\u91cc\u4f1a\u4fdd\u5b58\u4f60\u7684\u5bf9\u8bdd\u3002",
+    emptyState: "\u628a\u95ee\u9898\u3001\u60f3\u6cd5\u6216\u6750\u6599\u53d1\u4e0a\u6765\uff0c\u6811\u5b50AI\u4f1a\u5728\u8fd9\u91cc\u548c\u4f60\u7ee7\u7eed\u5bf9\u8bdd\u3002",
   };
   const formatSize = (size) => (size > 1024 * 1024 ? (size / 1024 / 1024).toFixed(1) + " MB" : Math.max(1, Math.round(size / 1024)) + " KB");
+  const formatConversationTime = (value) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
+  };
   const canSend = status !== "loading" && (input.trim() || files.length > 0);
+  const pageClassName = sidebarCollapsed ? "free-ask-page is-conversation-collapsed" : "free-ask-page";
 
   return (
-    <section className="free-ask-page">
+    <section className={pageClassName}>
+      <aside className={sidebarCollapsed ? "free-conversation-sidebar is-collapsed" : "free-conversation-sidebar"} aria-label={text.history}>
+        <div className="free-conversation-header">
+          {!sidebarCollapsed && <strong>{text.history}</strong>}
+          <button type="button" className="free-collapse-button" onClick={() => setSidebarCollapsed?.((prev) => !prev)} aria-label={sidebarCollapsed ? text.expand : text.collapse}>
+            {sidebarCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+          </button>
+        </div>
+        <button type="button" className="free-new-conversation" onClick={createConversation} title={text.newChat}>
+          <Plus size={17} />
+          {!sidebarCollapsed && <span>{text.newChat}</span>}
+        </button>
+        {!sidebarCollapsed && (
+          <div className="free-conversation-list">
+            {conversations.length ? (
+              conversations.map((conversation) => (
+                <button
+                  type="button"
+                  key={conversation.id}
+                  className={conversation.id === activeConversationId ? "free-conversation-item is-active" : "free-conversation-item"}
+                  onClick={() => loadConversation?.(conversation.id)}
+                >
+                  <span>{conversation.title || "\u65b0\u7684\u5bf9\u8bdd"}</span>
+                  <em>{formatConversationTime(conversation.lastMessageAt || conversation.updatedAt)}</em>
+                </button>
+              ))
+            ) : (
+              <p className="free-conversation-empty">{text.emptyHistory}</p>
+            )}
+          </div>
+        )}
+      </aside>
+
       <div className="free-ask-center">
         <h2>{text.title}</h2>
         <div className="free-ask-thread">
@@ -7972,8 +8148,8 @@ function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile
             ))
           ) : (
             <div className="free-empty-state">
-              <Sparkles size={26} />
-              <span>把问题、想法或材料发上来，树子AI会在这里和你继续对话。</span>
+              <Sparkles size={28} />
+              <span>{text.emptyState}</span>
             </div>
           )}
         </div>
@@ -7998,7 +8174,12 @@ function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile
           </label>
           <textarea
             value={input}
+            rows={1}
             onChange={(event) => setInput(event.target.value)}
+            onInput={(event) => {
+              event.currentTarget.style.height = "auto";
+              event.currentTarget.style.height = Math.min(event.currentTarget.scrollHeight, 160) + "px";
+            }}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
@@ -8019,19 +8200,6 @@ function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile
             {status === "loading" ? <Loader2 className="spin" size={20} /> : <Send size={20} />}
           </button>
         </div>
-      </div>
-      <div className={guideOpen ? "free-ask-guide is-open" : "free-ask-guide"}>
-        {guideOpen && (
-          <div className="free-ask-guide-panel">
-            <strong>使用提示</strong>
-            <p>这里接入的是原生 AI API，相当于你直接与模型对话。请尽量把背景、目标、材料和你希望得到的结果说清楚，AI 才更容易给出准确、清晰的回答。</p>
-            <p>上传图片、PDF 或文档时，系统会优先整理可读取内容和关键图片，再交给 AI 处理；如果材料很多，建议先说明你最想让 AI 看哪一部分。</p>
-          </div>
-        )}
-        <button type="button" onClick={() => setGuideOpen((prev) => !prev)} aria-expanded={guideOpen}>
-          <Info size={17} />
-          {guideOpen ? "收起说明" : "使用说明"}
-        </button>
       </div>
     </section>
   );
