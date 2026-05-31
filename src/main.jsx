@@ -25,6 +25,7 @@ import {
   HardDrive,
   Home,
   Image as ImageIcon,
+  Info,
   Library,
   Loader2,
   LockKeyhole,
@@ -7827,11 +7828,83 @@ function ModernKnowledgeNotePage({
   );
 }
 
+function FreeAskText({ content = "" }) {
+  const lines = String(content || "").split(/\n/);
+  const blocks = [];
+  let paragraph = [];
+  let list = [];
+
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    blocks.push({ type: "p", text: paragraph.join("\n") });
+    paragraph = [];
+  };
+  const flushList = () => {
+    if (!list.length) return;
+    blocks.push({ type: "list", items: list });
+    list = [];
+  };
+
+  lines.forEach((rawLine) => {
+    const line = rawLine.trim();
+    if (!line) {
+      flushParagraph();
+      flushList();
+      return;
+    }
+    const heading = line.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      flushParagraph();
+      flushList();
+      blocks.push({ type: "heading", level: Math.min(heading[1].length, 3), text: heading[2].trim() });
+      return;
+    }
+    const ordered = line.match(/^\d+[.、]\s+(.+)$/);
+    const unordered = line.match(/^[-*•]\s+(.+)$/);
+    if (ordered || unordered) {
+      flushParagraph();
+      list.push((ordered?.[1] || unordered?.[1] || "").trim());
+      return;
+    }
+    if (/^[一二三四五六七八九十]+[、.，]/.test(line) || /^[（(]\d+[）)]/.test(line)) {
+      flushParagraph();
+      flushList();
+      blocks.push({ type: "heading", level: 3, text: line });
+      return;
+    }
+    flushList();
+    paragraph.push(rawLine);
+  });
+  flushParagraph();
+  flushList();
+
+  if (!blocks.length) return null;
+  return (
+    <div className="free-structured-text">
+      {blocks.map((block, index) => {
+        if (block.type === "heading") {
+          const Tag = block.level <= 1 ? "h3" : block.level === 2 ? "h4" : "h5";
+          return <Tag key={index}>{block.text}</Tag>;
+        }
+        if (block.type === "list") {
+          return (
+            <ul key={index}>
+              {block.items.map((item, itemIndex) => (
+                <li key={itemIndex}>{item}</li>
+              ))}
+            </ul>
+          );
+        }
+        return <p key={index}>{block.text}</p>;
+      })}
+    </div>
+  );
+}
+
 function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile, sendFreeAsk, status, modelChoice, setModelChoice }) {
+  const [guideOpen, setGuideOpen] = useState(false);
   const text = {
     title: "\u4f60\u4eca\u5929\u5728\u60f3\u4e9b\u4ec0\u4e48\uff1f",
-    intro:
-      "\u53ef\u4ee5\u95ee\u4f5c\u4e1a\u3001\u77e5\u8bc6\u70b9\u3001\u5b66\u4e60\u65b9\u6cd5\uff0c\u4e5f\u53ef\u4ee5\u95ee\u79d1\u5b66\u3001\u751f\u6d3b\u3001\u5174\u8da3\u548c\u4efb\u4f55\u7a81\u7136\u60f3\u5230\u7684\u95ee\u9898\u3002\u4e0a\u4f20\u56fe\u7247\u6216\u6587\u4ef6\u540e\uff0cAI\u53ef\u4ee5\u7ed3\u5408\u6750\u6599\u4e00\u8d77\u56de\u7b54\u3002",
     user: "\u6211",
     assistant: "\u6811\u5b50AI",
     upload: "\u4e0a\u4f20\u6587\u4ef6\u6216\u56fe\u7247",
@@ -7842,12 +7915,6 @@ function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile
     downloadImage: "\u4e0b\u8f7d\u56fe\u7247",
     generatedImage: "AI\u751f\u6210\u56fe\u7247",
   };
-  const quickPrompts = [
-    "\u5e2e\u6211\u5206\u6790\u4e00\u9053\u6570\u5b66\u9898",
-    "\u628a\u7ec6\u80de\u7ed3\u6784\u505a\u6210\u77e5\u8bc6\u56fe",
-    "\u9ed1\u6d1e\u4e3a\u4ec0\u4e48\u4f1a\u5f62\u6210",
-    "\u6211\u603b\u662f\u62d6\u5ef6\u600e\u4e48\u529e",
-  ];
   const formatSize = (size) => (size > 1024 * 1024 ? (size / 1024 / 1024).toFixed(1) + " MB" : Math.max(1, Math.round(size / 1024)) + " KB");
   const canSend = status !== "loading" && (input.trim() || files.length > 0);
 
@@ -7855,42 +7922,48 @@ function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile
     <section className="free-ask-page">
       <div className="free-ask-center">
         <h2>{text.title}</h2>
-        <p className="free-ask-intro">{text.intro}</p>
         <div className="free-ask-thread">
-          {messages.map((message) => (
-            <article key={message.id} className={message.role === "user" ? "free-message is-user" : "free-message"}>
-              <strong>{message.role === "user" ? text.user : text.assistant}</strong>
-              <p>{message.content}</p>
-              {message.attachments?.length > 0 && (
-                <div className="free-message-attachments">
-                  {message.attachments.map((file) => (
-                    <span key={file.id}>
-                      {file.previewUrl ? <ImageIcon size={15} /> : <FileText size={15} />}
-                      {file.name}
-                    </span>
-                  ))}
-                </div>
-              )}
-              {message.imageBase64 && (
-                <div className="free-note-preview">
-                  <img src={"data:image/png;base64," + message.imageBase64} alt={text.generatedImage} />
-                  <button type="button" className="ghost-action" onClick={() => downloadBase64Image(message.imageBase64, "AI-free-ask-image.png")}>
-                    <Download size={17} />
-                    {text.downloadImage}
-                  </button>
-                </div>
-              )}
-              {message.note && (
-                <div className="free-note-preview">
-                  <img src={"data:image/svg+xml;charset=utf-8," + encodeURIComponent(message.note.svg)} alt={message.note.title} />
-                  <button type="button" className="ghost-action" onClick={() => downloadNoteSvg(message.note)}>
-                    <Download size={17} />
-                    {text.downloadImage}
-                  </button>
-                </div>
-              )}
-            </article>
-          ))}
+          {messages.length ? (
+            messages.map((message) => (
+              <article key={message.id} className={message.role === "user" ? "free-message is-user" : "free-message"}>
+                <strong>{message.role === "user" ? text.user : text.assistant}</strong>
+                <FreeAskText content={message.content} />
+                {message.attachments?.length > 0 && (
+                  <div className="free-message-attachments">
+                    {message.attachments.map((file) => (
+                      <span key={file.id}>
+                        {file.previewUrl ? <ImageIcon size={15} /> : <FileText size={15} />}
+                        {file.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {message.imageBase64 && (
+                  <div className="free-note-preview">
+                    <img src={"data:image/png;base64," + message.imageBase64} alt={text.generatedImage} />
+                    <button type="button" className="ghost-action" onClick={() => downloadBase64Image(message.imageBase64, "AI-free-ask-image.png")}>
+                      <Download size={17} />
+                      {text.downloadImage}
+                    </button>
+                  </div>
+                )}
+                {message.note && (
+                  <div className="free-note-preview">
+                    <img src={"data:image/svg+xml;charset=utf-8," + encodeURIComponent(message.note.svg)} alt={message.note.title} />
+                    <button type="button" className="ghost-action" onClick={() => downloadNoteSvg(message.note)}>
+                      <Download size={17} />
+                      {text.downloadImage}
+                    </button>
+                  </div>
+                )}
+              </article>
+            ))
+          ) : (
+            <div className="free-empty-state">
+              <Sparkles size={26} />
+              <span>把问题、想法或材料发上来，树子AI会在这里和你继续对话。</span>
+            </div>
+          )}
         </div>
         {files.length > 0 && (
           <div className="free-attachment-tray">
@@ -7934,13 +8007,19 @@ function FreeAskPage({ messages, input, setInput, files, handleFiles, removeFile
             {status === "loading" ? <Loader2 className="spin" size={20} /> : <Send size={20} />}
           </button>
         </div>
-        <div className="free-ask-prompts">
-          {quickPrompts.map((prompt) => (
-            <button key={prompt} type="button" onClick={() => setInput(prompt)}>
-              {prompt}
-            </button>
-          ))}
-        </div>
+      </div>
+      <div className={guideOpen ? "free-ask-guide is-open" : "free-ask-guide"}>
+        {guideOpen && (
+          <div className="free-ask-guide-panel">
+            <strong>使用提示</strong>
+            <p>这里接入的是原生 AI API，相当于你直接与模型对话。请尽量把背景、目标、材料和你希望得到的结果说清楚，AI 才更容易给出准确、清晰的回答。</p>
+            <p>上传图片、PDF 或文档时，系统会先控制材料大小并整理可读取内容，再交给 AI 处理，避免一次性请求过大。</p>
+          </div>
+        )}
+        <button type="button" onClick={() => setGuideOpen((prev) => !prev)} aria-expanded={guideOpen}>
+          <Info size={17} />
+          {guideOpen ? "收起说明" : "使用说明"}
+        </button>
       </div>
     </section>
   );

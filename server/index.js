@@ -1235,6 +1235,71 @@ async function makeDocumentTextSummary(files) {
   return chunks.join("\n\n---\n\n").slice(0, 30000);
 }
 
+const freeAskMaterialLimits = {
+  maxFiles: 4,
+  maxImageFiles: 3,
+  maxImageBytes: 4 * 1024 * 1024,
+  maxDocumentChars: 16000,
+  maxCharsPerDocument: 6000,
+};
+
+function isImageUpload(file) {
+  return (file?.mimetype || "").startsWith("image/");
+}
+
+async function buildFreeAskMaterialContext(files = []) {
+  const incoming = Array.isArray(files) ? files : [];
+  const selected = incoming.slice(0, freeAskMaterialLimits.maxFiles);
+  const skipped = incoming.slice(freeAskMaterialLimits.maxFiles).map((file) => file.originalname);
+  const safeImageFiles = selected
+    .filter((file) => isImageUpload(file) && Number(file.size || 0) <= freeAskMaterialLimits.maxImageBytes)
+    .slice(0, freeAskMaterialLimits.maxImageFiles);
+  const skippedLargeImages = selected
+    .filter((file) => isImageUpload(file) && Number(file.size || 0) > freeAskMaterialLimits.maxImageBytes)
+    .map((file) => file.originalname);
+  const documentChunks = [];
+  let usedChars = 0;
+
+  for (const file of selected) {
+    if (isImageUpload(file)) continue;
+    const text = await extractDocumentText(file);
+    const remaining = freeAskMaterialLimits.maxDocumentChars - usedChars;
+    if (remaining <= 0) {
+      skipped.push(file.originalname);
+      continue;
+    }
+    const slice = String(text || "").slice(0, Math.min(remaining, freeAskMaterialLimits.maxCharsPerDocument));
+    usedChars += slice.length;
+    documentChunks.push(
+      [
+        `文件：${file.originalname}`,
+        `类型：${file.mimetype || "未知"}`,
+        slice ? `可读取内容摘录：\n${slice}` : "暂时没有提取到可读取文字。若这是扫描版PDF，请上传关键页面截图或补充你希望AI重点看的内容。",
+      ].join("\n")
+    );
+  }
+
+  const notes = [];
+  if (safeImageFiles.length) notes.push(`已传入可识别图片 ${safeImageFiles.length} 张。`);
+  if (skippedLargeImages.length) {
+    notes.push(`以下图片较大，已避免直接传入模型：${skippedLargeImages.join("、")}。建议裁剪到题目或关键内容区域后重传。`);
+  }
+  if (skipped.length) {
+    notes.push(`以下材料未直接进入本次AI上下文，避免一次请求过大：${skipped.join("、")}。`);
+  }
+
+  return {
+    safeImageFiles,
+    materialText: [notes.join("\n"), documentChunks.join("\n\n---\n\n")].filter(Boolean).join("\n\n").slice(0, 18000),
+    fileSummary: incoming.length
+      ? incoming.map((file) => `${file.originalname} (${file.mimetype || "unknown"}, ${file.size || 0} bytes)`).join(", ")
+      : "no attachment",
+  };
+}
+
+const freeAskSystemPrompt =
+  "你是树子AI的自由对话助手。用户可能是学生，也可能是家长。请直接回答用户当前问题；如果有上传材料，优先结合可读取材料和图片回答。保持中文表达，结构清楚，分段自然，便于学生和家长阅读。不要臆造看不清或没有提供的信息；材料不足时请说明需要补充什么。";
+
 function jsonInstruction(schemaDescription) {
   return `请只输出严格 JSON，不要 Markdown，不要额外解释。JSON结构：${schemaDescription}`;
 }
@@ -2768,15 +2833,12 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 6), async (req, 
     if (!String(question).trim() && !files.length) {
       return res.status(400).json({ error: "QUESTION_REQUIRED", message: "Please enter a question or upload a file." });
     }
-    const fileSummary = files.length
-      ? files.map((file) => file.originalname + " (" + (file.mimetype || "unknown") + ")").join(", ")
-      : "no attachment";
-    const documentText = await makeDocumentTextSummary(files);
+    const materialContext = await buildFreeAskMaterialContext(files);
     const promptText = [
       "Student question: " + (question || "Please answer based on the attachments."),
       "User wants an image: " + (shouldGenerateImage ? "yes" : "no"),
-      "Attachments: " + fileSummary,
-      documentText ? "Extracted attachment text:\n" + documentText : "",
+      "Attachments: " + materialContext.fileSummary,
+      materialContext.materialText ? "Prepared attachment context:\n" + materialContext.materialText : "",
     ].filter(Boolean).join("\n");
 
     if (shouldGenerateImage || files.length) {
@@ -2800,25 +2862,21 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 6), async (req, 
             model = getGeminiModel(aiMode);
             answer = await generateGeminiText({
               model,
-              prompt: [
-                "You are Shuzi AI free-question assistant. Answer only the current question and current attachments. You may answer study, knowledge, homework, science, life, interest, or open-ended questions. Be clear, warm, and suitable for middle/high-school students. If it is a learning question, give a concrete next step. Answer in Chinese.",
-                promptText,
-              ].join("\n"),
-              files,
+              prompt: [freeAskSystemPrompt, promptText].join("\n"),
+              files: materialContext.safeImageFiles,
               temperature: aiMode === "thinking" ? 0.2 : 0.35,
             });
           } else {
             ensureOpenAIKey();
             model = getOpenAITextModel(aiMode);
-            const imageInputs = makeImageInputs(files);
+            const imageInputs = makeImageInputs(materialContext.safeImageFiles);
             const response = await openai.responses.create({
               model,
               background: true,
               input: [
                 {
                   role: "system",
-                  content:
-                    "You are Shuzi AI free-question assistant. Answer only the current question and current attachments. You may answer study, knowledge, homework, science, life, interest, or open-ended questions. Be clear, warm, and suitable for middle/high-school students. If it is a learning question, give a concrete next step. If the user asks for a knowledge image, first explain the structure and key points. Answer in Chinese.",
+                  content: freeAskSystemPrompt,
                 },
                 {
                   role: "user",
@@ -2880,24 +2938,20 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 6), async (req, 
       model = getGeminiModel(aiMode);
       answer = await generateGeminiText({
         model,
-        prompt: [
-          "You are Shuzi AI free-question assistant. Answer only the current question and current attachments. You may answer study, knowledge, homework, science, life, interest, or open-ended questions. Be clear, warm, and suitable for middle/high-school students. If it is a learning question, give a concrete next step. Answer in Chinese.",
-          promptText,
-        ].join("\n"),
-        files,
+        prompt: [freeAskSystemPrompt, promptText].join("\n"),
+        files: materialContext.safeImageFiles,
         temperature: aiMode === "thinking" ? 0.2 : 0.35,
       });
     } else {
       ensureOpenAIKey();
       model = getOpenAITextModel(aiMode);
-      const imageInputs = makeImageInputs(files);
+      const imageInputs = makeImageInputs(materialContext.safeImageFiles);
       const response = await openai.responses.create({
         model,
         input: [
           {
             role: "system",
-            content:
-              "You are Shuzi AI free-question assistant. Answer only the current question and current attachments. You may answer study, knowledge, homework, science, life, interest, or open-ended questions. Be clear, warm, and suitable for middle/high-school students. If it is a learning question, give a concrete next step. If the user asks for a knowledge image, first explain the structure and key points. Answer in Chinese.",
+            content: freeAskSystemPrompt,
           },
           {
             role: "user",
