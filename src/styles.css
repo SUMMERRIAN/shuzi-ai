@@ -3975,18 +3975,18 @@ audio {
 
 .task-card-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
 }
 
 .task-card {
   display: grid;
-  gap: 14px;
-  padding: 18px;
+  gap: 12px;
+  padding: 14px;
   border: 1px solid #dfe5da;
   border-radius: 8px;
   background: #ffffff;
-  box-shadow: 0 12px 30px rgba(17, 24, 32, 0.04);
+  box-shadow: 0 10px 24px rgba(17, 24, 32, 0.04);
 }
 
 .task-card-head {
@@ -4042,20 +4042,20 @@ audio {
 }
 
 .task-card-head input {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 900;
 }
 
 .task-card textarea,
 .flow-step-body textarea {
-  min-height: 76px;
+  min-height: 70px;
   padding: 11px 12px;
   resize: vertical;
 }
 
 .task-card label:nth-of-type(4) textarea,
 .task-card label:nth-of-type(5) textarea {
-  min-height: 96px;
+  min-height: 86px;
 }
 
 .flow-map {
@@ -6853,9 +6853,12 @@ audio {
   .insight-grid,
   .record-list-wide,
   .profile-detail-body,
-  .task-card-grid,
   .diagnosis-index {
     grid-template-columns: 1fr;
+  }
+
+  .task-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .analysis-target {
@@ -6867,6 +6870,10 @@ audio {
 @media (max-width: 760px) {
   .workspace {
     padding: 18px 14px 30px;
+  }
+
+  .task-card-grid {
+    grid-template-columns: 1fr;
   }
 
   .topbar,
