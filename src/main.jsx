@@ -1317,15 +1317,6 @@ function createSubjectWorkspace(subject) {
     taskSuggestion: "",
     acceptedStrategy: "",
     studentStrategy: "",
-    materials: data.materials.map((item, index) => ({ ...item, id: `${subject}-material-${index}` })),
-    customMaterials: [
-      {
-        id: `${subject}-custom-material-0`,
-        name: "",
-        purpose: "",
-        usage: "",
-      },
-    ],
     tasks: data.tasks.map((task, index) => ({ ...task, id: `${subject}-task-${index}` })),
     aiNote: "AI学习任务建议会根据学情画像、学情陈述和当前科目内容生成。",
   };
@@ -3220,35 +3211,6 @@ function App() {
     }));
   }
 
-  function updateMaterialUsage(materialId, field, value) {
-    updateStrategyWorkspace(activeSubject, (workspace) => ({
-      ...workspace,
-      materials: workspace.materials.map((material) => (material.id === materialId ? { ...material, [field]: value } : material)),
-    }));
-  }
-
-  function updateCustomMaterial(materialId, field, value) {
-    updateStrategyWorkspace(activeSubject, (workspace) => ({
-      ...workspace,
-      customMaterials: workspace.customMaterials.map((material) => (material.id === materialId ? { ...material, [field]: value } : material)),
-    }));
-  }
-
-  function addCustomMaterial() {
-    updateStrategyWorkspace(activeSubject, (workspace) => ({
-      ...workspace,
-      customMaterials: [
-        ...workspace.customMaterials,
-        {
-          id: `${activeSubject}-custom-material-${Date.now()}`,
-          name: "",
-          purpose: "",
-          usage: "",
-        },
-      ],
-    }));
-  }
-
   function addStrategyTask() {
     updateStrategyWorkspace(activeSubject, (workspace) => ({
       ...workspace,
@@ -3687,7 +3649,7 @@ function App() {
                 title: nextTask.title || `${subject}AI建议任务`,
                 problem: nextTask.problem || result.strategy_suggestion || "请明确这个任务要解决的学科问题。",
                 time: nextTask.time || "每周2-3次，每次25-40分钟",
-                material: nextTask.material || current.materials?.[0]?.name || "课本、错题本或专项资料",
+                material: nextTask.material || "课本、错题本或专项资料",
                 detail: nextTask.detail || "写清楚任务步骤、资料使用方式和完成顺序。",
                 standard: nextTask.standard || "写清楚完成标准和检查方式。",
                 studentNote: nextTask.studentNote || "",
@@ -4200,9 +4162,6 @@ function App() {
             strategyAiStatus={strategyAiStatus}
             updateStrategyText={updateStrategyText}
             updateStrategyTask={updateStrategyTask}
-            updateMaterialUsage={updateMaterialUsage}
-            updateCustomMaterial={updateCustomMaterial}
-            addCustomMaterial={addCustomMaterial}
             addStrategyTask={addStrategyTask}
             acceptStrategySuggestion={acceptStrategySuggestion}
             runStrategyAi={runStrategyAi}
@@ -6679,9 +6638,6 @@ function StrategyDesignPage({
   strategyAiStatus,
   updateStrategyText,
   updateStrategyTask,
-  updateMaterialUsage,
-  updateCustomMaterial,
-  addCustomMaterial,
   addStrategyTask,
   acceptStrategySuggestion,
   runStrategyAi,
@@ -6791,83 +6747,6 @@ function StrategyDesignPage({
             />
           </label>
         </article>
-
-        <aside className="panel material-panel">
-          <div className="panel-heading">
-            <div>
-              <span className="eyebrow">推荐资料</span>
-              <h2>本学科常用资料</h2>
-            </div>
-            <FileText size={24} />
-          </div>
-          <h3 className="material-subtitle">AI推荐资料</h3>
-          <div className="material-list">
-            {workspace.materials.map((material) => (
-              <article className="material-card" key={material.id}>
-                <strong>{material.name}</strong>
-                <p>{material.description}</p>
-                <label>
-                  <span>这本资料的作用</span>
-                  <textarea
-                    value={material.aiUseNote || material.description}
-                    onChange={(event) => updateMaterialUsage(material.id, "aiUseNote", event.target.value)}
-                  />
-                </label>
-                <label>
-                  <span>学生资料使用细节</span>
-                  <textarea
-                    placeholder="例如：我准备用这本资料做哪一章、什么时间做、每次做多少、做完怎样检查。"
-                    value={material.usage}
-                    onChange={(event) => updateMaterialUsage(material.id, "usage", event.target.value)}
-                  />
-                </label>
-              </article>
-            ))}
-          </div>
-          <div className="custom-material-section">
-            <div className="custom-material-head">
-              <h3 className="material-subtitle">我认为需要的学习资料</h3>
-              <button type="button" className="ghost-action" onClick={addCustomMaterial}>
-                <Plus size={16} />
-                添加资料
-              </button>
-            </div>
-            <div className="material-list">
-              {workspace.customMaterials.map((material, index) => (
-                <article className="material-card" key={material.id}>
-                  <label>
-                    <span>资料名称 {index + 1}</span>
-                    <input
-                      value={material.name}
-                      onChange={(event) => updateCustomMaterial(material.id, "name", event.target.value)}
-                      placeholder="例如：我的错题本、老师发的专题卷、课外阅读材料"
-                    />
-                  </label>
-                  <label>
-                    <span>资料作用</span>
-                    <textarea
-                      value={material.purpose}
-                      onChange={(event) => updateCustomMaterial(material.id, "purpose", event.target.value)}
-                      placeholder="写清楚这份资料主要帮你解决什么问题。"
-                    />
-                  </label>
-                  <label>
-                    <span>使用细节</span>
-                    <textarea
-                      value={material.usage}
-                      onChange={(event) => updateCustomMaterial(material.id, "usage", event.target.value)}
-                      placeholder="写清楚什么时候用、每次用多少、完成后怎么检查。"
-                    />
-                  </label>
-                </article>
-              ))}
-            </div>
-          </div>
-          <div className="strategy-explain">
-            <strong>设计原则</strong>
-            <p>任务必须写清楚时间、资料、步骤和完成标准。学生可以用自己的话补充，AI再帮助优化成更可执行的表达。</p>
-          </div>
-        </aside>
       </section>
 
       <section className="panel">

@@ -3875,8 +3875,7 @@ audio {
   align-items: stretch;
 }
 
-.strategy-editor-panel,
-.material-panel {
+.strategy-editor-panel {
   display: grid;
   gap: 14px;
 }
@@ -3941,8 +3940,7 @@ audio {
 }
 
 .strategy-advice-head strong,
-.strategy-student-box > span,
-.material-subtitle {
+.strategy-student-box > span {
   color: #102018;
   font-size: 18px;
   font-weight: 950;
@@ -3972,84 +3970,6 @@ audio {
 
 .compact-actions {
   margin-top: 4px;
-}
-
-.material-list {
-  display: grid;
-  gap: 12px;
-  max-height: 430px;
-  overflow-y: auto;
-  padding-right: 6px;
-  margin: 0;
-  list-style: none;
-}
-
-.material-subtitle {
-  margin: 4px 0 0;
-  font-size: 17px;
-}
-
-.custom-material-section,
-.custom-material-head {
-  display: grid;
-  gap: 12px;
-}
-
-.custom-material-head {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-}
-
-.material-card {
-  display: grid;
-  gap: 10px;
-  padding: 14px;
-  border: 1px solid #dfe5da;
-  border-radius: 8px;
-  background: #ffffff;
-}
-
-.material-card strong {
-  color: #1d2520;
-  font-size: 17px;
-}
-
-.material-card p {
-  margin-bottom: 0;
-  color: #48534d;
-  font-size: 14px;
-}
-
-.material-card label {
-  display: grid;
-  gap: 7px;
-}
-
-.material-card label span {
-  color: #68736b;
-  font-size: 13px;
-  font-weight: 900;
-}
-
-.material-card textarea {
-  width: 100%;
-  min-height: 74px;
-  padding: 10px 11px;
-  border: 1px solid #d9ded6;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #1d2520;
-  resize: vertical;
-}
-
-.material-card input {
-  width: 100%;
-  min-height: 42px;
-  padding: 0 11px;
-  border: 1px solid #d9ded6;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #1d2520;
 }
 
 .task-card-grid {
@@ -7022,10 +6942,6 @@ audio {
   .forum-thumbnail-grid img {
     width: 96px;
     height: 72px;
-  }
-
-  .custom-material-head {
-    grid-template-columns: 1fr;
   }
 
   .knowledge-actions {
