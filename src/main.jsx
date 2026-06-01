@@ -1936,7 +1936,7 @@ function App() {
   const [strategyAiStatus, setStrategyAiStatus] = useState("");
   const savedPlanDraft = readDraftValue("plan", null);
   const [planRows, setPlanRows] = useState(() => normalizePlanRows(savedPlanDraft?.planRows || defaultPlanRows));
-  const [planNote, setPlanNote] = useState(savedPlanDraft?.planNote || "本周计划按默认作息生成：早晨7点前15-20分钟、晚自习一节课、回家后约30分钟；学生可以按真实作息自行修改。");
+  const [planNote, setPlanNote] = useState(savedPlanDraft?.planNote || "本周计划按默认作息生成：早晨7点前15-20分钟、课间最多10分钟轻任务、晚自习一节课、回家后约90分钟；学生可以按真实作息自行修改。");
   const [planAiStatus, setPlanAiStatus] = useState("idle");
   const [methodFocusRows, setMethodFocusRows] = useState(() => savedPlanDraft?.methodFocusRows || createFocusRows("method", methodTrainingOptions));
   const [habitFocusRows, setHabitFocusRows] = useState(() => savedPlanDraft?.habitFocusRows || createFocusRows("habit", habitTrainingOptions));
@@ -3318,13 +3318,13 @@ function App() {
         {
           id: "ai-plan-row-" + Date.now() + "-3",
           cells: makeCells({
-            [weekDays[3]]: { start: "21:30", end: "22:00", task: "当天收尾复盘", note: "整理明日任务，避免拖到太晚" },
+            [weekDays[3]]: { start: "21:00", end: "22:30", task: "当天收尾复盘", note: "先处理作业收尾，再复盘错题和整理明日任务" },
             [weekDays[6]]: { start: "19:30", end: "20:00", task: "下周预安排", note: "把重点任务先放进日程" },
           }),
         },
       ])
     );
-    setPlanNote("AI暂时没有返回有效计划，已先按默认作息生成一份示范安排：早晨7点前、晚自习和回家后为主要可用时间，学生可以继续修改。");
+    setPlanNote("AI暂时没有返回有效计划，已先按默认作息生成一份示范安排：早晨7点前、课间轻任务、晚自习和回家后90分钟为主要可用时间，学生可以继续修改。");
     setPlanAiStatus("done");
   }
 
