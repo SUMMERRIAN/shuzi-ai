@@ -2501,7 +2501,7 @@ app.post("/api/ai/strategy", requireAuth, async (req, res, next) => {
     ensureOpenAIKey();
     await assertTokenBalance(req.user.id, 8);
     const student = await getPrimaryStudent(req.user);
-    const { subject = "", section = "strategy", mode = "generate", targetId = "", task = null, archiveSnapshot = {} } = req.body || {};
+    const { subject = "", archiveSnapshot = {} } = req.body || {};
     const { job, reused } = await createAiJob({
       userId: req.user.id,
       studentId: student.id,
@@ -2509,7 +2509,7 @@ app.post("/api/ai/strategy", requireAuth, async (req, res, next) => {
       provider: "openai",
       mode: "text-background",
       tokenCost: 8,
-      input: { subject, section, mode, targetId, task, archiveSnapshot },
+      input: { subject, archiveSnapshot },
     });
     if (!reused) {
       startAiJob(job.id, async () => {
@@ -2521,23 +2521,34 @@ app.post("/api/ai/strategy", requireAuth, async (req, res, next) => {
             {
               role: "system",
               content:
-                "You are the Shuzi AI learning task agent. Only work on the current subject learning tasks, material-use advice, execution details, and completion standards based on the latest learning profile and current subject context. Do not rediagnose the whole student, do not create a weekly timetable, do not analyze mistake images. When section is strategy, put a well-structured multi-task recommendation into strategy_suggestion. Each task must include task name, why the student should do it, and concrete execution guidance. Return strict JSON in Chinese.",
+                "你是树子AI的学习任务设计老师，服务中国大陆应试教育场景。你只负责为当前科目生成一组可执行的学习任务建议，不负责周计划、不分析错题图片、不生成资料推荐、不修改单个任务。必须结合学生的学情问卷、学情陈述、学情画像、学生补充说明和当前科目，判断学生在预习、上课、作业、错题、复习、巩固、试卷分析、方法训练等学习链条中的薄弱环节。数学、语文、英语、物理、化学等科目要按学科特点设计任务，不能只给一个笼统任务。每个任务必须具体、可执行、可检查，不能写空话，例如“多刷题”“认真复习”。返回严格 JSON，全部使用中文。",
             },
             {
               role: "user",
-              content: jsonInstruction(
-                "{strategy_suggestion, ai_note, task:{title, problem, time, material, detail, standard, studentNote}, revision_notes:[string]}"
-              ) + "\nSubject: " + subject + "\nSection: " + section + "\nMode: " + mode + "\nTarget ID: " + targetId + "\nCurrent task JSON:\n" + JSON.stringify(task || {}) + "\nStrategy archive snapshot:\n" + JSON.stringify(archiveSnapshot),
+              content:
+                jsonInstruction(
+                  "{strategy_suggestion:string, ai_note:string, tasks:[{title:string, problem:string, reason:string, time:string, material:string, detail:string, standard:string}]}"
+                ) +
+                "\n当前科目：" +
+                subject +
+                "\n输出要求：" +
+                "\n1. tasks 至少 4 项，最多 8 项；如果学情信息明显不足，也要给出基础版任务链。" +
+                "\n2. 每个任务要对应一个真实学习环节，例如预习、上课、作业、错题、复习、巩固、试卷分析或方法训练。" +
+                "\n3. problem 写这个任务解决什么问题；reason 写为什么学生需要做；time 写建议频率和时长；material 写使用什么资料；detail 写具体执行步骤；standard 写完成后如何检查。" +
+                "\n4. strategy_suggestion 用简洁段落概括本学科任务设计思路，不要替代 tasks。" +
+                "\n5. 不要生成周计划表，不要生成单个任务，不要让学生自己再去判断怎么做。" +
+                "\n学情资料 JSON：\n" +
+                JSON.stringify(archiveSnapshot),
             },
           ],
         });
         const completed = await waitForOpenAIBackgroundResponse(response, { jobId: job.id, timeoutMessage: "学习策略AI任务仍未完成，系统已尝试取消以控制费用。" });
-        const result = parseJsonText(getResponseText(completed), { strategy_suggestion: "", ai_note: "", task: null, revision_notes: [] });
+        const result = parseJsonText(getResponseText(completed), { strategy_suggestion: "", ai_note: "", tasks: [] });
         await query(
           "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'subject_strategy_ai', $3, $4)",
-          [student.id, req.user.id, "AI learning task suggestion", JSON.stringify({ subject, section, mode, targetId, result })]
+          [student.id, req.user.id, "AI learning task suggestion", JSON.stringify({ subject, result })]
         );
-        await recordTokenUsage(req.user.id, 8, "AI learning task suggestion", { feature: "strategy", model: textModel, subject, section, mode, jobId: job.id });
+        await recordTokenUsage(req.user.id, 8, "AI learning task suggestion", { feature: "strategy", model: textModel, subject, jobId: job.id });
         return { result };
       });
     }

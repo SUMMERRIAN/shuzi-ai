@@ -3953,9 +3953,10 @@ audio {
 }
 
 .strategy-suggestion-textarea {
-  min-height: 170px;
+  min-height: 260px;
   background: #ffffff;
   color: #24312a;
+  line-height: 1.75;
 }
 
 .strategy-student-box .strategy-textarea {
@@ -3974,25 +3975,35 @@ audio {
 
 .task-card-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
 }
 
 .task-card {
   display: grid;
-  gap: 12px;
-  padding: 16px;
+  gap: 14px;
+  padding: 18px;
   border: 1px solid #dfe5da;
   border-radius: 8px;
   background: #ffffff;
+  box-shadow: 0 12px 30px rgba(17, 24, 32, 0.04);
 }
 
 .task-card-head {
   display: grid;
-  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
 }
 
 .task-card-head span {
+  display: inline-grid;
+  place-items: center;
+  min-width: 54px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #eef8ef;
   color: #008653;
   font-size: 12px;
   font-weight: 900;
@@ -4037,9 +4048,14 @@ audio {
 
 .task-card textarea,
 .flow-step-body textarea {
-  min-height: 86px;
+  min-height: 76px;
   padding: 11px 12px;
   resize: vertical;
+}
+
+.task-card label:nth-of-type(4) textarea,
+.task-card label:nth-of-type(5) textarea {
+  min-height: 96px;
 }
 
 .flow-map {

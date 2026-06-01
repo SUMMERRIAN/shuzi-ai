@@ -1002,7 +1002,6 @@ const subjectStrategyData = {
         material: "语文课本、文言文或唐诗宋词资料",
         detail: "先读原文，再看背景和解析。两天背一首，读完后用自己的话说出意思和情感。",
         standard: "能流利朗读，能说出重点词句含义，并完成当天背诵或复述。",
-        studentNote: "",
       },
       {
         title: "阅读三问训练",
@@ -1011,7 +1010,6 @@ const subjectStrategyData = {
         material: "阅读训练资料、知识清单",
         detail: "做题后回答三问：为什么这么问？答案思路是什么？答案和中心思想有什么关系？",
         standard: "每篇阅读至少整理 3 个答题规律，并能说清楚答案来源。",
-        studentNote: "",
       },
       {
         title: "作文写改一体",
@@ -1020,7 +1018,6 @@ const subjectStrategyData = {
         material: "作文纸、优秀作文、个人素材本",
         detail: "先列结构，再写 600 字作文。写完后重点修改开头、事例细节、段落连接和结尾升华。",
         standard: "完成一篇可修改作文，并保留修改痕迹和本周表达收获。",
-        studentNote: "",
       },
     ],
   },
@@ -1043,7 +1040,6 @@ const subjectStrategyData = {
         material: "数学课本、课堂笔记、王后雄教材全解",
         detail: "先读课本定义和定理，再用自己的话解释含义，最后做对应课后基础题。",
         standard: "能说清楚概念意思，能独立完成对应基础题，并标记不懂处。",
-        studentNote: "",
       },
       {
         title: "例题复现与迁移",
@@ -1052,7 +1048,6 @@ const subjectStrategyData = {
         material: "王后雄教材全解、课本例题",
         detail: "先自己尝试做例题，再看讲解，最后合上答案独立写一遍完整步骤。",
         standard: "同类例题能独立写出关键步骤，并说明题目关键点。",
-        studentNote: "",
       },
       {
         title: "错题三遍做题法",
@@ -1061,7 +1056,6 @@ const subjectStrategyData = {
         material: "错题本、试卷、作业本",
         detail: "第一遍看懂答案，第二遍独立写步骤，第三遍隔几天重新做并总结错因。",
         standard: "能说出错在哪里、对的方法是什么、下次怎么避免。",
-        studentNote: "",
       },
     ],
   },
@@ -1084,7 +1078,6 @@ const subjectStrategyData = {
         material: "英语课本、课文音频",
         detail: "张口大声读。重点课文反复朗读，配合听写和翻译，逐步形成语感。",
         standard: "能流利朗读课文，能听写关键句，并说出主要意思。",
-        studentNote: "",
       },
       {
         title: "每日单词循环",
@@ -1093,7 +1086,6 @@ const subjectStrategyData = {
         material: "初中单词表、错词本",
         detail: "每天背 20 个单词，新词和旧词循环复习，错词单独记录。",
         standard: "当天能默写，三天后复查仍能认读和拼写。",
-        studentNote: "",
       },
       {
         title: "语法一章一清",
@@ -1102,7 +1094,6 @@ const subjectStrategyData = {
         material: "无敌英语语法、课堂笔记",
         detail: "先看本章核心规则，再做基础练习，错题整理成规则提醒。",
         standard: "能讲清本章语法规则，并完成对应基础题。",
-        studentNote: "",
       },
     ],
   },
@@ -1125,7 +1116,6 @@ const subjectStrategyData = {
         material: "物理课本、课堂笔记",
         detail: "读概念后，用自己的话解释它描述的现象，并举一个生活例子。",
         standard: "能说清概念、单位、公式含义和适用场景。",
-        studentNote: "",
       },
       {
         title: "画图建模训练",
@@ -1134,7 +1124,6 @@ const subjectStrategyData = {
         material: "物理题、草稿本",
         detail: "遇到力学、电学等题目，先画图，再标已知量、未知量和关系。",
         standard: "每道重点题都有图、有条件标记、有公式来源。",
-        studentNote: "",
       },
       {
         title: "专项题三遍做法",
@@ -1143,7 +1132,6 @@ const subjectStrategyData = {
         material: "必刷题、专项练习、错题本",
         detail: "基础题先过关，再做提升题。错题当天弄懂，隔天复做，一周后再测。",
         standard: "同类题正确率明显提高，并能说出题型关键条件。",
-        studentNote: "",
       },
     ],
   },
@@ -1166,7 +1154,6 @@ const subjectStrategyData = {
         material: "方程式清单、化学课本",
         detail: "每天默写一组核心方程式，写出反应条件、现象和应用场景。",
         standard: "能独立写对并配平，能说出对应实验现象。",
-        studentNote: "",
       },
       {
         title: "实验现象整理",
@@ -1175,7 +1162,6 @@ const subjectStrategyData = {
         material: "课本实验、课堂笔记",
         detail: "按物质、现象、结论整理实验，重点写清为什么能得出这个结论。",
         standard: "能根据现象反推物质或反应，并说明判断依据。",
-        studentNote: "",
       },
     ],
   },
@@ -1198,7 +1184,6 @@ const subjectStrategyData = {
         material: "生物课本、知识框架图",
         detail: "每学完一节，用关键词画出结构图，再用自己的话讲一遍。",
         standard: "能看着框架说清本节核心概念和关系。",
-        studentNote: "",
       },
       {
         title: "图表理解训练",
@@ -1207,7 +1192,6 @@ const subjectStrategyData = {
         material: "课本图表、练习题",
         detail: "先说图中对象，再说变化关系，最后写出结论和依据。",
         standard: "能用规范语言解释图表表达的信息。",
-        studentNote: "",
       },
     ],
   },
@@ -1230,7 +1214,6 @@ const subjectStrategyData = {
         material: "历史课本、时间轴资料",
         detail: "按时间顺序整理事件，并写出背景、经过、影响三个关键词。",
         standard: "能说清事件前后关系和主要影响。",
-        studentNote: "",
       },
       {
         title: "材料题关键词训练",
@@ -1239,7 +1222,6 @@ const subjectStrategyData = {
         material: "材料题专项、课堂笔记",
         detail: "先圈材料关键词，再判断设问方向，最后联系课本知识组织答案。",
         standard: "答案能包含材料信息、课本知识和清楚结论。",
-        studentNote: "",
       },
     ],
   },
@@ -1262,7 +1244,6 @@ const subjectStrategyData = {
         material: "政治课本、课堂笔记",
         detail: "每天整理一组核心观点，背关键词，并用一句自己的话解释。",
         standard: "能准确说出观点关键词，并知道适用情境。",
-        studentNote: "",
       },
       {
         title: "材料分层答题",
@@ -1271,7 +1252,6 @@ const subjectStrategyData = {
         material: "材料题专项、时政材料",
         detail: "先把材料分层，再为每层匹配课本观点，最后写成规范答案。",
         standard: "答案有观点、有材料、有分析，不只堆概念。",
-        studentNote: "",
       },
     ],
   },
@@ -1294,7 +1274,6 @@ const subjectStrategyData = {
         material: "体能训练清单、训练记录表",
         detail: "先做慢跑、核心力量、拉伸和基础协调训练，强度逐步增加。",
         standard: "能稳定完成训练，并记录心率、疲劳感或完成情况。",
-        studentNote: "",
       },
       {
         title: "考试项目专项训练",
@@ -1303,7 +1282,6 @@ const subjectStrategyData = {
         material: "体育考试项目标准、专项动作视频",
         detail: "选择一个考试项目，拆成动作要点、节奏训练和模拟测试三步。",
         standard: "专项成绩有记录，动作问题能被具体指出并改进。",
-        studentNote: "",
       },
     ],
   },
@@ -1315,6 +1293,7 @@ function createSubjectWorkspace(subject) {
     strategy: data.strategy,
     strategySuggestion: "",
     taskSuggestion: "",
+    suggestedTasks: [],
     acceptedStrategy: "",
     studentStrategy: "",
     tasks: data.tasks.map((task, index) => ({ ...task, id: `${subject}-task-${index}` })),
@@ -1322,24 +1301,46 @@ function createSubjectWorkspace(subject) {
   };
 }
 
+function normalizeSuggestedTask(subject, task = {}, index = 0) {
+  return {
+    id: `${subject}-accepted-task-${Date.now()}-${index}`,
+    title: task.title || `${subject}学习任务 ${index + 1}`,
+    problem: task.problem || task.reason || "根据当前学情中的薄弱环节安排。",
+    time: task.time || "请根据学习计划安排具体时间",
+    material: task.material || "课本、错题本、课堂笔记或当前正在使用的资料",
+    detail: task.detail || task.execution || "写清楚任务步骤、完成顺序和检查方式。",
+    standard: task.standard || "完成后能复述方法、独立完成同类题，并记录反馈。",
+  };
+}
+
 function formatTaskSuggestion(result = {}) {
   const tasks = Array.isArray(result.tasks) ? result.tasks : result.task ? [result.task] : [];
-  if (tasks.length) {
-    return tasks
-      .map((task, index) => {
-        const title = task.title || `学习任务 ${index + 1}`;
-        const reason = task.problem || task.reason || result.strategy_suggestion || "针对当前学情中的关键薄弱点进行训练。";
-        const detail = task.detail || task.execution || task.standard || "请写清楚资料、时间、步骤和完成标准。";
-        return `任务${index + 1}：${title}\n为什么要做：${reason}\n执行细节：${detail}`;
-      })
-      .join("\n\n");
-  }
-  return result.strategy_suggestion || result.ai_note || "";
+  const intro = result.strategy_suggestion || result.ai_note || "";
+  if (!tasks.length) return intro;
+  const body = tasks
+    .map((task, index) => {
+      const normalized = normalizeSuggestedTask("本学科", task, index);
+      const reason = task.reason || normalized.problem;
+      return [
+        `任务${index + 1}：${normalized.title}`,
+        `对应问题：${normalized.problem}`,
+        `为什么要做：${reason}`,
+        `什么时间做：${normalized.time}`,
+        `使用资料：${normalized.material}`,
+        `执行细节：${normalized.detail}`,
+        `完成标准：${normalized.standard}`,
+      ].join("\n");
+    })
+    .join("\n\n");
+  return [intro, body].filter(Boolean).join("\n\n");
 }
 
 function buildTasksFromSuggestion(subject, suggestion) {
+  if (Array.isArray(suggestion) && suggestion.length) {
+    return suggestion.map((task, index) => normalizeSuggestedTask(subject, task, index));
+  }
   const chunks = String(suggestion || "")
-    .split(/\n(?=任务\s*\d+|任务[一二三四五六七八九十])/)
+    .split(/\n(?=任务\s*\d+[：:]|任务[一二三四五六七八九十][：:])/)
     .map((item) => item.trim())
     .filter(Boolean);
   const source = chunks.length ? chunks : [String(suggestion || "").trim()].filter(Boolean);
@@ -1347,17 +1348,15 @@ function buildTasksFromSuggestion(subject, suggestion) {
     const lines = chunk.split(/\n+/).map((line) => line.trim()).filter(Boolean);
     const first = lines[0] || `${subject}学习任务 ${index + 1}`;
     const title = first.replace(/^任务\s*\d+[：:]\s*/, "").replace(/^任务[一二三四五六七八九十][：:]\s*/, "") || `${subject}学习任务 ${index + 1}`;
-    const reasonLine = lines.find((line) => line.startsWith("为什么要做")) || "";
-    const detailLine = lines.find((line) => line.startsWith("执行细节")) || "";
+    const pick = (label) => (lines.find((line) => line.startsWith(label)) || "").replace(new RegExp(`^${label}[：:]\\s*`), "");
     return {
       id: `${subject}-accepted-task-${Date.now()}-${index}`,
       title,
-      problem: reasonLine.replace(/^为什么要做[：:]\s*/, "") || "根据AI学习任务建议整理。",
-      time: "请根据学习计划安排具体时间",
-      material: "结合课本、错题本或当前资料",
-      detail: detailLine.replace(/^执行细节[：:]\s*/, "") || lines.slice(1).join("\n") || chunk,
-      standard: "完成后能复述方法、独立完成同类题，并记录反馈。",
-      studentNote: "",
+      problem: pick("对应问题") || pick("为什么要做") || "根据AI学习任务建议整理。",
+      time: pick("什么时间做") || "请根据学习计划安排具体时间",
+      material: pick("使用资料") || "结合课本、错题本或当前资料",
+      detail: pick("执行细节") || lines.slice(1).join("\n") || chunk,
+      standard: pick("完成标准") || "完成后能复述方法、独立完成同类题，并记录反馈。",
     };
   });
 }
@@ -3199,7 +3198,7 @@ function App() {
       ...workspace,
       acceptedStrategy: workspace.taskSuggestion || workspace.strategySuggestion,
       strategy: workspace.taskSuggestion || workspace.strategySuggestion,
-      tasks: buildTasksFromSuggestion(activeSubject, workspace.taskSuggestion || workspace.strategySuggestion),
+      tasks: buildTasksFromSuggestion(activeSubject, workspace.suggestedTasks?.length ? workspace.suggestedTasks : workspace.taskSuggestion || workspace.strategySuggestion),
       aiNote: "已接受当前AI学习任务建议，这份建议会记录在当前学生的任务档案中，并作为本学科后续计划设计的依据。",
     }));
   }
@@ -3224,7 +3223,6 @@ function App() {
           material: "例如：课本、错题本、教材全解",
           detail: "写清楚任务步骤，越具体越容易执行。",
           standard: "写清楚怎样算完成，以及如何检查效果。",
-          studentNote: "",
         },
       ],
     }));
@@ -3605,12 +3603,10 @@ function App() {
     recordDownload("下载知识图", `${knowledgeNote.title || "AI知识图"}.svg`, "AI知识图");
   }
 
-  async function runStrategyAi(section, mode, targetId = "") {
-    if (!requireMemberAction("AI优化学习任务", () => runStrategyAi(section, mode, targetId), "学习任务会根据学情画像生成科目任务、资料使用建议或完成标准，需要会员权限。")) return;
+  async function runStrategyAi() {
+    if (!requireMemberAction("AI学习任务建议", runStrategyAi, "学习任务会根据学情画像、学情陈述和当前科目生成任务建议，需要会员权限。")) return;
     if (typeof strategyAiStatus === "string" && strategyAiStatus.startsWith("AI正在")) return;
     const subject = activeSubject;
-    const workspace = strategyWorkspaces[subject];
-    const targetTask = workspace?.tasks?.find((task) => task.id === targetId) || null;
     const archiveSnapshot = buildStrategyArchiveSnapshot({
       answers,
       records,
@@ -3625,64 +3621,19 @@ function App() {
     try {
       const data = await apiRequest("/ai/strategy", {
         method: "POST",
-        body: JSON.stringify({ subject, section, mode, targetId, task: targetTask, archiveSnapshot }),
+        body: JSON.stringify({ subject, archiveSnapshot }),
       });
       const result = data.result || {};
-      if (section === "strategy") {
-        const suggestion = formatTaskSuggestion(result) || "AI没有返回明确的学习任务建议，请点击重新生成再试一次。";
-        updateStrategyWorkspace(subject, (current) => ({
-          ...current,
-          strategySuggestion: suggestion,
-          taskSuggestion: suggestion,
-          acceptedStrategy: "",
-          aiNote: result.ai_note || "AI已根据当前学情画像生成本学科学习任务建议。",
-        }));
-      } else if (section === "task") {
-        const nextTask = result.task || {};
-        if (!targetId) {
-          updateStrategyWorkspace(subject, (current) => ({
-            ...current,
-            tasks: [
-              ...current.tasks,
-              {
-                id: `${subject}-ai-task-${Date.now()}`,
-                title: nextTask.title || `${subject}AI建议任务`,
-                problem: nextTask.problem || result.strategy_suggestion || "请明确这个任务要解决的学科问题。",
-                time: nextTask.time || "每周2-3次，每次25-40分钟",
-                material: nextTask.material || "课本、错题本或专项资料",
-                detail: nextTask.detail || "写清楚任务步骤、资料使用方式和完成顺序。",
-                standard: nextTask.standard || "写清楚完成标准和检查方式。",
-                studentNote: nextTask.studentNote || "",
-              },
-            ],
-            aiNote: result.ai_note || "AI已新增一条可继续修改的学习任务。",
-          }));
-        } else {
-          updateStrategyWorkspace(subject, (current) => ({
-            ...current,
-            tasks: current.tasks.map((task) =>
-              task.id === targetId
-                ? {
-                    ...task,
-                    title: nextTask.title || task.title,
-                    problem: nextTask.problem || task.problem,
-                    time: nextTask.time || task.time,
-                    material: nextTask.material || task.material,
-                    detail: nextTask.detail || task.detail,
-                    standard: nextTask.standard || task.standard,
-                    studentNote: nextTask.studentNote || task.studentNote,
-                  }
-                : task
-            ),
-            aiNote: result.ai_note || "AI已优化当前学习任务。",
-          }));
-        }
-      } else if (section === "material") {
-        updateStrategyWorkspace(subject, (current) => ({
-          ...current,
-          aiNote: result.ai_note || result.strategy_suggestion || "AI已给出资料使用建议。",
-        }));
-      }
+      const suggestion = formatTaskSuggestion(result) || "AI没有返回明确的学习任务建议，请点击重新生成再试一次。";
+      const suggestedTasks = Array.isArray(result.tasks) ? result.tasks : [];
+      updateStrategyWorkspace(subject, (current) => ({
+        ...current,
+        strategySuggestion: suggestion,
+        taskSuggestion: suggestion,
+        suggestedTasks,
+        acceptedStrategy: "",
+        aiNote: result.ai_note || "AI已根据当前学情画像生成本学科学习任务建议。",
+      }));
       setStrategyAiStatus("AI建议已生成");
     } catch (error) {
       showAiError(error, "AI暂时没有完成学习任务建议，请稍后再试。");
@@ -6655,7 +6606,7 @@ function StrategyDesignPage({
           <span className="eyebrow">学习任务</span>
           <h2>先把这个科目的学习任务安排清楚</h2>
           <p>
-            这一页以学情画像为基础，由AI给出科目学习任务建议。学生可以补充资料使用细节，也可以让AI帮忙重新生成，最后形成可执行的科目学习任务。
+            这一页以学情问卷、学情陈述和学情画像为基础，由AI先生成本学科任务建议，再由学生整理成自己能执行、能检查的具体学习任务。
           </p>
         </div>
         <div className="hero-action-stack">
@@ -6703,7 +6654,7 @@ function StrategyDesignPage({
           </div>
 
           <div className="strategy-ai-entry">
-            <button type="button" className="primary-action" onClick={() => runStrategyAi("strategy", "generate")} disabled={isGeneratingStrategy}>
+            <button type="button" className="primary-action" onClick={runStrategyAi} disabled={isGeneratingStrategy}>
               <Sparkles size={17} />
               AI学习任务建议
             </button>
@@ -6728,7 +6679,7 @@ function StrategyDesignPage({
                   <CheckCircle2 size={17} />
                   接受建议
                 </button>
-                <button type="button" className="ghost-action" onClick={() => runStrategyAi("strategy", "generate")} disabled={isGeneratingStrategy}>
+                <button type="button" className="ghost-action" onClick={runStrategyAi} disabled={isGeneratingStrategy}>
                   <WandSparkles size={17} />
                   重新生成
                 </button>
@@ -6756,10 +6707,6 @@ function StrategyDesignPage({
             <h2>把策略拆成学生能执行的任务</h2>
           </div>
           <div className="ai-action-row">
-            <button type="button" className="ghost-action" onClick={() => runStrategyAi("task", "suggest")}>
-              <Sparkles size={17} />
-              AI新增任务
-            </button>
             <button type="button" className="primary-action" onClick={addStrategyTask}>
               <ClipboardList size={17} />
               添加任务
@@ -6795,21 +6742,6 @@ function StrategyDesignPage({
                 <span>完成标准</span>
                 <textarea value={task.standard} onChange={(event) => updateStrategyTask(task.id, "standard", event.target.value)} />
               </label>
-              <label>
-                <span>学生自己的表达</span>
-                <textarea
-                  placeholder="学生可以写：我觉得自己最需要先做什么、什么时候更容易完成、希望老师怎样提醒。"
-                  value={task.studentNote}
-                  onChange={(event) => updateStrategyTask(task.id, "studentNote", event.target.value)}
-                />
-              </label>
-
-              <div className="ai-action-row compact-actions">
-                <button type="button" className="ghost-action" onClick={() => runStrategyAi("task", "revise", task.id)}>
-                  <Save size={16} />
-                  AI帮我修改
-                </button>
-              </div>
             </article>
           ))}
         </div>
