@@ -1936,7 +1936,7 @@ function App() {
   const [strategyAiStatus, setStrategyAiStatus] = useState("");
   const savedPlanDraft = readDraftValue("plan", null);
   const [planRows, setPlanRows] = useState(() => normalizePlanRows(savedPlanDraft?.planRows || defaultPlanRows));
-  const [planNote, setPlanNote] = useState(savedPlanDraft?.planNote || "本周先保证每天有明确空闲时间、明确任务和每日反思，不追求任务数量。");
+  const [planNote, setPlanNote] = useState(savedPlanDraft?.planNote || "本周计划按默认作息生成：早晨7点前15-20分钟、晚自习一节课、回家后约30分钟；学生可以按真实作息自行修改。");
   const [planAiStatus, setPlanAiStatus] = useState("idle");
   const [methodFocusRows, setMethodFocusRows] = useState(() => savedPlanDraft?.methodFocusRows || createFocusRows("method", methodTrainingOptions));
   const [habitFocusRows, setHabitFocusRows] = useState(() => savedPlanDraft?.habitFocusRows || createFocusRows("habit", habitTrainingOptions));
@@ -3304,27 +3304,27 @@ function App() {
         {
           id: "ai-plan-row-" + Date.now() + "-1",
           cells: makeCells({
-            [weekDays[0]]: { start: "19:30", end: "20:10", task: weakSubject + "\u57fa\u7840\u590d\u4e60", note: "\u5148\u590d\u76d8\u77e5\u8bc6\u70b9\uff0c\u518d\u505a\u4f8b\u9898" },
-            [weekDays[2]]: { start: "19:30", end: "20:10", task: weakSubject + "\u9519\u9898\u590d\u76d8", note: "\u9009\u62e91-2\u9053\u5178\u578b\u9519\u9898\u91cd\u505a" },
+            [weekDays[0]]: { start: "06:40", end: "07:00", task: weakSubject + "轻量预习", note: "只看目标、概念和1道例题" },
+            [weekDays[2]]: { start: "06:40", end: "07:00", task: weakSubject + "错题方法回忆", note: "不重做整套题，只复述关键方法" },
           }),
         },
         {
           id: "ai-plan-row-" + Date.now() + "-2",
           cells: makeCells({
-            [weekDays[1]]: { start: "19:30", end: "20:00", task: "\u9650\u65f6\u8bad\u7ec3", note: "\u63a7\u5236\u65f6\u95f4\uff0c\u8bb0\u5f55\u5361\u70b9" },
-            [weekDays[4]]: { start: "19:30", end: "20:00", task: "\u65b9\u6cd5\u590d\u76d8", note: "\u603b\u7ed3\u672c\u5468\u6709\u6548\u505a\u6cd5" },
+            [weekDays[1]]: { start: "19:30", end: "20:20", task: weakSubject + "专题训练", note: "控制时间，记录卡点" },
+            [weekDays[4]]: { start: "19:30", end: "20:20", task: "本周错题复测", note: "选1-2道典型错题重做" },
           }),
         },
         {
           id: "ai-plan-row-" + Date.now() + "-3",
           cells: makeCells({
-            [weekDays[5]]: { start: "20:30", end: "20:50", task: "\u6bcf\u5468\u8ba8\u8bba", note: "\u628a\u95ee\u9898\u548c\u8c03\u6574\u60f3\u6e05\u695a" },
-            [weekDays[6]]: { start: "19:30", end: "20:00", task: "\u4e0b\u5468\u9884\u5b89\u6392", note: "\u628a\u91cd\u70b9\u4efb\u52a1\u5148\u653e\u8fdb\u65e5\u7a0b" },
+            [weekDays[3]]: { start: "21:30", end: "22:00", task: "当天收尾复盘", note: "整理明日任务，避免拖到太晚" },
+            [weekDays[6]]: { start: "19:30", end: "20:00", task: "下周预安排", note: "把重点任务先放进日程" },
           }),
         },
       ])
     );
-    setPlanNote("AI\u6682\u65f6\u6ca1\u6709\u8fd4\u56de\u6709\u6548\u8ba1\u5212\uff0c\u5df2\u5148\u751f\u6210\u4e00\u4efd\u53ef\u7ee7\u7eed\u4fee\u6539\u7684\u793a\u8303\u5b89\u6392\u3002");
+    setPlanNote("AI暂时没有返回有效计划，已先按默认作息生成一份示范安排：早晨7点前、晚自习和回家后为主要可用时间，学生可以继续修改。");
     setPlanAiStatus("done");
   }
 

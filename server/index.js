@@ -39,6 +39,17 @@ const knowledgeInfographicTemplate = `超精细教育信息图 [SUBJECT]，
 包含标题、核心结构图、3到5个关键标注、底部一句总结。
 白色背景，文字尽量少但清楚，适合中学生复习。`;
 
+const defaultStudyPlanTimePolicy = [
+  "如果学生没有明确填写可用时间，默认按中国大陆中学生的常见学习日节奏来安排。",
+  "早晨起床后到7:00前，通常可安排15到20分钟轻任务，例如背诵、预习、回忆错题方法。",
+  "白天在学校上课期间，不默认安排完整自主学习任务；课间10分钟最多只安排约5分钟的轻量任务，例如看一眼错题卡、背2到3个关键词。",
+  "晚自习一般可安排一节课左右的自主学习任务，适合错题复盘、专题训练、限时练习或阶段复习。",
+  "回家后默认还有约30分钟可用学习时间，适合收尾复盘、整理明日任务、轻量背诵或检查作业漏洞。",
+  "默认睡觉时间约为22:30到23:00，不能把任务堆到太晚，计划必须留出休息余量。",
+  "周末可以比平日安排稍长一点，但仍要避免满负荷堆任务。",
+  "必须在计划说明 note 中提醒：以上时间只是默认建议，学生可以根据自己的真实作息自行修改。"
+].join("\n");
+
 function normalizeAiProvider(provider = "") {
   return String(provider).toLowerCase() === "gemini" ? "gemini" : "openai";
 }
@@ -2542,7 +2553,7 @@ app.post("/api/ai/strategy", requireAuth, async (req, res, next) => {
             },
           ],
         });
-        const completed = await waitForOpenAIBackgroundResponse(response, { jobId: job.id, timeoutMessage: "学习策略AI任务仍未完成，系统已尝试取消以控制费用。" });
+        const completed = await waitForOpenAIBackgroundResponse(response, { jobId: job.id, timeoutMessage: "学习任务建议AI任务仍未完成，系统已尝试取消以控制费用。" });
         const result = parseJsonText(getResponseText(completed), { strategy_suggestion: "", ai_note: "", tasks: [] });
         await query(
           "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'subject_strategy_ai', $3, $4)",
@@ -2584,13 +2595,31 @@ app.post("/api/ai/study-plan", requireAuth, async (req, res, next) => {
             {
               role: "system",
               content:
-                "You are the Shuzi AI study plan agent. Only arrange confirmed strategies, tasks, available time, method training, and habit goals into an editable weekly plan. Do not rediagnose the learning profile, do not analyze images, and do not generate similar questions. Keep the plan concrete, executable, and not overloaded. Return strict JSON in Chinese.",
+                "你是树子AI的学习计划制定老师，服务中国大陆中学生应试学习场景。你只负责把已经确认的学情画像、学习任务、方法习惯目标和默认可用时间安排成一份可修改的周学习计划。不要重新诊断学情，不要分析错题图片，不要生成相似题，不要写长篇报告。计划必须具体、可执行、可检查，并且不能把任务排得过满。返回严格 JSON，全部使用中文。",
             },
             {
               role: "user",
-              content: jsonInstruction(
-                "{note, rows:[{cells:{\u661f\u671f\u4e00:{start,end,task,note},\u661f\u671f\u4e8c:{start,end,task,note},\u661f\u671f\u4e09:{start,end,task,note},\u661f\u671f\u56db:{start,end,task,note},\u661f\u671f\u4e94:{start,end,task,note},\u661f\u671f\u516d:{start,end,task,note},\u661f\u671f\u65e5:{start,end,task,note}}}], method_focus_suggestions, habit_focus_suggestions, execution_notes}"
-              ) + "\nPlan archive snapshot:\n" + JSON.stringify(archiveSnapshot) + "\nCurrent weekly plan rows:\n" + JSON.stringify(currentPlanRows) + "\nMethod focus rows:\n" + JSON.stringify(methodFocusRows) + "\nHabit focus rows:\n" + JSON.stringify(habitFocusRows),
+              content:
+                jsonInstruction(
+                  "{note:string, rows:[{cells:{星期一:{start:string,end:string,task:string,note:string},星期二:{start:string,end:string,task:string,note:string},星期三:{start:string,end:string,task:string,note:string},星期四:{start:string,end:string,task:string,note:string},星期五:{start:string,end:string,task:string,note:string},星期六:{start:string,end:string,task:string,note:string},星期日:{start:string,end:string,task:string,note:string}}}], method_focus_suggestions:string[], habit_focus_suggestions:string[], execution_notes:string[]}"
+                ) +
+                "\n默认可用时间规则：\n" +
+                defaultStudyPlanTimePolicy +
+                "\n输出要求：" +
+                "\n1. rows 生成 3 到 6 行即可，每行代表一类可执行学习任务，不要把每天排满。" +
+                "\n2. start/end 必须使用 HH:mm 格式；平日优先使用 06:40-07:00、19:30-20:20、21:30-22:00 这类时间段；课间任务如果使用，只能是 5 分钟轻任务，并在 note 写明“课间轻量完成”。" +
+                "\n3. task 写具体任务，note 写执行方法或检查标准，例如“错题重做后遮答案复述思路”。" +
+                "\n4. 必须结合学习任务建议中的科目任务来安排，不要凭空新增与学情无关的大任务。" +
+                "\n5. note 必须说明：本计划按默认作息生成，学生可以根据真实放学、晚自习和睡觉时间自行修改。" +
+                "\n6. method_focus_suggestions 和 habit_focus_suggestions 只写简短建议，不要写成另一份计划。" +
+                "\n学情与任务资料 JSON：\n" +
+                JSON.stringify(archiveSnapshot) +
+                "\n当前周计划草稿：\n" +
+                JSON.stringify(currentPlanRows) +
+                "\n方法训练草稿：\n" +
+                JSON.stringify(methodFocusRows) +
+                "\n习惯训练草稿：\n" +
+                JSON.stringify(habitFocusRows),
             },
           ],
         });
