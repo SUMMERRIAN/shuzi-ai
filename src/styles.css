@@ -6651,7 +6651,7 @@ audio {
 
 .free-ask-input {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 132px 48px;
+  grid-template-columns: 44px minmax(0, 1fr) 156px 48px;
   align-items: end;
   gap: 8px;
   margin-top: 14px;
@@ -6702,7 +6702,7 @@ audio {
 .free-model-picker {
   position: relative;
   align-self: center;
-  min-width: 0;
+  min-width: 156px;
 }
 
 .free-model-picker .free-model-trigger {
@@ -6713,13 +6713,20 @@ audio {
   align-items: center;
   justify-content: center;
   gap: 6px;
+  overflow: hidden;
   border: 1px solid #d6dce5;
   border-radius: 999px;
   background: linear-gradient(180deg, #ffffff 0%, #f5f8fb 100%);
   color: #102018;
   padding: 0 10px 0 12px;
   font-weight: 850;
+  white-space: nowrap;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+.free-model-trigger span,
+.free-model-trigger em {
+  flex: 0 0 auto;
 }
 
 .free-model-trigger em {
