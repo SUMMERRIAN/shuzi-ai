@@ -7,6 +7,7 @@ import {
   Brain,
   CalendarDays,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
@@ -187,10 +188,10 @@ function escapeHtml(value = "") {
 }
 
 const freeAskModelOptions = [
-  { value: "openai-fast", provider: "openai", mode: "fast", label: "OpenAI · 快速" },
-  { value: "openai-thinking", provider: "openai", mode: "thinking", label: "OpenAI · 思考" },
-  { value: "gemini-fast", provider: "gemini", mode: "fast", label: "Gemini · 快速" },
-  { value: "gemini-thinking", provider: "gemini", mode: "thinking", label: "Gemini · 思考" },
+  { value: "openai-fast", provider: "openai", mode: "fast", label: "OpenAI · 快速", title: "OpenAI", tone: "快速", hint: "日常问答、总结表达" },
+  { value: "openai-thinking", provider: "openai", mode: "thinking", label: "OpenAI · 思考", title: "OpenAI", tone: "思考", hint: "复杂问题、长文本推理" },
+  { value: "gemini-fast", provider: "gemini", mode: "fast", label: "Gemini · 快速", title: "Gemini", tone: "快速", hint: "图片理解、轻量提问" },
+  { value: "gemini-thinking", provider: "gemini", mode: "thinking", label: "Gemini · 思考", title: "Gemini", tone: "思考", hint: "图片题目、深度分析" },
 ];
 
 function detectFreeAskImageGenerationIntent(content = "") {
@@ -8073,6 +8074,27 @@ function FreeAskPage({
   };
   const canSend = status !== "loading" && (input.trim() || files.length > 0);
   const pageClassName = sidebarCollapsed ? "free-ask-page is-conversation-collapsed" : "free-ask-page";
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const modelMenuRef = useRef(null);
+  const selectedModel = freeAskModelOptions.find((option) => option.value === modelChoice) || freeAskModelOptions[0];
+
+  useEffect(() => {
+    if (!modelMenuOpen) return undefined;
+    const handlePointerDown = (event) => {
+      if (modelMenuRef.current && !modelMenuRef.current.contains(event.target)) {
+        setModelMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") setModelMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [modelMenuOpen]);
 
   return (
     <section className={pageClassName}>
@@ -8189,13 +8211,47 @@ function FreeAskPage({
             }}
             placeholder={text.placeholder}
           />
-          <select className="free-model-select" value={modelChoice} onChange={(event) => setModelChoice(event.target.value)} aria-label={text.modelLabel}>
-            {freeAskModelOptions.map((option) => (
-              <option value={option.value} key={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          <div className="free-model-picker" ref={modelMenuRef}>
+            <button
+              type="button"
+              className="free-model-trigger"
+              onClick={() => setModelMenuOpen((prev) => !prev)}
+              aria-label={text.modelLabel}
+              aria-haspopup="listbox"
+              aria-expanded={modelMenuOpen}
+            >
+              <span>{selectedModel.title}</span>
+              <em>{selectedModel.tone}</em>
+              <ChevronDown size={15} />
+            </button>
+            {modelMenuOpen && (
+              <div className="free-model-menu" role="listbox" aria-label={text.modelLabel}>
+                {freeAskModelOptions.map((option) => {
+                  const active = option.value === modelChoice;
+                  return (
+                    <button
+                      type="button"
+                      key={option.value}
+                      role="option"
+                      aria-selected={active}
+                      className={active ? "free-model-option is-active" : "free-model-option"}
+                      onClick={() => {
+                        setModelChoice(option.value);
+                        setModelMenuOpen(false);
+                      }}
+                    >
+                      <span>
+                        <strong>{option.title}</strong>
+                        <em>{option.tone}</em>
+                      </span>
+                      <small>{option.hint}</small>
+                      {active && <CheckCircle2 size={16} />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           <button type="button" className="free-send" onClick={sendFreeAsk} aria-label={text.send} disabled={!canSend} aria-busy={status === "loading"}>
             {status === "loading" ? <Loader2 className="spin" size={20} /> : <Send size={20} />}
           </button>
