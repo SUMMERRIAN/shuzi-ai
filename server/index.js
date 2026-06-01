@@ -1298,7 +1298,7 @@ async function buildFreeAskMaterialContext(files = []) {
 }
 
 const freeAskSystemPrompt =
-  "你是树子AI的自由对话助手。用户可能是学生，也可能是家长。请直接回答用户当前问题；如果有上传材料，优先结合可读取材料和图片回答。保持中文表达，结构清楚，分段自然，便于学生和家长阅读。不要臆造看不清或没有提供的信息；材料不足时请说明需要补充什么。";
+  "你是树子AI的自由对话助手。用户可能是学生，也可能是家长。你必须先判断用户本轮希望你对文字、图片或文件做什么，再选择回答方式。普通图片、截图和文档默认按内容理解、信息提取或总结来回答；只有用户明确要求讲题、解题、分析作业/试卷/错题时，才按学习题目讲解。保持中文表达，结构清楚，分段自然，便于学生和家长阅读。不要臆造看不清或没有提供的信息；材料不足时请说明需要补充什么。";
 
 const freeAskMemoryLimits = {
   recentMessages: Number(process.env.FREE_ASK_RECENT_MESSAGES || 12),
@@ -1475,11 +1475,24 @@ async function pruneFreeAskConversationMemory(conversationId) {
   );
 }
 
+function detectFreeAskIntent({ question = "", files = [], wantsImage = false }) {
+  if (wantsImage) return "image_generation";
+  const incomingFiles = Array.isArray(files) ? files : [];
+  const text = String(question || "").replace(/\s+/g, " ").trim();
+  const hasFiles = incomingFiles.length > 0;
+  const hasImages = incomingFiles.some((file) => isImageUpload(file));
+  if (!hasFiles) return "general_chat";
+
+  const explicitQuestionRequest =
+    /这道题|这题|本题|题目|题干|解题|讲题|讲解.*题|解析.*题|题怎么|怎么解|怎么做|求解|证明题|计算题|应用题|选择题|填空题|答案|解答|步骤|错题|作业题|试题|试卷|卷子|数学题|物理题|化学题|几何题|函数题|看不懂.*题|不会做|帮我解|帮我做题|分析.*(题|作业|试卷|卷子|错题)/.test(text);
+  if (explicitQuestionRequest) return "question_explanation";
+
+  if (hasImages) return "image_understanding";
+  return "document_summary";
+}
+
 function looksLikeFreeAskQuestionExplanation({ question = "", files = [] }) {
-  if (!files.length) return false;
-  const text = String(question || "");
-  if (!text.trim()) return true;
-  return /题|作业|试卷|讲解|解答|答案|步骤|数学|物理|化学|几何|函数|看不懂|不会|帮我看|分析/.test(text);
+  return detectFreeAskIntent({ question, files, wantsImage: false }) === "question_explanation";
 }
 
 function inferFreeAskSubject(question = "", files = []) {
@@ -1491,10 +1504,19 @@ function inferFreeAskSubject(question = "", files = []) {
   return "数学";
 }
 
-function buildFreeAskCleanAnswer({ question, materialContext, conversationContext }) {
+function buildFreeAskCleanAnswer({ question, materialContext, conversationContext, intent = "general_chat" }) {
+  const intentInstruction = {
+    image_understanding:
+      "本轮任务是图片理解或截图解读。请先根据用户的问题判断他想知道什么，再回答图片内容。除非用户明确要求讲题、解题、作业或试卷分析，不要把图片当成题目，不要输出“题干、已知条件、解题目标、AI讲解”等题目模板。如果是界面截图，请说明它大概是什么页面、主要文字、核心用途和用户需要注意的地方。",
+    document_summary:
+      "本轮任务是文档或文件内容理解。请按用户要求总结、提取重点、解释含义或指出需要注意的地方，不要套用题目讲解模板。",
+    general_chat:
+      "本轮任务是普通自由对话。请直接回答用户问题；如果用户没有明确目标，可以温和说明你能如何继续帮他。",
+  }[intent] || "";
   return [
     freeAskSystemPrompt,
     conversationContext ? `可参考的历史上下文：\n${conversationContext}` : "",
+    intentInstruction,
     "请直接回答用户本轮问题。输出要干净、分段清楚，不要输出原始 LaTeX 代码、JSON 或英文内部字段名。",
     "用户本轮问题：" + (question || "请根据附件回答。"),
     "附件：" + materialContext.fileSummary,
@@ -3177,7 +3199,8 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
     const aiProvider = normalizeAiProvider(provider);
     const aiMode = normalizeAiMode(mode);
     const shouldGenerateImage = wantsImage === "true";
-    const useQuestionWorkflow = !shouldGenerateImage && looksLikeFreeAskQuestionExplanation({ question, files });
+    const freeAskIntent = detectFreeAskIntent({ question, files, wantsImage: shouldGenerateImage });
+    const useQuestionWorkflow = freeAskIntent === "question_explanation";
     const tokenCost = shouldGenerateImage ? 35 : useQuestionWorkflow || aiMode === "thinking" ? 8 : 5;
     await assertTokenBalance(req.user.id, tokenCost);
     if (!String(question).trim() && !files.length) {
@@ -3198,7 +3221,7 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
       role: "user",
       content: question || (files.length ? `已上传 ${files.length} 个文件，请根据附件回答。` : ""),
       attachments: attachmentMeta,
-      meta: { provider: aiProvider, mode: aiMode, wantsImage: shouldGenerateImage, useQuestionWorkflow },
+      meta: { provider: aiProvider, mode: aiMode, wantsImage: shouldGenerateImage, intent: freeAskIntent, useQuestionWorkflow },
     });
     if ((!conversation.title || conversation.title === "新的对话") && makeFreeAskTitle(question, files) !== "新的对话") {
       await query("UPDATE free_ask_conversations SET title = $2, updated_at = now() WHERE id = $1", [
@@ -3207,7 +3230,7 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
       ]);
     }
     const materialContext = await buildFreeAskMaterialContext(files);
-    const promptText = buildFreeAskCleanAnswer({ question, materialContext, conversationContext });
+    const promptText = buildFreeAskCleanAnswer({ question, materialContext, conversationContext, intent: freeAskIntent });
 
     if (shouldGenerateImage || files.length) {
       const { job, reused } = await createAiJob({
@@ -3225,6 +3248,7 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
           provider: aiProvider,
           mode: aiMode,
           fileCount: files.length,
+          intent: freeAskIntent,
           useQuestionWorkflow,
         },
         reuseActive: false,
