@@ -2594,6 +2594,13 @@ app.patch("/api/library/items/:id", requireAuth, async (req, res, next) => {
   }
 });
 
+app.post("/api/ai/transcribe", requireAuth, (_req, res) => {
+  res.status(410).json({
+    error: "FEATURE_DISABLED",
+    message: "语音陈述功能已关闭，请使用文字方式填写学情陈述。",
+  });
+});
+
 app.post("/api/ai/transcribe", requireAuth, upload.single("audio"), async (req, res, next) => {
   try {
     await assertPaidMember(req.user.id);

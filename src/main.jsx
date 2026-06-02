@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  AlertCircle,
   BarChart3,
   BookOpen,
   Brain,
@@ -15,7 +14,6 @@ import {
   CreditCard,
   Crown,
   Download,
-  FileAudio,
   FileDown,
   FileImage,
   FileMusic,
@@ -34,7 +32,6 @@ import {
   LogOut,
   Mic,
   MinusCircle,
-  PauseCircle,
   Plus,
   Save,
   Search,
@@ -1385,7 +1382,6 @@ const defaultStatementDraft = {
   text: "我数学上课好像能听懂，但自己做综合题就卡住。错题改完以后过几天又不会，晚上学习效率也比较低。",
   subject: "数学",
   scene: "作业",
-  intensity: 7,
   guidedAnswers: {
     "你现在最困扰的学习问题是什么？": "数学综合题自己做不出来。",
     "它主要影响哪个科目或哪个学习环节？": "主要影响数学作业和考试。",
@@ -1397,7 +1393,6 @@ const emptyStatementDraft = {
   text: "",
   subject: "整体学习",
   scene: "上课",
-  intensity: 5,
   guidedAnswers: {},
   issueDetails: {},
 };
@@ -1915,7 +1910,6 @@ function App() {
   const [statementText, setStatementText] = useState(savedStatementDraft.text);
   const [statementSubject, setStatementSubject] = useState(savedStatementDraft.subject);
   const [statementScene, setStatementScene] = useState(savedStatementDraft.scene);
-  const [statementIntensity, setStatementIntensity] = useState(savedStatementDraft.intensity);
   const [guidedAnswers, setGuidedAnswers] = useState(savedStatementDraft.guidedAnswers);
   const [statementIssueDetails, setStatementIssueDetails] = useState(savedStatementDraft.issueDetails);
   const [records, setRecords] = useState([
@@ -1927,12 +1921,9 @@ function App() {
       time: "今天 10:20",
       subject: "数学",
       scene: "错题",
-      intensity: 7,
       tags: ["会听不会做", "错题复测不足"],
     },
   ]);
-  const [recordingState, setRecordingState] = useState("idle");
-  const [audioUrl, setAudioUrl] = useState("");
   const [aiStatus, setAiStatus] = useState("idle");
   const [aiInsight, setAiInsight] = useState(() => readDraftValue("profile", null));
   const [activeSubject, setActiveSubject] = useState("数学");
@@ -2003,10 +1994,6 @@ function App() {
   const [libraryEditor, setLibraryEditor] = useState(null);
   const [libraryPreview, setLibraryPreview] = useState(null);
   const [libraryStatus, setLibraryStatus] = useState("idle");
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const processedAudioKeysRef = useRef(new Set());
-  const audioRecordSeqRef = useRef(0);
   const pendingMemberActionRef = useRef(null);
   const memberActionBypassRef = useRef(false);
   const freeAskSendingRef = useRef(false);
@@ -2131,11 +2118,10 @@ function App() {
       text: statementText,
       subject: statementSubject,
       scene: statementScene,
-      intensity: statementIntensity,
       guidedAnswers,
       issueDetails: statementIssueDetails,
     });
-  }, [statementText, statementSubject, statementScene, statementIntensity, guidedAnswers, statementIssueDetails]);
+  }, [statementText, statementSubject, statementScene, guidedAnswers, statementIssueDetails]);
 
   useEffect(() => {
     writeDraftValue("profile", aiInsight);
@@ -2205,7 +2191,6 @@ function App() {
     setStatementText(emptyStatementDraft.text);
     setStatementSubject(emptyStatementDraft.subject);
     setStatementScene(emptyStatementDraft.scene);
-    setStatementIntensity(emptyStatementDraft.intensity);
     setGuidedAnswers(emptyStatementDraft.guidedAnswers);
     setStatementIssueDetails(emptyStatementDraft.issueDetails);
   }
@@ -2956,14 +2941,13 @@ function App() {
     if (!content) return;
     const selectedSubject = statementSubject || "未选主题";
     const selectedScene = statementScene || "未选场景";
-    const tags = [selectedSubject, selectedScene, statementIntensity >= 8 ? "高影响" : "需跟进"];
+    const tags = [selectedSubject, selectedScene, "文字陈述"];
     try {
       await apiRequest("/archive/statements", {
         method: "POST",
         body: JSON.stringify({
           subject: selectedSubject,
           scene: selectedScene,
-          intensity: statementIntensity,
           content,
           guidedAnswers,
         }),
@@ -2980,118 +2964,11 @@ function App() {
         time: "刚刚",
         subject: selectedSubject,
         scene: selectedScene,
-        intensity: statementIntensity,
         tags,
         guidedAnswers,
       },
       ...prev,
     ]);
-  }
-
-  async function saveAudioStatement(file, { key, url, title, type, fallbackContent }) {
-    if (!file || !key) return;
-    if (processedAudioKeysRef.current.has(key)) {
-      setAccountNotice("这段语音已经保存过了，不会重复分析同一个录音。");
-      return;
-    }
-    processedAudioKeysRef.current.add(key);
-    setRecordingState("processing");
-    let transcriptText = "";
-    let transcribeError = "";
-    try {
-      clearAiNotice();
-      const formData = new FormData();
-      formData.append("audio", file, file.name || title || "student-statement.webm");
-      const data = await apiRequest("/ai/transcribe", {
-        method: "POST",
-        body: formData,
-      });
-      transcriptText = data.transcript || "";
-      transcribeError = data.transcribeError || "";
-      if (transcribeError) {
-        showAiError({ message: transcribeError }, "语音已保存到个人档案，但本次暂时没有完成转写。");
-      }
-    } catch (error) {
-      processedAudioKeysRef.current.delete(key);
-      showAiError(error, "语音暂时没有保存成功，请稍后重新上传。");
-      setRecordingState("idle");
-      return;
-    }
-    setRecords((prev) => [
-      {
-        id: Date.now(),
-        type,
-        title,
-        content: transcriptText || fallbackContent || "语音已保存到个人学情档案，后续会在学情画像页面统一分析。",
-        time: "刚刚",
-        subject: statementSubject,
-        scene: statementScene,
-        intensity: statementIntensity,
-        tags: [statementSubject, statementScene, transcriptText ? "语音已转写" : "语音已保存"],
-        audioUrl: url,
-      },
-      ...prev,
-    ]);
-    setRecordingState("idle");
-  }
-
-  async function startRecording() {
-    if (!requireMemberAction("使用麦克风保存学情陈述", startRecording, "语音陈述会保存到个人档案，后续会在学情画像页面统一分析。")) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioChunksRef.current = [];
-      const recorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = recorder;
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) audioChunksRef.current.push(event.data);
-      };
-      recorder.onstop = () => {
-        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        const url = URL.createObjectURL(blob);
-        setAudioUrl(url);
-        stream.getTracks().forEach((track) => track.stop());
-        audioRecordSeqRef.current += 1;
-        const file = new File([blob], `student-statement-${Date.now()}.webm`, { type: "audio/webm" });
-        const key = `recording-${audioRecordSeqRef.current}-${blob.size}`;
-        saveAudioStatement(file, {
-          key,
-          url,
-          type: "麦克风录音",
-          title: "学生语音陈述",
-          fallbackContent: "已保存一段实时录音，后续会在学情画像页面统一分析。",
-        });
-      };
-      recorder.start();
-      setRecordingState("recording");
-    } catch {
-      setRecordingState("blocked");
-    }
-  }
-
-  function stopRecording() {
-    if (mediaRecorderRef.current && recordingState === "recording") {
-      mediaRecorderRef.current.stop();
-      setRecordingState("idle");
-    }
-  }
-
-  async function uploadAudio(event) {
-    if (!requireMemberAction("上传语音并保存", null, "上传语音会保存到个人档案，后续会在学情画像页面统一分析。")) {
-      event.target.value = "";
-      return;
-    }
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const url = URL.createObjectURL(file);
-    const key = `upload-${file.name}-${file.size}-${file.lastModified}`;
-    await saveAudioStatement(file, {
-      key,
-      url,
-      type: "上传语音",
-      title: file.name,
-      fallbackContent: "已上传学生录制的语音，后续会在学情画像页面统一分析。",
-    });
-    event.target.value = "";
   }
 
   function updateDailyReflection(row, day, value) {
@@ -4082,18 +3959,11 @@ function App() {
             setStatementSubject={setStatementSubject}
             statementScene={statementScene}
             setStatementScene={setStatementScene}
-            statementIntensity={statementIntensity}
-            setStatementIntensity={setStatementIntensity}
             guidedAnswers={guidedAnswers}
             setGuidedAnswers={setGuidedAnswers}
             issueDetails={statementIssueDetails}
             toggleIssue={toggleStatementIssue}
             updateIssueDetail={updateStatementIssueDetail}
-            recordingState={recordingState}
-            startRecording={startRecording}
-            stopRecording={stopRecording}
-            uploadAudio={uploadAudio}
-            audioUrl={audioUrl}
             records={records}
             aiStatus={aiStatus}
             aiInsight={aiInsight}
@@ -6136,15 +6006,8 @@ function ModernStatementPage({
   setStatementSubject,
   statementScene,
   setStatementScene,
-  statementIntensity,
-  setStatementIntensity,
   guidedAnswers,
   setGuidedAnswers,
-  recordingState,
-  startRecording,
-  stopRecording,
-  uploadAudio,
-  audioUrl,
   records,
   clearStatementDraft,
 }) {
@@ -6165,7 +6028,7 @@ function ModernStatementPage({
         <div>
           <span className="eyebrow">学情陈述</span>
           <h2>先让学生把问题说完整，再进入个人学习档案</h2>
-          <p>学生可以选择科目和发生场景，形成“组合序号 + 文字陈述”的记录；也可以使用麦克风或上传语音，后续交给AI结合问卷做整体分析。</p>
+          <p>学生可以选择主题和发生场景，把学习中的真实困扰写清楚；保存后的内容会进入个人学情档案，后续用于学情画像、学习任务和学习计划。</p>
         </div>
         <div className="hero-action-stack">
           <MessageStat records={records.length} />
@@ -6223,17 +6086,9 @@ function ModernStatementPage({
               </div>
 
               <button type="button" className="ghost-action combination-add" onClick={appendCombination}>
-                <Plus size={17} />
-                添加为一个问题组合
-              </button>
-
-              <div className="impact-slider">
-                <div>
-                  <strong>影响程度</strong>
-                  <span>{statementIntensity}/10</span>
-                </div>
-                <input type="range" min="1" max="10" value={statementIntensity} onChange={(event) => setStatementIntensity(Number(event.target.value))} />
-              </div>
+                  <Plus size={17} />
+                  添加为一个问题组合
+                </button>
 
               <label className="statement-long-box">
                 <span>学生问题陈述</span>
@@ -6249,65 +6104,6 @@ function ModernStatementPage({
                   <Save size={18} />
                   保存
                 </button>
-              </div>
-            </section>
-
-            <section className="panel voice-side-panel">
-              <div className="panel-heading">
-                <div>
-                  <span className="eyebrow">语音陈述</span>
-                  <h2>录音或上传，先保存到个人档案</h2>
-                </div>
-                <FileAudio size={24} />
-              </div>
-              <div className="voice-panel-body">
-                <article className="voice-record-card">
-                  <div className="voice-card-icon">
-                    <Mic size={22} />
-                  </div>
-                  <div>
-                    <strong>麦克风录音</strong>
-                    <p>适合学生直接说出学习困扰，录音会进入陈述档案。</p>
-                  </div>
-                  {recordingState === "recording" ? (
-                    <button className="danger-action voice-button" onClick={stopRecording}>
-                      <PauseCircle size={20} />
-                      结束录音
-                    </button>
-                  ) : recordingState === "processing" ? (
-                    <button className="primary-action voice-button" disabled>
-                      <Sparkles size={20} />
-                      保存并转写中
-                    </button>
-                  ) : (
-                    <button className="primary-action voice-button" onClick={startRecording}>
-                      <Mic size={20} />
-                      开始录音
-                    </button>
-                  )}
-                </article>
-                <label className="voice-upload-card">
-                  <div className="voice-card-icon">
-                    <UploadCloud size={22} />
-                  </div>
-                  <div>
-                    <strong>上传已有语音</strong>
-                    <p>支持学生上传提前录好的音频，后续会整理进个人学情档案。</p>
-                  </div>
-                  <span>选择音频文件</span>
-                  <input type="file" accept="audio/*" onChange={uploadAudio} />
-                </label>
-                {recordingState === "blocked" && (
-                  <p className="warning-text">
-                    <AlertCircle size={16} />
-                    浏览器没有获得麦克风权限，请允许后重试。
-                  </p>
-                )}
-                {audioUrl && (
-                  <audio controls src={audioUrl}>
-                    <track kind="captions" />
-                  </audio>
-                )}
               </div>
             </section>
           </div>
@@ -6348,7 +6144,6 @@ function ModernStatementPage({
               <article key={record.id}>
                 <div className="record-topline">
                   <span>{record.type} · {record.time}</span>
-                  {record.intensity && <b>{record.intensity}/10</b>}
                 </div>
                 <h3>{record.title}</h3>
                 {record.tags && (
@@ -6359,11 +6154,6 @@ function ModernStatementPage({
                   </div>
                 )}
                 <p>{record.content}</p>
-                {record.audioUrl && (
-                  <audio controls src={record.audioUrl}>
-                    <track kind="captions" />
-                  </audio>
-                )}
               </article>
             ))}
           </div>
