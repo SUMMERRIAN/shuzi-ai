@@ -5787,6 +5787,24 @@ function formatArchiveHtmlValue(value) {
 function QuestionnaireArchivePanel({ records, preview, setPreview, downloadPdf }) {
   const activePreview = preview || records[0] || null;
   const archiveSections = activePreview ? buildQuestionnaireArchiveSections(activePreview.answers) : [];
+  const [openArchiveSections, setOpenArchiveSections] = useState(() => new Set());
+
+  useEffect(() => {
+    setOpenArchiveSections(new Set());
+  }, [activePreview?.id, activePreview?.createdAt]);
+
+  function toggleArchiveSection(sectionId) {
+    setOpenArchiveSections((current) => {
+      const next = new Set(current);
+      if (next.has(sectionId)) {
+        next.delete(sectionId);
+      } else {
+        next.add(sectionId);
+      }
+      return next;
+    });
+  }
+
   return (
     <div className="questionnaire-archive-layout">
       <div className="questionnaire-archive-list">
@@ -5829,25 +5847,33 @@ function QuestionnaireArchivePanel({ records, preview, setPreview, downloadPdf }
               <FileDown size={24} />
             </div>
             <div className="archive-section-stack">
-              {archiveSections.map((section, index) => (
-                <section className="archive-section-card" key={section.id}>
-                  <div className="archive-section-title">
-                    <span>{index + 1}</span>
-                    <div>
-                      <h3>{section.title}</h3>
-                      {section.description && <p>{section.description}</p>}
-                    </div>
-                  </div>
-                  <div className="archive-answer-table">
-                    {section.rows.map((row) => (
-                      <div key={row.id}>
-                        <strong>{row.label}</strong>
-                        <p>{row.answer}</p>
+              {archiveSections.map((section, index) => {
+                const isOpen = openArchiveSections.has(section.id);
+                const filledRows = section.rows.filter((row) => !isBlankArchiveValue(row.answer) && row.answer !== "未填写").length;
+                return (
+                  <section className={isOpen ? "archive-section-card is-open" : "archive-section-card"} key={section.id}>
+                    <button type="button" className="archive-section-toggle" onClick={() => toggleArchiveSection(section.id)}>
+                      <span className="archive-section-index">{index + 1}</span>
+                      <span className="archive-section-copy">
+                        <strong>{section.title}</strong>
+                        {section.description && <small>{section.description}</small>}
+                      </span>
+                      <span className="archive-section-count">{filledRows}/{section.rows.length}</span>
+                      <ChevronDown size={18} />
+                    </button>
+                    {isOpen && (
+                      <div className="archive-answer-table">
+                        {section.rows.map((row) => (
+                          <div key={row.id}>
+                            <strong>{row.label}</strong>
+                            <p>{row.answer}</p>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </section>
-              ))}
+                    )}
+                  </section>
+                );
+              })}
             </div>
           </>
         ) : (
@@ -6052,7 +6078,7 @@ function ModernStatementPage({
 
       {activeStatementTab === "entry" && (
         <>
-          <div className="statement-layout statement-focus-layout">
+          <div className="statement-layout statement-focus-layout statement-entry-layout">
             <section className="panel statement-input-panel">
               <div className="panel-heading">
                 <div>
@@ -6106,27 +6132,27 @@ function ModernStatementPage({
                 </button>
               </div>
             </section>
-          </div>
 
-          <section className="panel">
-            <div className="panel-heading">
-              <div>
-                <span className="eyebrow">引导式追问</span>
-                <h2>如果同学不知道如何反思自己的学习问题，可以按照以下思路进行。</h2>
+            <aside className="panel statement-guide-panel">
+              <div className="panel-heading">
+                <div>
+                  <span className="eyebrow">引导式追问</span>
+                  <h2>不会写的时候，可以从这些问题里找线索。</h2>
+                </div>
+                <ClipboardList size={24} />
               </div>
-              <ClipboardList size={24} />
-            </div>
-            <div className="guide-accordion">
-              {statementGuideQuestions.map((question, index) => (
-                <article key={question} className="guide-item guide-item-static">
-                  <div className="guide-static-title">
-                    <span>{String(index + 1).padStart(2, "0")}</span>
-                    <strong>{question}</strong>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </section>
+              <div className="guide-accordion statement-guide-list">
+                {statementGuideQuestions.map((question, index) => (
+                  <article key={question} className="guide-item guide-item-static">
+                    <div className="guide-static-title">
+                      <span>{String(index + 1).padStart(2, "0")}</span>
+                      <strong>{question}</strong>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </aside>
+          </div>
         </>
       )}
 
