@@ -2165,15 +2165,25 @@ function App() {
   function downloadQuestionnaireArchivePdf(record) {
     if (!record) return;
     if (!requireMemberAction("下载学情问卷档案PDF", () => downloadQuestionnaireArchivePdf(record), "学情问卷档案下载需要登录并开通会员。")) return;
-    const rows = summarizeQuestionnaireAnswers(record.answers)
-      .map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(Array.isArray(value) ? value.join("、") : String(value))}</td></tr>`)
+    const sections = buildQuestionnaireArchiveSections(record.answers);
+    const sectionHtml = sections
+      .map((section, index) => {
+        const rows = section.rows
+          .map((row) => `<tr><th>${escapeHtml(row.label)}</th><td>${formatArchiveHtmlValue(row.answer)}</td></tr>`)
+          .join("");
+        return `<section class="archive-section"><h2><span>${index + 1}</span>${escapeHtml(section.title)}</h2>${section.description ? `<p class="section-desc">${escapeHtml(section.description)}</p>` : ""}<table>${rows}</table></section>`;
+      })
       .join("");
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>学情问卷档案</title><style>
-      body{font-family:"Microsoft YaHei",Arial,sans-serif;color:#111820;padding:28px;line-height:1.7}
-      h1{font-size:24px;margin:0 0 6px} .meta{color:#5b665f;margin-bottom:18px}
-      table{width:100%;border-collapse:collapse} th,td{border:1px solid #d9ded6;padding:10px;text-align:left;vertical-align:top}
-      th{width:180px;background:#f4f8f2}
-    </style></head><body><h1>学情问卷档案</h1><div class="meta">填写日期：${escapeHtml(formatArchiveDate(record.createdAt))} · 完成度：${record.completion || 0}%</div><table>${rows}</table></body></html>`;
+      *{box-sizing:border-box} body{font-family:"Microsoft YaHei",Arial,sans-serif;color:#111820;padding:28px;line-height:1.7;background:#fff}
+      h1{font-size:26px;margin:0 0 6px}.meta{color:#5b665f;margin-bottom:22px}
+      .archive-section{break-inside:avoid;margin:0 0 22px;padding:16px;border:1px solid #d9ded6;border-radius:10px}
+      h2{display:flex;align-items:center;gap:10px;font-size:18px;margin:0 0 8px}
+      h2 span{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:999px;background:#e8f5eb;color:#008653;font-size:14px}
+      .section-desc{margin:0 0 12px;color:#5b665f}
+      table{width:100%;border-collapse:collapse} th,td{border:1px solid #dfe5da;padding:10px 12px;text-align:left;vertical-align:top}
+      th{width:210px;background:#f4f8f2} td{white-space:pre-wrap}
+    </style></head><body><h1>学情问卷完整档案</h1><div class="meta">填写日期：${escapeHtml(formatArchiveDate(record.createdAt))} · 状态：${record.status === "submitted" ? "正式提交" : "草稿保存"} · 完成度：${record.completion || 0}%</div>${sectionHtml}</body></html>`;
     const printWindow = window.open("", "_blank");
     if (!printWindow) return;
     printWindow.document.write(html);
@@ -5832,23 +5842,75 @@ function formatArchiveDate(value) {
   return date.toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
-function summarizeQuestionnaireAnswers(answers = {}) {
-  const rows = [
-    ["学生姓名", answers.name],
-    ["年级", answers.grade],
-    ["学习阶段", answers.stage],
-    ["主要薄弱科目", Array.isArray(answers.weakSubjects) ? answers.weakSubjects.join("、") : answers.weakSubjects],
-    ["核心问题", answers.coreProblemText],
-    ["最后补充", answers.finalSupplement],
-  ];
-  return rows.filter(([, value]) => {
-    if (Array.isArray(value)) return value.length;
-    return value !== undefined && value !== null && String(value).trim();
-  });
+function isBlankArchiveValue(value) {
+  if (value === undefined || value === null) return true;
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === "object") return Object.keys(value).length === 0;
+  return String(value).trim() === "";
+}
+
+function formatSimpleArchiveValue(value) {
+  if (isBlankArchiveValue(value)) return "未填写";
+  if (Array.isArray(value)) return value.join("、");
+  if (typeof value === "object") return Object.entries(value).map(([key, item]) => `${key}：${formatSimpleArchiveValue(item)}`).join("\n");
+  return String(value);
+}
+
+function formatQuestionnaireAnswer(question, answers = {}) {
+  const value = answers[question.id];
+  if (question.type === "scoreTable") {
+    const rows = (question.subjects || [])
+      .map((subject) => {
+        const item = value?.[subject] || {};
+        if (!item.score && !item.total) return "";
+        const score = item.score || "未填";
+        const total = item.total || "未填";
+        return `${subject}：${score} / ${total}`;
+      })
+      .filter(Boolean);
+    return rows.length ? rows.join("\n") : "未填写";
+  }
+
+  if (question.type === "scoreMatrix") {
+    return (question.rows || []).map((row) => `${row}：${value?.[row] ?? "未填写"}${value?.[row] !== undefined ? " 分" : ""}`).join("\n");
+  }
+
+  if (question.type === "yesNoGrid") {
+    return (question.rows || []).map((row) => `${row}：${value?.[row] || "未填写"}`).join("\n");
+  }
+
+  if (question.type === "scale") {
+    if (isBlankArchiveValue(value)) return "未填写";
+    const range = question.minLabel || question.maxLabel ? `（${question.minLabel || "低"} - ${question.maxLabel || "高"}）` : "";
+    return `${value} 分${range}`;
+  }
+
+  return formatSimpleArchiveValue(value);
+}
+
+function buildQuestionnaireArchiveSections(answers = {}) {
+  return buildQuestionnaireSteps(answers)
+    .filter((step) => step.type !== "archive")
+    .map((step) => ({
+      id: step.id,
+      title: step.title,
+      description: step.description,
+      rows: (step.questions || []).map((question) => ({
+        id: question.id,
+        label: question.label,
+        answer: formatQuestionnaireAnswer(question, answers),
+      })),
+    }))
+    .filter((section) => section.rows.length);
+}
+
+function formatArchiveHtmlValue(value) {
+  return escapeHtml(value || "未填写").replace(/\n/g, "<br>");
 }
 
 function QuestionnaireArchivePanel({ records, preview, setPreview, downloadPdf }) {
   const activePreview = preview || records[0] || null;
+  const archiveSections = activePreview ? buildQuestionnaireArchiveSections(activePreview.answers) : [];
   return (
     <div className="questionnaire-archive-layout">
       <div className="questionnaire-archive-list">
@@ -5885,16 +5947,30 @@ function QuestionnaireArchivePanel({ records, preview, setPreview, downloadPdf }
             <div className="panel-heading">
               <div>
                 <span className="eyebrow">档案预览</span>
-                <h2>学情问卷档案 · {formatArchiveDate(activePreview.createdAt)}</h2>
+                <h2>学情问卷完整档案 · {formatArchiveDate(activePreview.createdAt)}</h2>
+                <p>状态：{activePreview.status === "submitted" ? "正式提交" : "草稿保存"} · 完成度 {activePreview.completion || 0}%</p>
               </div>
               <FileDown size={24} />
             </div>
-            <div className="archive-summary-table">
-              {summarizeQuestionnaireAnswers(activePreview.answers).map(([label, value]) => (
-                <div key={label}>
-                  <strong>{label}</strong>
-                  <p>{Array.isArray(value) ? value.join("、") : String(value)}</p>
-                </div>
+            <div className="archive-section-stack">
+              {archiveSections.map((section, index) => (
+                <section className="archive-section-card" key={section.id}>
+                  <div className="archive-section-title">
+                    <span>{index + 1}</span>
+                    <div>
+                      <h3>{section.title}</h3>
+                      {section.description && <p>{section.description}</p>}
+                    </div>
+                  </div>
+                  <div className="archive-answer-table">
+                    {section.rows.map((row) => (
+                      <div key={row.id}>
+                        <strong>{row.label}</strong>
+                        <p>{row.answer}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
               ))}
             </div>
           </>
