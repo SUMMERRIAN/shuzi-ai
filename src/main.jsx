@@ -62,6 +62,10 @@ import { expertArticles } from "./expertArticles.js";
 import { storagePlans } from "./membershipConfig.js";
 import "./styles.css";
 
+const featureFlags = {
+  showExpertDiagnosis: false,
+};
+
 const subPages = [
   { id: "home", label: "首页", icon: Home },
   { id: "questionnaire", label: "学情问卷", icon: ClipboardList },
@@ -77,6 +81,8 @@ const subPages = [
   { id: "freeAsk", label: "AI自由问", icon: Sparkles },
   { id: "expert", label: "专家诊断", icon: ShieldCheck },
 ];
+
+const visibleSubPages = subPages.filter((page) => page.id !== "expert" || featureFlags.showExpertDiagnosis);
 
 const aiJobFeatureLabels = {
   transcribe: "语音转写",
@@ -3966,7 +3972,7 @@ function App() {
         </div>
 
         <nav className="nav-list" aria-label="树子AI功能导航">
-          {subPages.map(({ id, label, icon: Icon }) => (
+          {visibleSubPages.map(({ id, label, icon: Icon }) => (
             <button key={id} className={activePage === id ? "nav-item is-active" : "nav-item"} onClick={() => setActivePage(id)}>
               <Icon size={18} />
               <span>{label}</span>
@@ -4111,7 +4117,7 @@ function App() {
           />
         )}
 
-        {activePage === "expert" && <ExpertDiagnosisPage />}
+        {featureFlags.showExpertDiagnosis && activePage === "expert" && <ExpertDiagnosisPage />}
 
         {activePage === "strategy" && (
           <StrategyDesignPage
