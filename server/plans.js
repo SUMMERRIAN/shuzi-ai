@@ -42,9 +42,35 @@ export const ltPackages = {
   "token-500": { id: "token-500", title: "Token充值 ¥500", priceCny: 500, learningTokens: 50000 },
 };
 
+function numberFromEnv(name, fallback) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
 export const tokenBillingRules = {
-  markup: 3.5,
-  tokensPerCny: 100,
+  markup: numberFromEnv("AI_BILLING_MARKUP", 3.5),
+  tokensPerCny: numberFromEnv("TOKENS_PER_CNY", 100),
+  usdToCny: numberFromEnv("USD_TO_CNY", 7.3),
+  minimumChargeTokens: Math.max(0, Math.ceil(numberFromEnv("AI_MIN_CHARGE_TOKENS", 1))),
+  completedJobReuseMinutes: Math.max(0, Math.ceil(numberFromEnv("AI_COMPLETED_JOB_REUSE_MINUTES", 5))),
+  pricingUpdatedAt: "2026-06-02",
+  textPricingUsdPer1M: {
+    "gpt-5.5": { input: 5, cachedInput: 0.5, output: 30 },
+    "gpt-5.4": { input: 2.5, cachedInput: 0.25, output: 15 },
+    "gpt-5.4-mini": { input: 0.75, cachedInput: 0.075, output: 4.5 },
+    "gpt-5.4-nano": { input: 0.2, cachedInput: 0.02, output: 1.25 },
+    "gpt-5": { input: 1.25, cachedInput: 0.125, output: 10 },
+    "gemini-3.5-flash": { input: 1.5, cachedInput: 0.15, output: 9 },
+    "gemini-3.1-flash-lite": { input: 0.25, cachedInput: 0.025, output: 1.5 },
+    "gemini-2.5-flash": { input: 0.3, cachedInput: 0.075, output: 2.5 },
+    "gemini-2.5-pro": { input: 1.25, cachedInput: 0.31, output: 10 },
+  },
+  imagePricingUsd: {
+    "gpt-image-2": {
+      "1024x1024": { low: 0.011, medium: 0.042, high: 0.167 },
+      default: { low: 0.011, medium: 0.042, high: 0.167 },
+    },
+  },
 };
 
 export const storageExpansionPackages = {

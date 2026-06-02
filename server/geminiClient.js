@@ -56,6 +56,7 @@ export async function generateGeminiText({
   responseMimeType = "",
   thinkingBudget = defaultGeminiThinkingBudget,
   maxOutputTokens = geminiMaxOutputTokens,
+  onUsage = null,
 }) {
   ensureGeminiKey();
   const parts = [{ text: prompt }, ...files.map(toGeminiPart).filter(Boolean)];
@@ -115,6 +116,14 @@ export async function generateGeminiText({
     error.provider = "gemini";
     error.model = model;
     throw error;
+  }
+  if (typeof onUsage === "function") {
+    await onUsage({
+      provider: "gemini",
+      model,
+      kind: "text",
+      usage: data?.usageMetadata || {},
+    });
   }
   const text = getGeminiText(data);
   if (!text) {

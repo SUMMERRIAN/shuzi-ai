@@ -19,9 +19,9 @@ JWT_SECRET=change-this-secret
 ADMIN_SETUP_TOKEN=change-this-admin-token
 PORT=3001
 OPENAI_API_KEY=sk-your-key
-OPENAI_MODEL_TEXT=gpt-5
-OPENAI_MODEL_FAST=gpt-5
-OPENAI_MODEL_THINKING=gpt-5
+OPENAI_MODEL_TEXT=gpt-5.4-mini
+OPENAI_MODEL_FAST=gpt-5.4-mini
+OPENAI_MODEL_THINKING=gpt-5.4
 OPENAI_MODEL_IMAGE=gpt-image-2
 OPENAI_IMAGE_GENERATION_ENABLED=false
 OPENAI_IMAGE_QUALITY=medium
@@ -34,21 +34,26 @@ FREE_ASK_MAX_IMAGE_MB=8
 FREE_ASK_MAX_DOCUMENT_CHARS=32000
 FREE_ASK_MAX_CHARS_PER_DOCUMENT=12000
 GEMINI_API_KEY=your-gemini-api-key
-GEMINI_MODEL_FAST=gemini-2.5-flash
-GEMINI_MODEL_THINKING=gemini-2.5-pro
-GEMINI_MODEL_MISTAKE=gemini-2.5-flash
-GEMINI_MODEL_MISTAKE_HIGH=gemini-2.5-pro
+GEMINI_MODEL_FAST=gemini-3.5-flash
+GEMINI_MODEL_THINKING=gemini-3.5-flash
+GEMINI_MODEL_MISTAKE=gemini-3.5-flash
+GEMINI_MODEL_MISTAKE_HIGH=gemini-3.5-flash
 GEMINI_TIMEOUT_MS=120000
 GEMINI_MAX_OUTPUT_TOKENS=4096
 GEMINI_MODEL_COOLDOWN_MS=600000
 GEMINI_MISTAKE_RETRY_DELAYS_MS=30000,90000,180000
-GEMINI_MODEL_MISTAKE_RECOGNITION=gemini-2.5-flash
+GEMINI_MODEL_MISTAKE_RECOGNITION=gemini-3.5-flash
 GEMINI_MISTAKE_RECOGNITION_MAX_OUTPUT_TOKENS=2048
 GEMINI_MISTAKE_EXPLANATION_MAX_OUTPUT_TOKENS=4096
+AI_BILLING_MARKUP=3.5
+TOKENS_PER_CNY=100
+USD_TO_CNY=7.3
+AI_MIN_CHARGE_TOKENS=1
+AI_COMPLETED_JOB_REUSE_MINUTES=5
 UPLOAD_DIR=/var/www/shuzi-ai/uploads
 ```
 
-知识图和自由问中的图片生成通过 OpenAI Image API 使用 `OPENAI_MODEL_IMAGE`。错题专项最终讲解默认使用思考模型 `GEMINI_MODEL_MISTAKE_HIGH`，并使用 `temperature=0`、`topP=0.1` 的严谨参数；如果高质量模型返回高需求或临时不可用，后端会短暂冷却并排队重试，不会降级生成低质量讲解。题目识别和类似题初稿可使用 `GEMINI_MODEL_MISTAKE` / `GEMINI_MODEL_MISTAKE_RECOGNITION` 减少高级模型压力。
+AI billing is based on actual provider usage when the API returns token/image usage. The system converts provider USD cost to CNY with USD_TO_CNY, multiplies by AI_BILLING_MARKUP, then converts to learning tokens with TOKENS_PER_CNY. Fixed token amounts are only fallback values when the provider does not return usage. Identical completed background jobs can be reused within AI_COMPLETED_JOB_REUSE_MINUTES to avoid repeated billing. Image generation uses OPENAI_MODEL_IMAGE.
 
 ## 启动
 

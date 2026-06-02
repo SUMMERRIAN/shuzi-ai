@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import bcrypt from "bcryptjs";
@@ -21,11 +22,11 @@ const port = Number(process.env.PORT || 3001);
 app.use(cors({ origin: process.env.CORS_ORIGIN || true }));
 app.use(express.json({ limit: "5mb" }));
 
-const textModel = process.env.OPENAI_MODEL_TEXT || process.env.OPENAI_MODEL_THINKING || "gpt-5";
+const textModel = process.env.OPENAI_MODEL_TEXT || process.env.OPENAI_MODEL_THINKING || "gpt-5.4-mini";
 const openaiFastModel = process.env.OPENAI_MODEL_FAST || process.env.OPENAI_MODEL_TEXT || textModel;
-const openaiThinkingModel = process.env.OPENAI_MODEL_THINKING || process.env.OPENAI_MODEL_TEXT || textModel;
-const geminiFastModel = process.env.GEMINI_MODEL_FAST || "gemini-2.5-flash";
-const geminiThinkingModel = process.env.GEMINI_MODEL_THINKING || "gemini-2.5-pro";
+const openaiThinkingModel = process.env.OPENAI_MODEL_THINKING || process.env.OPENAI_MODEL_TEXT || "gpt-5.4";
+const geminiFastModel = process.env.GEMINI_MODEL_FAST || "gemini-3.5-flash";
+const geminiThinkingModel = process.env.GEMINI_MODEL_THINKING || "gemini-3.5-flash";
 const imageModel = process.env.OPENAI_MODEL_IMAGE || "gpt-image-2";
 const imageGenerationEnabled = process.env.OPENAI_IMAGE_GENERATION_ENABLED === "true";
 const imageQuality = process.env.OPENAI_IMAGE_QUALITY || "medium";
@@ -116,7 +117,7 @@ function fallbackKnowledgeBreakdown(topic = "") {
   };
 }
 
-async function generateKnowledgeBreakdown({ topic, grade = "", subject = "", promptText = "" }) {
+async function generateKnowledgeBreakdown({ topic, grade = "", subject = "", promptText = "", onUsage = null }) {
   const response = await openai.responses.create({
     model: openaiFastModel,
     input: [
@@ -139,6 +140,9 @@ async function generateKnowledgeBreakdown({ topic, grade = "", subject = "", pro
       },
     ],
   });
+  if (typeof onUsage === "function") {
+    await onUsage(createOpenAIUsageEvent(response, openaiFastModel));
+  }
   const parsed = parseJsonText(getResponseText(response), {});
   const points = Array.isArray(parsed.points)
     ? parsed.points
@@ -790,6 +794,173 @@ function serializeJobError(error) {
   };
 }
 
+function normalizeStableValue(value) {
+  if (value === undefined) return null;
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(normalizeStableValue);
+  const entries = Object.entries(value)
+    .filter(([key]) => !["path", "url", "data", "base64", "content"].includes(key))
+    .sort(([a], [b]) => a.localeCompare(b));
+  return Object.fromEntries(entries.map(([key, item]) => [key, normalizeStableValue(item)]));
+}
+
+function stableStringify(value) {
+  return JSON.stringify(normalizeStableValue(value));
+}
+
+function createRequestHash(value) {
+  return crypto.createHash("sha256").update(stableStringify(value)).digest("hex");
+}
+
+function parseMaybeJson(value, fallback = {}) {
+  if (!value) return fallback;
+  if (typeof value === "object") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function numberFromPaths(source, paths) {
+  for (const pathItems of paths) {
+    let cursor = source;
+    for (const key of pathItems) cursor = cursor?.[key];
+    const value = Number(cursor);
+    if (Number.isFinite(value)) return value;
+  }
+  return 0;
+}
+
+function getTextPricing(model) {
+  const modelKey = String(model || "").toLowerCase();
+  const prices = tokenBillingRules.textPricingUsdPer1M || {};
+  if (prices[modelKey]) return prices[modelKey];
+  const matchedKey = Object.keys(prices)
+    .sort((a, b) => b.length - a.length)
+    .find((key) => modelKey.startsWith(key));
+  return matchedKey ? prices[matchedKey] : null;
+}
+
+function createOpenAIUsageEvent(response, model, kind = "text") {
+  return {
+    provider: "openai",
+    model,
+    kind,
+    usage: response?.usage || {},
+  };
+}
+
+function createImageUsageEvent({ model = imageModel, quality = imageQuality, size = imageSize } = {}) {
+  return {
+    provider: "openai",
+    model,
+    kind: "image",
+    usage: { images: 1, quality, size },
+  };
+}
+
+function makeFileDedupeMeta(files = []) {
+  return (files || []).map((file) => ({
+    originalname: file.originalname || file.filename || "",
+    mimetype: file.mimetype || "",
+    size: file.size || 0,
+  }));
+}
+
+function estimateTextCostUsd(event) {
+  const pricing = getTextPricing(event?.model);
+  if (!pricing) return 0;
+  const usage = event?.usage || {};
+  const provider = String(event?.provider || "").toLowerCase();
+  let input = 0;
+  let output = 0;
+  let cachedInput = 0;
+  if (provider === "gemini") {
+    input = Number(usage.promptTokenCount || 0);
+    output = Number(usage.candidatesTokenCount || 0) + Number(usage.thoughtsTokenCount || 0);
+    cachedInput = Number(usage.cachedContentTokenCount || 0);
+  } else {
+    input = numberFromPaths(usage, [["input_tokens"], ["prompt_tokens"]]);
+    output = numberFromPaths(usage, [["output_tokens"], ["completion_tokens"]]);
+    cachedInput = numberFromPaths(usage, [
+      ["input_tokens_details", "cached_tokens"],
+      ["prompt_tokens_details", "cached_tokens"],
+      ["input_token_details", "cached_tokens"],
+    ]);
+  }
+  const uncachedInput = Math.max(0, input - cachedInput);
+  return (
+    (uncachedInput * Number(pricing.input || 0) +
+      cachedInput * Number(pricing.cachedInput ?? pricing.input ?? 0) +
+      output * Number(pricing.output || 0)) /
+    1_000_000
+  );
+}
+
+function estimateImageCostUsd(event) {
+  const usage = event?.usage || {};
+  const modelPrices = tokenBillingRules.imagePricingUsd?.[event?.model] || tokenBillingRules.imagePricingUsd?.[imageModel];
+  if (!modelPrices) return 0;
+  const sizePrices = modelPrices[usage.size] || modelPrices.default || {};
+  const unitPrice = Number(sizePrices[usage.quality] ?? sizePrices.medium ?? 0);
+  return unitPrice * Math.max(1, Number(usage.images || 1));
+}
+
+function estimateProviderCostUsd(usageEvents = []) {
+  return usageEvents.reduce((sum, event) => {
+    if (event?.kind === "image") return sum + estimateImageCostUsd(event);
+    return sum + estimateTextCostUsd(event);
+  }, 0);
+}
+
+async function recordAiUsageBilling(userId, { jobId = "", note = "AI usage", usageEvents = [], fallbackTokenCost = 0, meta = {} } = {}) {
+  const providerCostUsd = estimateProviderCostUsd(usageEvents);
+  const providerCostCny = providerCostUsd * Number(tokenBillingRules.usdToCny || 0);
+  const billableCny = providerCostCny * Number(tokenBillingRules.markup || 1);
+  let billedTokens =
+    providerCostUsd > 0
+      ? Math.ceil(billableCny * Number(tokenBillingRules.tokensPerCny || 1))
+      : Math.ceil(Number(fallbackTokenCost || 0));
+  if (billedTokens > 0) billedTokens = Math.max(billedTokens, Number(tokenBillingRules.minimumChargeTokens || 1));
+  const billing = {
+    usageEvents,
+    providerCostUsd: Number(providerCostUsd.toFixed(6)),
+    providerCostCny: Number(providerCostCny.toFixed(4)),
+    billableCny: Number(billableCny.toFixed(4)),
+    billingMarkup: Number(tokenBillingRules.markup || 1),
+    billedTokens,
+    usedFallback: providerCostUsd <= 0,
+  };
+  if (billedTokens > 0) {
+    await recordTokenUsage(userId, billedTokens, note, { ...meta, billing });
+  }
+  if (jobId) {
+    await query(
+      `UPDATE ai_generation_jobs
+       SET usage = $2,
+           provider_cost_usd = $3,
+           provider_cost_cny = $4,
+           billable_cny = $5,
+           billing_markup = $6,
+           billed_tokens = $7,
+           token_cost = $7,
+           updated_at = now()
+       WHERE id = $1`,
+      [
+        jobId,
+        JSON.stringify({ events: usageEvents }),
+        billing.providerCostUsd,
+        billing.providerCostCny,
+        billing.billableCny,
+        billing.billingMarkup,
+        billing.billedTokens,
+      ]
+    );
+  }
+  return billing;
+}
+
 function publicJob(row) {
   if (!row) return null;
   return {
@@ -803,13 +974,42 @@ function publicJob(row) {
     error: row.error || {},
     externalResponseId: row.external_response_id || undefined,
     tokenCost: row.token_cost || 0,
+    requestHash: row.request_hash || undefined,
+    usage: parseMaybeJson(row.usage, {}),
+    providerCostUsd: Number(row.provider_cost_usd || 0),
+    providerCostCny: Number(row.provider_cost_cny || 0),
+    billableCny: Number(row.billable_cny || 0),
+    billingMarkup: Number(row.billing_markup || tokenBillingRules.markup || 1),
+    billedTokens: Number(row.billed_tokens || row.token_cost || 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,
   };
 }
 
-async function createAiJob({ userId, studentId, feature, provider = "", mode = "", tokenCost = 0, input = {}, activeWindowMinutes = 30, reuseActive = true }) {
+async function createAiJob({
+  userId,
+  studentId,
+  feature,
+  provider = "",
+  mode = "",
+  tokenCost = 0,
+  input = {},
+  dedupeInput = null,
+  requestHash = "",
+  activeWindowMinutes = 30,
+  reuseActive = true,
+  reuseCompleted = true,
+}) {
+  const finalRequestHash =
+    requestHash ||
+    createRequestHash({
+      studentId: studentId || "",
+      feature,
+      provider,
+      mode,
+      input: dedupeInput || input,
+    });
   if (reuseActive) {
     const activeJob = (
       await query(
@@ -817,21 +1017,39 @@ async function createAiJob({ userId, studentId, feature, provider = "", mode = "
          FROM ai_generation_jobs
          WHERE user_id = $1
            AND feature = $2
+           AND request_hash = $4
            AND status IN ('queued', 'processing')
            AND created_at > now() - ($3::text || ' minutes')::interval
          ORDER BY created_at DESC
          LIMIT 1`,
-        [userId, feature, activeWindowMinutes]
+        [userId, feature, activeWindowMinutes, finalRequestHash]
       )
     ).rows[0];
     if (activeJob) return { job: activeJob, reused: true };
   }
+  if (reuseCompleted && tokenBillingRules.completedJobReuseMinutes > 0) {
+    const completedJob = (
+      await query(
+        `SELECT *
+         FROM ai_generation_jobs
+         WHERE user_id = $1
+           AND feature = $2
+           AND request_hash = $4
+           AND status = 'completed'
+           AND created_at > now() - ($3::text || ' minutes')::interval
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [userId, feature, tokenBillingRules.completedJobReuseMinutes, finalRequestHash]
+      )
+    ).rows[0];
+    if (completedJob) return { job: completedJob, reused: true };
+  }
   const job = (
     await query(
-      `INSERT INTO ai_generation_jobs (user_id, student_id, feature, status, input, provider, mode, token_cost)
-       VALUES ($1, $2, $3, 'queued', $4, $5, $6, $7)
+      `INSERT INTO ai_generation_jobs (user_id, student_id, feature, status, input, provider, mode, token_cost, request_hash)
+       VALUES ($1, $2, $3, 'queued', $4, $5, $6, $7, $8)
        RETURNING *`,
-      [userId, studentId, feature, JSON.stringify(input), provider, mode, tokenCost]
+      [userId, studentId, feature, JSON.stringify(input), provider, mode, tokenCost, finalRequestHash]
     )
   ).rows[0];
   return { job, reused: false };
@@ -842,6 +1060,7 @@ function startAiJob(jobId, executor) {
     try {
       await query("UPDATE ai_generation_jobs SET status = 'processing', updated_at = now() WHERE id = $1", [jobId]);
       const result = await executor({
+        jobId,
         setExternalResponseId: async (externalResponseId) => {
           await query("UPDATE ai_generation_jobs SET external_response_id = $2, updated_at = now() WHERE id = $1", [jobId, externalResponseId]);
         },
@@ -1535,7 +1754,7 @@ function buildFreeAskCleanAnswer({ question, materialContext, conversationContex
   ].filter(Boolean).join("\n\n");
 }
 
-async function generateFreeAskQuestionExplanation({ question, files, student, materialContext }) {
+async function generateFreeAskQuestionExplanation({ question, files, student, materialContext, onUsage = null }) {
   const subject = inferFreeAskSubject(question, files);
   const grade = student?.grade || "";
   const title = makeFreeAskTitle(question, files);
@@ -1552,6 +1771,7 @@ async function generateFreeAskQuestionExplanation({ question, files, student, ma
     temperature: 0,
     topP: 0.1,
     maxOutputTokens: 2048,
+    onUsage,
   });
   const explanationResult = await generateMistakeGeminiTextWithRetry({
     stage: "free-ask-explanation",
@@ -1567,6 +1787,7 @@ async function generateFreeAskQuestionExplanation({ question, files, student, ma
     temperature: 0,
     topP: 0.1,
     maxOutputTokens: 4096,
+    onUsage,
   });
   const answer = [
     "AI识别到的题目",
@@ -2425,7 +2646,12 @@ app.post("/api/ai/transcribe", requireAuth, upload.single("audio"), async (req, 
            VALUES ($1, $2, 'audio_transcript_done', '语音陈述转写完成', $3)`,
           [student.id, req.user.id, JSON.stringify({ transcript: text, audioId: saved.id })]
         );
-        await recordTokenUsage(req.user.id, 6, "语音转文字", { feature: "transcribe", audioId: saved.id, jobId: job.id });
+        await recordAiUsageBilling(req.user.id, {
+          jobId: job.id,
+          note: "AI transcribe",
+          fallbackTokenCost: 6,
+          meta: { feature: "transcribe", audioId: saved.id, model: transcriptionModel },
+        });
         return { transcript: text, saved, transcribeError: "" };
       });
     }
@@ -2472,6 +2698,7 @@ app.post("/api/ai/profile", requireAuth, async (req, res, next) => {
           ],
         });
         const completed = await waitForOpenAIBackgroundResponse(response, { jobId: job.id, timeoutMessage: "学情画像AI任务仍未完成，系统已尝试取消以控制费用。" });
+        const usageEvents = [createOpenAIUsageEvent(completed, textModel)];
         const profile = parseJsonText(getResponseText(completed), {
           summary: "",
           core: "",
@@ -2496,7 +2723,13 @@ app.post("/api/ai/profile", requireAuth, async (req, res, next) => {
           );
           return row;
         });
-        await recordTokenUsage(req.user.id, 12, "AI learning profile analysis", { feature: "profile", model: textModel, profileId: saved.id, jobId: job.id });
+        await recordAiUsageBilling(req.user.id, {
+          jobId: job.id,
+          note: "AI learning profile analysis",
+          usageEvents,
+          fallbackTokenCost: 12,
+          meta: { feature: "profile", model: textModel, profileId: saved.id },
+        });
         return { profile, saved };
       });
     }
@@ -2554,12 +2787,19 @@ app.post("/api/ai/strategy", requireAuth, async (req, res, next) => {
           ],
         });
         const completed = await waitForOpenAIBackgroundResponse(response, { jobId: job.id, timeoutMessage: "学习任务建议AI任务仍未完成，系统已尝试取消以控制费用。" });
+        const usageEvents = [createOpenAIUsageEvent(completed, textModel)];
         const result = parseJsonText(getResponseText(completed), { strategy_suggestion: "", ai_note: "", tasks: [] });
         await query(
           "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'subject_strategy_ai', $3, $4)",
           [student.id, req.user.id, "AI learning task suggestion", JSON.stringify({ subject, result })]
         );
-        await recordTokenUsage(req.user.id, 8, "AI learning task suggestion", { feature: "strategy", model: textModel, subject, jobId: job.id });
+        await recordAiUsageBilling(req.user.id, {
+          jobId: job.id,
+          note: "AI learning task suggestion",
+          usageEvents,
+          fallbackTokenCost: 8,
+          meta: { feature: "strategy", model: textModel, subject },
+        });
         return { result };
       });
     }
@@ -2624,12 +2864,19 @@ app.post("/api/ai/study-plan", requireAuth, async (req, res, next) => {
           ],
         });
         const completed = await waitForOpenAIBackgroundResponse(response, { jobId: job.id, timeoutMessage: "学习计划AI任务仍未完成，系统已尝试取消以控制费用。" });
+        const usageEvents = [createOpenAIUsageEvent(completed, textModel)];
         const plan = parseJsonText(getResponseText(completed), { rows: [], note: "" });
         await query(
           "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'study_plan_ai', $3, $4)",
           [student.id, req.user.id, "AI study plan", JSON.stringify({ plan })]
         );
-        await recordTokenUsage(req.user.id, 8, "AI study plan", { feature: "study-plan", model: textModel, jobId: job.id });
+        await recordAiUsageBilling(req.user.id, {
+          jobId: job.id,
+          note: "AI study plan",
+          usageEvents,
+          fallbackTokenCost: 8,
+          meta: { feature: "study-plan", model: textModel },
+        });
         return { plan };
       });
     }
@@ -2677,10 +2924,24 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
       mode: geminiMode,
       tokenCost,
       input: { taskType, prompt, subject, grade, title, source, archiveSnapshot, questionScope, fileCount: files.length, qualityMode: normalizedQualityMode },
+      dedupeInput: {
+        taskType,
+        prompt,
+        subject,
+        grade,
+        title,
+        source,
+        archiveSnapshot,
+        questionScope,
+        qualityMode: normalizedQualityMode,
+        files: makeFileDedupeMeta(files),
+      },
     });
     if (!reused) {
       startAiJob(job.id, async () => {
         await assertTokenBalance(req.user.id, tokenCost);
+        const usageEvents = [];
+        const collectUsage = (event) => usageEvents.push(event);
         const documentText = await makeDocumentTextSummary(files);
         let recognitionText = "";
         let reportText = "";
@@ -2699,6 +2960,7 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
               responseMimeType: "",
               thinkingBudget: Number(process.env.GEMINI_MISTAKE_RECOGNITION_THINKING_BUDGET || 512),
               maxOutputTokens: Number(process.env.GEMINI_MISTAKE_RECOGNITION_MAX_OUTPUT_TOKENS || 2048),
+              onUsage: collectUsage,
             });
             recognitionText = recognitionResult.text;
             modelTrace.push(recognitionResult);
@@ -2724,6 +2986,7 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
             responseMimeType: "",
             thinkingBudget: Number(process.env.GEMINI_MISTAKE_THINKING_BUDGET || (normalizedQualityMode === "high" ? 2048 : 1024)),
             maxOutputTokens: Number(process.env.GEMINI_MISTAKE_EXPLANATION_MAX_OUTPUT_TOKENS || 4096),
+            onUsage: collectUsage,
           });
           reportText = compactRepeatedMistakeText(normalizeStudentMathText(explanationResult.text));
           modelTrace.push(explanationResult);
@@ -2748,6 +3011,7 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
               responseMimeType: "",
               thinkingBudget: Number(process.env.GEMINI_MISTAKE_REPAIR_THINKING_BUDGET || 1024),
               maxOutputTokens: Number(process.env.GEMINI_MISTAKE_EXPLANATION_MAX_OUTPUT_TOKENS || 4096),
+              onUsage: collectUsage,
             });
             reportText = compactRepeatedMistakeText(normalizeStudentMathText(repairResult.text));
             modelTrace.push(repairResult);
@@ -2779,6 +3043,7 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
             responseMimeType: "application/json",
             thinkingBudget: undefined,
             maxOutputTokens: Number(process.env.GEMINI_MISTAKE_STRUCTURED_MAX_OUTPUT_TOKENS || 4096),
+            onUsage: collectUsage,
           });
           reportText = structuredResult.text;
           modelTrace.push(structuredResult);
@@ -2824,15 +3089,20 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
           );
           return row;
         });
-        await recordTokenUsage(req.user.id, chargedTokenCost, taskMap[taskType] || "错题专项AI处理", {
-          feature: "mistake-workflow",
-          provider: "gemini",
-          model: effectiveGeminiModel,
-          mode: geminiMode,
-          taskType,
-          usedFallback,
-          mistakeId: saved.id,
+        await recordAiUsageBilling(req.user.id, {
           jobId: job.id,
+          note: taskMap[taskType] || "Mistake workflow AI",
+          usageEvents,
+          fallbackTokenCost: chargedTokenCost,
+          meta: {
+            feature: "mistake-workflow",
+            provider: "gemini",
+            model: effectiveGeminiModel,
+            mode: geminiMode,
+            taskType,
+            usedFallback,
+            mistakeId: saved.id,
+          },
         });
         return { report, saved };
       });
@@ -2861,10 +3131,13 @@ app.post("/api/ai/mistakes/analyze", requireAuth, upload.array("files", 6), asyn
       mode: "vision-background",
       tokenCost: 12,
       input: { subject, title, note, fileCount: files.length },
+      dedupeInput: { subject, title, note, files: makeFileDedupeMeta(files) },
     });
     if (!reused) {
       startAiJob(job.id, async () => {
         await assertTokenBalance(req.user.id, 12);
+        const usageEvents = [];
+        const collectUsage = (event) => usageEvents.push(event);
         const prompt = [
           "你是树子AI错题专项智能体。只围绕上传材料中的错题识别、题目拆分、错因归类、知识点、解题方法缺口、相似题训练建议和复测安排输出。",
           "如果材料里有多道题，要拆成题目清单；不要制定完整周计划，不要做学情画像总报告。必须输出严格JSON。",
@@ -2881,6 +3154,7 @@ app.post("/api/ai/mistakes/analyze", requireAuth, upload.array("files", 6), asyn
           prompt,
           files,
           responseMimeType: "application/json",
+          onUsage: collectUsage,
         });
         const analysisText = analysisResult.text;
         const analysis = parseJsonText(analysisText, { mistake_title: title });
@@ -2902,7 +3176,19 @@ app.post("/api/ai/mistakes/analyze", requireAuth, upload.array("files", 6), asyn
           );
           return row;
         });
-        await recordTokenUsage(req.user.id, 12, "AI错题识别", { feature: "mistake-analyze", provider: "gemini", model: effectiveModel, retried: analysisResult.retried, mistakeId: saved.id, jobId: job.id });
+        await recordAiUsageBilling(req.user.id, {
+          jobId: job.id,
+          note: "AI mistake recognition",
+          usageEvents,
+          fallbackTokenCost: 12,
+          meta: {
+            feature: "mistake-analyze",
+            provider: "gemini",
+            model: effectiveModel,
+            retried: analysisResult.retried,
+            mistakeId: saved.id,
+          },
+        });
         return { analysis, saved };
       });
     }
@@ -2928,10 +3214,13 @@ app.post("/api/ai/mistakes/practice", requireAuth, async (req, res, next) => {
       mode: "text-background",
       tokenCost: 10,
       input: { sourceMistakeId, subject, mistake, count },
+      dedupeInput: { sourceMistakeId, subject, mistake, count },
     });
     if (!reused) {
       startAiJob(job.id, async () => {
         await assertTokenBalance(req.user.id, 10);
+        const usageEvents = [];
+        const collectUsage = (event) => usageEvents.push(event);
         const prompt = [
           "你是树子AI相似题训练智能体。根据错题的知识点、方法缺口和错误类型，生成1-3道相似题，必须包含答案、步骤和训练目的。必须输出严格JSON。",
           jsonInstruction("{questions:[{title, question, answer, solution_steps, training_goal, difficulty}]}"),
@@ -2945,6 +3234,7 @@ app.post("/api/ai/mistakes/practice", requireAuth, async (req, res, next) => {
           stage: "legacy-practice",
           prompt,
           responseMimeType: "application/json",
+          onUsage: collectUsage,
         });
         const generatedText = generatedResult.text;
         const generated = parseJsonText(generatedText, { questions: [] });
@@ -2956,7 +3246,19 @@ app.post("/api/ai/mistakes/practice", requireAuth, async (req, res, next) => {
             [student.id, req.user.id, sourceMistakeId, JSON.stringify(generated.questions || generated)]
           )
         ).rows[0];
-        await recordTokenUsage(req.user.id, generatedResult.usedFallback ? 6 : 10, "AI生成相似题", { feature: "mistake-practice", provider: "gemini", model: generatedResult.model, usedFallback: generatedResult.usedFallback, practiceId: saved.id, jobId: job.id });
+        await recordAiUsageBilling(req.user.id, {
+          jobId: job.id,
+          note: "AI similar practice generation",
+          usageEvents,
+          fallbackTokenCost: generatedResult.usedFallback ? 6 : 10,
+          meta: {
+            feature: "mistake-practice",
+            provider: "gemini",
+            model: generatedResult.model,
+            usedFallback: generatedResult.usedFallback,
+            practiceId: saved.id,
+          },
+        });
         return { practice: generated, saved };
       });
     }
@@ -3117,20 +3419,25 @@ app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
       mode: "image-background",
       tokenCost: 35,
       input: jobPayload,
+      dedupeInput: jobPayload,
     });
     if (!reused) {
       startAiJob(job.id, async ({ setExternalResponseId }) => {
         ensureOpenAIKey();
         await assertTokenBalance(req.user.id, 35);
+        const usageEvents = [];
+        const collectUsage = (event) => usageEvents.push(event);
         const imageQualityForRequest = resolveImageQuality(topic);
         const breakdown = await generateKnowledgeBreakdown({
           topic,
           grade: jobPayload.grade,
           subject: jobPayload.subject,
           promptText: topic,
+          onUsage: collectUsage,
         });
         const prompt = buildKnowledgeNotePrompt({ ...jobPayload, breakdown });
         const imageBase64 = await generateOpenAIImageBackground(prompt, setExternalResponseId, imageQualityForRequest);
+        if (imageBase64) usageEvents.push(createImageUsageEvent({ quality: imageQualityForRequest }));
         const note = {
           topic,
           title: breakdown.title,
@@ -3151,7 +3458,19 @@ app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
             [student.id, req.user.id, topic, JSON.stringify(note), imageBase64 || null]
           )
         ).rows[0];
-        await recordTokenUsage(req.user.id, 35, "AI知识图生成", { feature: "knowledge-note", noteId: saved.id, jobId: job.id });
+        await recordAiUsageBilling(req.user.id, {
+          jobId: job.id,
+          note: "AI knowledge image generation",
+          usageEvents,
+          fallbackTokenCost: 35,
+          meta: {
+            feature: "knowledge-note",
+            provider: "openai",
+            noteId: saved.id,
+            imageModel,
+            imageQuality: imageQualityForRequest,
+          },
+        });
         return { note, imageBase64, saved, points: breakdown.points, quality: imageQualityForRequest };
       });
     }
@@ -3291,11 +3610,23 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
           intent: freeAskIntent,
           useQuestionWorkflow,
         },
+        dedupeInput: {
+          conversationId: conversation.id,
+          question,
+          wantsImage: shouldGenerateImage,
+          provider: aiProvider,
+          mode: aiMode,
+          intent: freeAskIntent,
+          useQuestionWorkflow,
+          files: makeFileDedupeMeta(files),
+        },
         reuseActive: false,
       });
       if (!reused) {
         startAiJob(job.id, async ({ setExternalResponseId }) => {
           await assertTokenBalance(req.user.id, tokenCost);
+          const usageEvents = [];
+          const collectUsage = (event) => usageEvents.push(event);
           let answer = "";
           let model = "";
           let responseProvider = aiProvider;
@@ -3303,7 +3634,7 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
           let imageBase64 = "";
           let responseMeta = {};
           if (useQuestionWorkflow) {
-            const result = await generateFreeAskQuestionExplanation({ question, files, student, materialContext });
+            const result = await generateFreeAskQuestionExplanation({ question, files, student, materialContext, onUsage: collectUsage });
             answer = result.answer;
             model = result.model;
             responseProvider = result.provider;
@@ -3317,6 +3648,7 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
               prompt: promptText,
               files: materialContext.safeImageFiles,
               temperature: aiMode === "thinking" ? 0.2 : 0.35,
+              onUsage: collectUsage,
             });
           } else {
             ensureOpenAIKey();
@@ -3338,6 +3670,7 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
             });
             await setExternalResponseId(response.id);
             const completed = await waitForOpenAIBackgroundResponse(response, { timeoutMessage: "AI自由问后台任务仍未完成，系统已尝试取消以控制费用。" });
+            usageEvents.push(createOpenAIUsageEvent(completed, model));
             answer = getResponseText(completed);
           }
           if (shouldGenerateImage) {
@@ -3350,6 +3683,7 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
               answer ? "Text answer context: " + answer.slice(0, 800) : "",
             ].filter(Boolean).join("\n");
             imageBase64 = (await generateOpenAIImageBackground(imagePrompt, setExternalResponseId, imageQualityForRequest)) || "";
+            if (imageBase64) usageEvents.push(createImageUsageEvent({ quality: imageQualityForRequest }));
           }
           answer = normalizeStudentMathText(answer || "AI has read your question, but did not generate a valid answer. Please try asking in another way.");
           const assistantMessage = await insertFreeAskMessage({
@@ -3383,14 +3717,19 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
               [student.id, req.user.id, "AI free ask", JSON.stringify(eventPayload)]
             );
           }
-          await recordTokenUsage(req.user.id, tokenCost, "AI free ask", {
-            feature: "free-ask",
-            provider: responseProvider,
-            mode: responseMode,
-            model,
-            imageModel: imageBase64 ? imageModel : null,
-            hasImage: Boolean(imageBase64),
+          await recordAiUsageBilling(req.user.id, {
             jobId: job.id,
+            note: "AI free ask",
+            usageEvents,
+            fallbackTokenCost: tokenCost,
+            meta: {
+              feature: "free-ask",
+              provider: responseProvider,
+              mode: responseMode,
+              model,
+              imageModel: imageBase64 ? imageModel : null,
+              hasImage: Boolean(imageBase64),
+            },
           });
           const latest = await getFreeAskConversationWithMessages(req.user.id, conversation.id);
           return {
@@ -3412,6 +3751,8 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
     let answer = "";
     let model = "";
     let imageBase64 = "";
+    const usageEvents = [];
+    const collectUsage = (event) => usageEvents.push(event);
     if (aiProvider === "gemini") {
       ensureGeminiKey();
       model = getGeminiModel(aiMode);
@@ -3420,6 +3761,7 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
         prompt: promptText,
         files: materialContext.safeImageFiles,
         temperature: aiMode === "thinking" ? 0.2 : 0.35,
+        onUsage: collectUsage,
       });
     } else {
       ensureOpenAIKey();
@@ -3438,6 +3780,7 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
           },
         ],
       });
+      usageEvents.push(createOpenAIUsageEvent(response, model));
       answer = getResponseText(response);
     }
 
@@ -3466,13 +3809,18 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
         [student.id, req.user.id, "AI free ask", JSON.stringify(eventPayload)]
       );
     }
-    await recordTokenUsage(req.user.id, tokenCost, "AI free ask", {
-      feature: "free-ask",
-      provider: aiProvider,
-      mode: aiMode,
-      model,
-      imageModel: imageBase64 ? imageModel : null,
-      hasImage: Boolean(imageBase64),
+    await recordAiUsageBilling(req.user.id, {
+      note: "AI free ask",
+      usageEvents,
+      fallbackTokenCost: tokenCost,
+      meta: {
+        feature: "free-ask",
+        provider: aiProvider,
+        mode: aiMode,
+        model,
+        imageModel: imageBase64 ? imageModel : null,
+        hasImage: Boolean(imageBase64),
+      },
     });
     const latest = await getFreeAskConversationWithMessages(req.user.id, conversation.id);
     res.json({

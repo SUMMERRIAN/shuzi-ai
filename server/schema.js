@@ -317,6 +317,16 @@ export async function ensureSchema() {
   await query(`ALTER TABLE ai_generation_jobs ADD COLUMN IF NOT EXISTS mode TEXT`);
   await query(`ALTER TABLE ai_generation_jobs ADD COLUMN IF NOT EXISTS external_response_id TEXT`);
   await query(`ALTER TABLE ai_generation_jobs ADD COLUMN IF NOT EXISTS token_cost INTEGER NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE ai_generation_jobs ADD COLUMN IF NOT EXISTS request_hash TEXT`);
+  await query(`ALTER TABLE ai_generation_jobs ADD COLUMN IF NOT EXISTS usage JSONB NOT NULL DEFAULT '{}'::jsonb`);
+  await query(`ALTER TABLE ai_generation_jobs ADD COLUMN IF NOT EXISTS provider_cost_usd NUMERIC(12,6) NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE ai_generation_jobs ADD COLUMN IF NOT EXISTS provider_cost_cny NUMERIC(12,4) NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE ai_generation_jobs ADD COLUMN IF NOT EXISTS billable_cny NUMERIC(12,4) NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE ai_generation_jobs ADD COLUMN IF NOT EXISTS billing_markup NUMERIC(8,3) NOT NULL DEFAULT 3.5`);
+  await query(`ALTER TABLE ai_generation_jobs ADD COLUMN IF NOT EXISTS billed_tokens INTEGER NOT NULL DEFAULT 0`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_ai_generation_jobs_user_feature_hash
+    ON ai_generation_jobs(user_id, feature, request_hash, created_at DESC)
+    WHERE request_hash IS NOT NULL`);
   await query(`
     ALTER TABLE users DROP CONSTRAINT IF EXISTS users_channel_check;
     ALTER TABLE users ADD CONSTRAINT users_channel_check CHECK (channel IN ('username', 'email', 'phone'));
