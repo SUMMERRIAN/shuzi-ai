@@ -1915,7 +1915,7 @@ function App() {
   const [records, setRecords] = useState([
     {
       id: 1,
-      type: "文字申述",
+      type: "文字陈述",
       title: "数学会听不会做",
       content: "错题改完以后过几天又不会，晚上学习效率比较低。",
       time: "今天 10:20",
@@ -2095,6 +2095,10 @@ function App() {
   }, [activePage, member.isLoggedIn]);
 
   useEffect(() => {
+    if (member.isLoggedIn && ["statement", "profile", "strategy", "plan"].includes(activePage)) loadStatementArchives();
+  }, [activePage, member.isLoggedIn]);
+
+  useEffect(() => {
     if (activePage === "library" && member.isLoggedIn) loadLibraryItems();
   }, [activePage, member.isLoggedIn, libraryView, libraryFolderId, librarySort, librarySortDir]);
 
@@ -2139,8 +2143,46 @@ function App() {
     try {
       const data = await apiRequest("/archive/questionnaires");
       setQuestionnaireArchives(data.records || []);
+      setQuestionnairePreview((current) => {
+        if (!current) return null;
+        return (data.records || []).find((record) => record.id === current.id) || null;
+      });
     } catch (error) {
       setAccountNotice(error.message || "学情问卷档案暂时无法读取。");
+    }
+  }
+
+  async function loadStatementArchives() {
+    try {
+      const data = await apiRequest("/archive/statements");
+      setRecords(data.records || []);
+    } catch (error) {
+      setAccountNotice(error.message || "学情陈述档案暂时无法读取。");
+    }
+  }
+
+  async function removeQuestionnaireArchive(record) {
+    if (!record?.id) return;
+    if (!window.confirm("确认删除这份学情问卷档案吗？删除后无法恢复。")) return;
+    if (!requireMemberAction("删除学情问卷档案", () => removeQuestionnaireArchive(record), "删除学情问卷档案需要登录并开通会员。")) return;
+    try {
+      await apiRequest(`/archive/questionnaires/${record.id}`, { method: "DELETE" });
+      setQuestionnaireArchives((prev) => prev.filter((item) => item.id !== record.id));
+      setQuestionnairePreview((current) => (current?.id === record.id ? null : current));
+    } catch (error) {
+      showAiError(error, "学情问卷档案删除失败。");
+    }
+  }
+
+  async function removeStatementArchive(record) {
+    if (!record?.id) return;
+    if (!window.confirm("确认删除这条学情陈述吗？删除后无法恢复。")) return;
+    if (!requireMemberAction("删除学情陈述档案", () => removeStatementArchive(record), "删除学情陈述档案需要登录并开通会员。")) return;
+    try {
+      await apiRequest(`/archive/statements/${record.id}`, { method: "DELETE" });
+      setRecords((prev) => prev.filter((item) => item.id !== record.id));
+    } catch (error) {
+      showAiError(error, "学情陈述档案删除失败。");
     }
   }
 
@@ -2332,6 +2374,7 @@ function App() {
 
   async function removeCalendarEvent(id) {
     if (!requireMemberAction("删除学习日历记录", () => removeCalendarEvent(id))) return;
+    if (!window.confirm("确认删除这条学习日历记录吗？删除后无法恢复。")) return;
     try {
       await apiRequest(`/calendar/events/${id}`, { method: "DELETE" });
       setCalendarEvents((prev) => prev.filter((item) => item.id !== id));
@@ -2942,8 +2985,9 @@ function App() {
     const selectedSubject = statementSubject || "未选主题";
     const selectedScene = statementScene || "未选场景";
     const tags = [selectedSubject, selectedScene, "文字陈述"];
+    let saved = null;
     try {
-      await apiRequest("/archive/statements", {
+      const data = await apiRequest("/archive/statements", {
         method: "POST",
         body: JSON.stringify({
           subject: selectedSubject,
@@ -2952,16 +2996,18 @@ function App() {
           guidedAnswers,
         }),
       });
+      saved = data.saved;
     } catch (error) {
       setAccountNotice(error.message || "学情陈述暂时没有写入服务器。");
+      return;
     }
     setRecords((prev) => [
       {
-        id: Date.now(),
-        type: "文字申述",
+        id: saved?.id || Date.now(),
+        type: "文字陈述",
         title: `${selectedSubject} · ${selectedScene}`,
         content,
-        time: "刚刚",
+        time: saved?.created_at || "刚刚",
         subject: selectedSubject,
         scene: selectedScene,
         tags,
@@ -3947,6 +3993,7 @@ function App() {
             questionnairePreview={questionnairePreview}
             setQuestionnairePreview={setQuestionnairePreview}
             downloadQuestionnaireArchivePdf={downloadQuestionnaireArchivePdf}
+            removeQuestionnaireArchive={removeQuestionnaireArchive}
           />
         )}
 
@@ -3965,6 +4012,7 @@ function App() {
             toggleIssue={toggleStatementIssue}
             updateIssueDetail={updateStatementIssueDetail}
             records={records}
+            removeStatementArchive={removeStatementArchive}
             aiStatus={aiStatus}
             aiInsight={aiInsight}
             clearStatementDraft={clearStatementDraft}
@@ -4506,7 +4554,7 @@ function LearningCalendarPage({
             )}
             <div className="panel-actions">
               {editor.id && (
-                <button className="ghost-danger" type="button" onClick={() => removeEvent(editor.id)}>
+                <button className="danger-action" type="button" onClick={() => removeEvent(editor.id)}>
                   <Trash2 size={17} /> 删除
                 </button>
               )}
@@ -5599,6 +5647,7 @@ function QuestionnairePage({
   questionnairePreview,
   setQuestionnairePreview,
   downloadQuestionnaireArchivePdf,
+  removeQuestionnaireArchive,
 }) {
   const step = questionnaireSteps[currentStep];
   const isFirst = currentStep === 0;
@@ -5660,6 +5709,7 @@ function QuestionnairePage({
               preview={questionnairePreview}
               setPreview={setQuestionnairePreview}
               downloadPdf={downloadQuestionnaireArchivePdf}
+              removeArchive={removeQuestionnaireArchive}
             />
           ) : (
             <div className="question-page-grid questionnaire-single-column">
@@ -5784,7 +5834,7 @@ function formatArchiveHtmlValue(value) {
   return escapeHtml(value || "未填写").replace(/\n/g, "<br>");
 }
 
-function QuestionnaireArchivePanel({ records, preview, setPreview, downloadPdf }) {
+function QuestionnaireArchivePanel({ records, preview, setPreview, downloadPdf, removeArchive }) {
   const activePreview = preview || records[0] || null;
   const archiveSections = activePreview ? buildQuestionnaireArchiveSections(activePreview.answers) : [];
   const [openArchiveSections, setOpenArchiveSections] = useState(() => new Set());
@@ -5823,6 +5873,10 @@ function QuestionnaireArchivePanel({ records, preview, setPreview, downloadPdf }
                 <button type="button" className="ghost-action is-compact" onClick={() => downloadPdf(record)}>
                   <Download size={15} />
                   下载PDF
+                </button>
+                <button type="button" className="ghost-danger is-compact" onClick={() => removeArchive(record)}>
+                  <Trash2 size={15} />
+                  删除
                 </button>
               </div>
             </article>
@@ -6035,6 +6089,7 @@ function ModernStatementPage({
   guidedAnswers,
   setGuidedAnswers,
   records,
+  removeStatementArchive,
   clearStatementDraft,
 }) {
   const [activeStatementTab, setActiveStatementTab] = useState("entry");
@@ -6169,7 +6224,11 @@ function ModernStatementPage({
             {records.map((record) => (
               <article key={record.id}>
                 <div className="record-topline">
-                  <span>{record.type} · {record.time}</span>
+                  <span>{record.type} · {formatArchiveDate(record.time || record.createdAt)}</span>
+                  <button type="button" className="ghost-danger is-compact" onClick={() => removeStatementArchive(record)}>
+                    <Trash2 size={15} />
+                    删除
+                  </button>
                 </div>
                 <h3>{record.title}</h3>
                 {record.tags && (

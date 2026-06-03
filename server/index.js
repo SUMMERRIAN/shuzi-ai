@@ -2093,7 +2093,7 @@ app.post("/api/archive/questionnaire", requireAuth, async (req, res) => {
     await client.query(
       `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
        VALUES ($1, $2, 'questionnaire', $3, $4)`,
-      [student.id, req.user.id, status === "submitted" ? "提交学情问卷" : "保存学情问卷草稿", JSON.stringify({ completion, answers })]
+      [student.id, req.user.id, status === "submitted" ? "提交学情问卷" : "保存学情问卷草稿", JSON.stringify({ questionnaireId: record.id, completion, answers })]
     );
     return record;
   });
@@ -2128,6 +2128,84 @@ app.get("/api/archive/questionnaires", requireAuth, async (req, res, next) => {
   }
 });
 
+app.delete("/api/archive/questionnaires/:id", requireAuth, async (req, res, next) => {
+  try {
+    const deleted = await withTransaction(async (client) => {
+      const record = (
+        await client.query(
+          `SELECT *
+           FROM student_intake_questionnaires
+           WHERE id = $1 AND user_id = $2`,
+          [req.params.id, req.user.id]
+        )
+      ).rows[0];
+      if (!record) return null;
+      await client.query(
+        `DELETE FROM student_intake_questionnaires
+         WHERE id = $1 AND user_id = $2`,
+        [req.params.id, req.user.id]
+      );
+      await client.query(
+        `DELETE FROM student_archive_events
+         WHERE student_id = $1
+           AND user_id = $2
+           AND event_type = 'questionnaire'
+           AND (
+             payload->>'questionnaireId' = $3
+             OR payload @> $4::jsonb
+           )`,
+        [
+          record.student_id,
+          req.user.id,
+          String(record.id),
+          JSON.stringify({
+            completion: record.completion,
+            answers: record.answers || {},
+          }),
+        ]
+      );
+      return record;
+    });
+    if (!deleted) return res.status(404).json({ error: "QUESTIONNAIRE_NOT_FOUND" });
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/archive/statements", requireAuth, async (req, res, next) => {
+  try {
+    const student = await getPrimaryStudent(req.user);
+    const rows = (
+      await query(
+        `SELECT id, subject, scene, intensity, content, guided_answers, created_at
+         FROM student_statements
+         WHERE student_id = $1 AND user_id = $2
+         ORDER BY created_at DESC
+         LIMIT 100`,
+        [student.id, req.user.id]
+      )
+    ).rows;
+    res.json({
+      records: rows.map((row) => ({
+        id: row.id,
+        type: "文字陈述",
+        title: `${row.subject || "学习"} · ${row.scene || "未选场景"}`,
+        content: row.content,
+        time: row.created_at,
+        subject: row.subject || "",
+        scene: row.scene || "",
+        intensity: row.intensity,
+        tags: [row.subject, row.scene, "文字陈述"].filter(Boolean),
+        guidedAnswers: row.guided_answers || {},
+        createdAt: row.created_at,
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/archive/statements", requireAuth, async (req, res) => {
   const { subject = "", scene = "", intensity = null, content = "", guidedAnswers = {} } = req.body || {};
   if (!content.trim()) return res.status(400).json({ error: "CONTENT_REQUIRED" });
@@ -2145,11 +2223,59 @@ app.post("/api/archive/statements", requireAuth, async (req, res) => {
     await client.query(
       `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
        VALUES ($1, $2, 'statement', $3, $4)`,
-      [student.id, req.user.id, `${subject || "学习"}陈述`, JSON.stringify({ subject, scene, intensity, content, guidedAnswers })]
+      [student.id, req.user.id, `${subject || "学习"}陈述`, JSON.stringify({ statementId: record.id, subject, scene, intensity, content, guidedAnswers })]
     );
     return record;
   });
   res.json({ saved });
+});
+
+app.delete("/api/archive/statements/:id", requireAuth, async (req, res, next) => {
+  try {
+    const deleted = await withTransaction(async (client) => {
+      const record = (
+        await client.query(
+          `SELECT *
+           FROM student_statements
+           WHERE id = $1 AND user_id = $2`,
+          [req.params.id, req.user.id]
+        )
+      ).rows[0];
+      if (!record) return null;
+      await client.query(
+        `DELETE FROM student_statements
+         WHERE id = $1 AND user_id = $2`,
+        [req.params.id, req.user.id]
+      );
+      await client.query(
+        `DELETE FROM student_archive_events
+         WHERE student_id = $1
+           AND user_id = $2
+           AND event_type = 'statement'
+           AND (
+             payload->>'statementId' = $3
+             OR payload @> $4::jsonb
+           )`,
+        [
+          record.student_id,
+          req.user.id,
+          String(record.id),
+          JSON.stringify({
+            subject: record.subject,
+            scene: record.scene,
+            intensity: record.intensity,
+            content: record.content,
+            guidedAnswers: record.guided_answers || {},
+          }),
+        ]
+      );
+      return record;
+    });
+    if (!deleted) return res.status(404).json({ error: "STATEMENT_NOT_FOUND" });
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get("/api/archive", requireAuth, async (req, res) => {

@@ -2878,6 +2878,7 @@ p {
 .primary-action,
 .secondary-action,
 .danger-action,
+.ghost-danger,
 .ghost-action {
   display: inline-flex;
   align-items: center;
@@ -2906,6 +2907,19 @@ p {
   border: 0;
   background: #b7473e;
   color: #ffffff;
+}
+
+.ghost-danger {
+  border: 1px solid #f0c6c0;
+  background: #fff7f6;
+  color: #b7473e;
+}
+
+.ghost-danger.is-compact {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .ghost-action {
