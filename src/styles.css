@@ -5064,7 +5064,7 @@ audio {
 .mistake-ai-stage {
   display: grid;
   grid-template-columns: minmax(340px, 0.42fr) minmax(0, 1fr);
-  align-items: stretch;
+  align-items: start;
   gap: 18px;
   min-height: calc(100vh - 150px);
 }
@@ -5299,6 +5299,38 @@ audio {
   background: #fbfcfa;
 }
 
+.mistake-follow-up-item summary {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  cursor: pointer;
+  list-style: none;
+}
+
+.mistake-follow-up-item summary::-webkit-details-marker {
+  display: none;
+}
+
+.mistake-follow-up-item summary span {
+  color: #008653;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.mistake-follow-up-item summary strong {
+  overflow: hidden;
+  color: #17211b;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mistake-follow-up-item[open] summary {
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e4e8df;
+}
+
 .mistake-follow-up-question,
 .mistake-follow-up-answer {
   display: grid;
@@ -5388,11 +5420,10 @@ audio {
 }
 
 .mistake-result-panel {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: block;
   min-height: calc(100vh - 150px);
-  max-height: calc(100vh - 150px);
-  overflow: hidden;
+  max-height: none;
+  overflow: visible;
 }
 
 .mistake-empty-result {
@@ -5415,7 +5446,7 @@ audio {
   display: grid;
   gap: 18px;
   max-height: none;
-  overflow: auto;
+  overflow: visible;
   padding: 10px 4px 4px;
   color: #1d2520;
   line-height: 1.8;

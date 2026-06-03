@@ -7943,18 +7943,18 @@ function MistakeSpecialPage({
                 <FileDown size={17} />
                 下载PDF
               </button>
+              {mistakeResult && (
+                <button type="button" className="primary-action" onClick={resetMistakeWorkspace}>
+                  <Plus size={17} />
+                  开始新的错题
+                </button>
+              )}
             </div>
           </div>
           {mistakeResult ? (
             <>
               <MistakeReportView report={mistakeResult} />
               <MistakeFollowUpThread items={mistakeFollowUps} status={mistakeAiStatus} />
-              <div className="mistake-reset-row">
-                <button type="button" className="primary-action" onClick={resetMistakeWorkspace}>
-                  <Plus size={17} />
-                  开始新的错题
-                </button>
-              </div>
             </>
           ) : mistakeAiStatus === "loading" ? (
             <div className="mistake-empty-result">
@@ -8122,8 +8122,12 @@ function MistakeFollowUpThread({ items = [], status = "idle" }) {
   return (
     <section className="mistake-follow-up-thread">
       <h3>继续追问</h3>
-      {items.map((item) => (
-        <article key={item.id} className="mistake-follow-up-item">
+      {items.map((item, index) => (
+        <details key={item.id} className="mistake-follow-up-item" open={index === items.length - 1}>
+          <summary>
+            <span>第 {index + 1} 次追问</span>
+            <strong>{item.question}</strong>
+          </summary>
           <div className="mistake-follow-up-question">
             <strong>学生追问</strong>
             <p>{item.question}</p>
@@ -8132,7 +8136,7 @@ function MistakeFollowUpThread({ items = [], status = "idle" }) {
             <strong>AI继续讲解</strong>
             <StructuredMistakeText text={item.answer} />
           </div>
-        </article>
+        </details>
       ))}
       {status === "loading" && (
         <div className="mistake-follow-up-loading">
