@@ -2505,6 +2505,34 @@ p {
   font-weight: 800;
 }
 
+.archive-source-selectors {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+  width: 100%;
+  margin: 12px 0;
+}
+
+.archive-source-selectors label {
+  display: grid;
+  gap: 6px;
+  color: #526159;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.archive-source-selectors select {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid #d9ded6;
+  border-radius: 8px;
+  padding: 0 10px;
+  background: #ffffff;
+  color: #1d2520;
+  font: inherit;
+  font-weight: 800;
+}
+
 .panel-heading svg {
   flex: 0 0 auto;
   color: #008653;

@@ -2278,6 +2278,60 @@ app.delete("/api/archive/statements/:id", requireAuth, async (req, res, next) =>
   }
 });
 
+app.get("/api/archive/learning-profiles", requireAuth, async (req, res, next) => {
+  try {
+    const student = await getPrimaryStudent(req.user);
+    const rows = (
+      await query(
+        `SELECT id, report, version, created_at
+         FROM student_learning_profiles
+         WHERE student_id = $1 AND user_id = $2
+         ORDER BY created_at DESC
+         LIMIT 50`,
+        [student.id, req.user.id]
+      )
+    ).rows;
+    res.json({
+      records: rows.map((row) => ({
+        id: row.id,
+        title: row.report?.profile?.summary || row.report?.profile?.core || "AI学情画像",
+        report: row.report || {},
+        version: row.version,
+        createdAt: row.created_at,
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/archive/strategy-suggestions", requireAuth, async (req, res, next) => {
+  try {
+    const student = await getPrimaryStudent(req.user);
+    const rows = (
+      await query(
+        `SELECT id, title, payload, created_at
+         FROM student_archive_events
+         WHERE student_id = $1 AND user_id = $2 AND event_type = 'subject_strategy_ai'
+         ORDER BY created_at DESC
+         LIMIT 50`,
+        [student.id, req.user.id]
+      )
+    ).rows;
+    res.json({
+      records: rows.map((row) => ({
+        id: row.id,
+        title: row.title || "AI学习任务建议",
+        subject: row.payload?.subject || "",
+        result: row.payload?.result || {},
+        createdAt: row.created_at,
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/archive", requireAuth, async (req, res) => {
   const student = (await query("SELECT * FROM students WHERE user_id = $1 ORDER BY created_at ASC LIMIT 1", [req.user.id])).rows[0];
   if (!student) return res.json({ events: [] });
@@ -2794,13 +2848,151 @@ app.post("/api/ai/transcribe", requireAuth, upload.single("audio"), async (req, 
   }
 });
 
+async function resolveSelectedRow({ studentId, userId, id, latestSql, idSql }) {
+  const useLatest = !id || id === "latest";
+  const sql = useLatest ? latestSql : idSql;
+  const params = useLatest ? [studentId, userId] : [studentId, userId, id];
+  return (await query(sql, params)).rows[0] || null;
+}
+
+function sourceMeta(label, row) {
+  if (!row) return { label, id: "", createdAt: "", note: "未选择或暂无档案" };
+  return { label, id: row.id, createdAt: row.created_at || row.createdAt || "", note: `${label}：${row.created_at || row.createdAt || ""}` };
+}
+
+async function buildArchiveSnapshotFromSourceIds({ feature, student, userId, sourceIds = {}, fallback = {}, subject = "" }) {
+  if (!sourceIds || !Object.keys(sourceIds).length) return fallback;
+  const questionnaire = await resolveSelectedRow({
+    studentId: student.id,
+    userId,
+    id: sourceIds.questionnaireId,
+    latestSql:
+      "SELECT id, answers, completion, status, created_at FROM student_intake_questionnaires WHERE student_id = $1 AND user_id = $2 ORDER BY created_at DESC LIMIT 1",
+    idSql:
+      "SELECT id, answers, completion, status, created_at FROM student_intake_questionnaires WHERE student_id = $1 AND user_id = $2 AND id = $3 LIMIT 1",
+  });
+  const statement = await resolveSelectedRow({
+    studentId: student.id,
+    userId,
+    id: sourceIds.statementId,
+    latestSql:
+      "SELECT id, subject, scene, content, guided_answers, created_at FROM student_statements WHERE student_id = $1 AND user_id = $2 ORDER BY created_at DESC LIMIT 1",
+    idSql:
+      "SELECT id, subject, scene, content, guided_answers, created_at FROM student_statements WHERE student_id = $1 AND user_id = $2 AND id = $3 LIMIT 1",
+  });
+  const profile = await resolveSelectedRow({
+    studentId: student.id,
+    userId,
+    id: sourceIds.profileId,
+    latestSql:
+      "SELECT id, report, created_at FROM student_learning_profiles WHERE student_id = $1 AND user_id = $2 ORDER BY created_at DESC LIMIT 1",
+    idSql:
+      "SELECT id, report, created_at FROM student_learning_profiles WHERE student_id = $1 AND user_id = $2 AND id = $3 LIMIT 1",
+  });
+  const strategy = await resolveSelectedRow({
+    studentId: student.id,
+    userId,
+    id: sourceIds.strategyId,
+    latestSql:
+      "SELECT id, title, payload, created_at FROM student_archive_events WHERE student_id = $1 AND user_id = $2 AND event_type = 'subject_strategy_ai' ORDER BY created_at DESC LIMIT 1",
+    idSql:
+      "SELECT id, title, payload, created_at FROM student_archive_events WHERE student_id = $1 AND user_id = $2 AND event_type = 'subject_strategy_ai' AND id = $3 LIMIT 1",
+  });
+  const answers = questionnaire?.answers || fallback.questionnaire || {};
+  const selectedStatement = statement
+    ? [
+        {
+          id: statement.id,
+          type: "文字陈述",
+          title: `${statement.subject || "学习"} · ${statement.scene || "未选场景"}`,
+          subject: statement.subject || "",
+          scene: statement.scene || "",
+          content: statement.content,
+          guidedAnswers: statement.guided_answers || {},
+          time: statement.created_at,
+        },
+      ]
+    : [];
+  const selectedSources = {
+    questionnaire: sourceMeta("学情问卷", questionnaire),
+    statement: sourceMeta("学情陈述", statement),
+    profile: sourceMeta("学情画像", profile),
+    strategy: sourceMeta("学习任务建议", strategy),
+  };
+  const studentBase = {
+    name: answers?.name || student.name || "",
+    grade: answers?.grade || student.grade || "",
+    weakSubjects: answers?.weakSubjects || [],
+    coreProblemText: answers?.coreProblemText || "",
+  };
+  if (feature === "profile") {
+    return {
+      ...fallback,
+      sourceMode: "selected_archive_ids",
+      selectedSources,
+      student: studentBase,
+      questionnaire: answers,
+      questionnaireMeta: selectedSources.questionnaire,
+      statements: selectedStatement,
+      statementMeta: selectedSources.statement,
+      dailyReflections: fallback.dailyReflections || [],
+      weeklyDiscussions: fallback.weeklyDiscussions || [],
+    };
+  }
+  if (feature === "strategy") {
+    return {
+      ...fallback,
+      sourceMode: "selected_archive_ids",
+      selectedSources,
+      student: studentBase,
+      subject: subject || fallback.subject || "",
+      profile: profile?.report?.profile || profile?.report || fallback.profile || null,
+      profileMeta: selectedSources.profile,
+      questionnaireSummary: {
+        weakSubjects: answers?.weakSubjects || [],
+        coreProblemText: answers?.coreProblemText || "",
+      },
+      questionnaireMeta: selectedSources.questionnaire,
+      recentStatements: selectedStatement,
+      statementMeta: selectedSources.statement,
+    };
+  }
+  if (feature === "study-plan") {
+    return {
+      ...fallback,
+      sourceMode: "selected_archive_ids",
+      selectedSources,
+      student: studentBase,
+      profile: profile?.report?.profile || profile?.report || fallback.profile || null,
+      profileMeta: selectedSources.profile,
+      questionnaireSummary: {
+        weakSubjects: answers?.weakSubjects || [],
+        coreProblemText: answers?.coreProblemText || "",
+      },
+      questionnaireMeta: selectedSources.questionnaire,
+      recentStatements: selectedStatement,
+      statementMeta: selectedSources.statement,
+      strategies: strategy?.payload?.result || fallback.strategies || null,
+      strategyMeta: selectedSources.strategy,
+    };
+  }
+  return fallback;
+}
+
 app.post("/api/ai/profile", requireAuth, async (req, res, next) => {
   try {
     await assertPaidMember(req.user.id);
     ensureOpenAIKey();
     await assertTokenBalance(req.user.id, 12);
     const student = await getPrimaryStudent(req.user);
-    const { archiveSnapshot = {} } = req.body || {};
+    const { archiveSnapshot = {}, sourceIds = {} } = req.body || {};
+    const resolvedArchiveSnapshot = await buildArchiveSnapshotFromSourceIds({
+      feature: "profile",
+      student,
+      userId: req.user.id,
+      sourceIds,
+      fallback: archiveSnapshot,
+    });
     const { job, reused } = await createAiJob({
       userId: req.user.id,
       studentId: student.id,
@@ -2808,7 +3000,7 @@ app.post("/api/ai/profile", requireAuth, async (req, res, next) => {
       provider: "openai",
       mode: "text-background",
       tokenCost: 12,
-      input: { archiveSnapshot },
+      input: { archiveSnapshot: resolvedArchiveSnapshot, sourceIds },
     });
     if (!reused) {
       startAiJob(job.id, async () => {
@@ -2826,7 +3018,7 @@ app.post("/api/ai/profile", requireAuth, async (req, res, next) => {
               role: "user",
               content: jsonInstruction(
                 "{summary, core, reasons:[string], evidence:[string], tags:[string], questions:[string], next, archiveConclusion, scores:{motivation:number, method:number, habit:number, execution:number, subject_strategy:number, emotion:number}}"
-              ) + "\nStudent profile archive snapshot:\n" + JSON.stringify(archiveSnapshot),
+              ) + "\nStudent profile archive snapshot:\n" + JSON.stringify(resolvedArchiveSnapshot),
             },
           ],
         });
@@ -2847,12 +3039,12 @@ app.post("/api/ai/profile", requireAuth, async (req, res, next) => {
           const row = (
             await client.query(
               "INSERT INTO student_learning_profiles (student_id, user_id, report) VALUES ($1, $2, $3) RETURNING *",
-              [student.id, req.user.id, JSON.stringify({ profile, sourcePolicy: archiveSnapshot?.policy || null })]
+              [student.id, req.user.id, JSON.stringify({ profile, sourcePolicy: resolvedArchiveSnapshot?.policy || null, selectedSources: resolvedArchiveSnapshot?.selectedSources || null })]
             )
           ).rows[0];
           await client.query(
             "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'learning_profile_ai', $3, $4)",
-            [student.id, req.user.id, "AI learning profile analysis", JSON.stringify({ profile, sourcePolicy: archiveSnapshot?.policy || null })]
+            [student.id, req.user.id, "AI learning profile analysis", JSON.stringify({ profile, sourcePolicy: resolvedArchiveSnapshot?.policy || null, selectedSources: resolvedArchiveSnapshot?.selectedSources || null })]
           );
           return row;
         });
@@ -2878,7 +3070,15 @@ app.post("/api/ai/strategy", requireAuth, async (req, res, next) => {
     ensureOpenAIKey();
     await assertTokenBalance(req.user.id, 8);
     const student = await getPrimaryStudent(req.user);
-    const { subject = "", archiveSnapshot = {} } = req.body || {};
+    const { subject = "", archiveSnapshot = {}, sourceIds = {} } = req.body || {};
+    const resolvedArchiveSnapshot = await buildArchiveSnapshotFromSourceIds({
+      feature: "strategy",
+      student,
+      userId: req.user.id,
+      sourceIds,
+      fallback: archiveSnapshot,
+      subject,
+    });
     const { job, reused } = await createAiJob({
       userId: req.user.id,
       studentId: student.id,
@@ -2886,7 +3086,7 @@ app.post("/api/ai/strategy", requireAuth, async (req, res, next) => {
       provider: "openai",
       mode: "text-background",
       tokenCost: 8,
-      input: { subject, archiveSnapshot },
+      input: { subject, archiveSnapshot: resolvedArchiveSnapshot, sourceIds },
     });
     if (!reused) {
       startAiJob(job.id, async () => {
@@ -2915,7 +3115,7 @@ app.post("/api/ai/strategy", requireAuth, async (req, res, next) => {
                 "\n4. strategy_suggestion 用简洁段落概括本学科任务设计思路，不要替代 tasks。" +
                 "\n5. 不要生成周计划表，不要生成单个任务，不要让学生自己再去判断怎么做。" +
                 "\n学情资料 JSON：\n" +
-                JSON.stringify(archiveSnapshot),
+                JSON.stringify(resolvedArchiveSnapshot),
             },
           ],
         });
@@ -2924,7 +3124,7 @@ app.post("/api/ai/strategy", requireAuth, async (req, res, next) => {
         const result = parseJsonText(getResponseText(completed), { strategy_suggestion: "", ai_note: "", tasks: [] });
         await query(
           "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'subject_strategy_ai', $3, $4)",
-          [student.id, req.user.id, "AI learning task suggestion", JSON.stringify({ subject, result })]
+          [student.id, req.user.id, "AI learning task suggestion", JSON.stringify({ subject, result, selectedSources: resolvedArchiveSnapshot?.selectedSources || null })]
         );
         await recordAiUsageBilling(req.user.id, {
           jobId: job.id,
@@ -2948,7 +3148,14 @@ app.post("/api/ai/study-plan", requireAuth, async (req, res, next) => {
     ensureOpenAIKey();
     await assertTokenBalance(req.user.id, 8);
     const student = await getPrimaryStudent(req.user);
-    const { archiveSnapshot = {}, currentPlanRows = [], methodFocusRows = [], habitFocusRows = [] } = req.body || {};
+    const { archiveSnapshot = {}, currentPlanRows = [], methodFocusRows = [], habitFocusRows = [], sourceIds = {} } = req.body || {};
+    const resolvedArchiveSnapshot = await buildArchiveSnapshotFromSourceIds({
+      feature: "study-plan",
+      student,
+      userId: req.user.id,
+      sourceIds,
+      fallback: archiveSnapshot,
+    });
     const { job, reused } = await createAiJob({
       userId: req.user.id,
       studentId: student.id,
@@ -2956,7 +3163,7 @@ app.post("/api/ai/study-plan", requireAuth, async (req, res, next) => {
       provider: "openai",
       mode: "text-background",
       tokenCost: 8,
-      input: { archiveSnapshot, currentPlanRows, methodFocusRows, habitFocusRows },
+      input: { archiveSnapshot: resolvedArchiveSnapshot, currentPlanRows, methodFocusRows, habitFocusRows, sourceIds },
     });
     if (!reused) {
       startAiJob(job.id, async () => {
@@ -2986,7 +3193,7 @@ app.post("/api/ai/study-plan", requireAuth, async (req, res, next) => {
                 "\n5. note 必须说明：本计划按默认作息生成，学生可以根据真实放学、晚自习和睡觉时间自行修改。" +
                 "\n6. method_focus_suggestions 和 habit_focus_suggestions 只写简短建议，不要写成另一份计划。" +
                 "\n学情与任务资料 JSON：\n" +
-                JSON.stringify(archiveSnapshot) +
+                JSON.stringify(resolvedArchiveSnapshot) +
                 "\n当前周计划草稿：\n" +
                 JSON.stringify(currentPlanRows) +
                 "\n方法训练草稿：\n" +
@@ -3001,7 +3208,7 @@ app.post("/api/ai/study-plan", requireAuth, async (req, res, next) => {
         const plan = parseJsonText(getResponseText(completed), { rows: [], note: "" });
         await query(
           "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'study_plan_ai', $3, $4)",
-          [student.id, req.user.id, "AI study plan", JSON.stringify({ plan })]
+          [student.id, req.user.id, "AI study plan", JSON.stringify({ plan, selectedSources: resolvedArchiveSnapshot?.selectedSources || null })]
         );
         await recordAiUsageBilling(req.user.id, {
           jobId: job.id,

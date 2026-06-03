@@ -1906,6 +1906,14 @@ function App() {
   const [lastSaved, setLastSaved] = useState(() => (readDraftValue("questionnaire", null) ? "已恢复上次填写记录" : "尚未保存"));
   const [questionnaireArchives, setQuestionnaireArchives] = useState([]);
   const [questionnairePreview, setQuestionnairePreview] = useState(null);
+  const [profileArchives, setProfileArchives] = useState([]);
+  const [strategyArchives, setStrategyArchives] = useState([]);
+  const [sourceSelection, setSourceSelection] = useState({
+    questionnaireId: "latest",
+    statementId: "latest",
+    profileId: "latest",
+    strategyId: "latest",
+  });
   const savedStatementDraft = readDraftValue("statement", defaultStatementDraft);
   const [statementText, setStatementText] = useState(savedStatementDraft.text);
   const [statementSubject, setStatementSubject] = useState(savedStatementDraft.subject);
@@ -2099,6 +2107,18 @@ function App() {
   }, [activePage, member.isLoggedIn]);
 
   useEffect(() => {
+    if (member.isLoggedIn && ["profile", "strategy", "plan"].includes(activePage)) loadQuestionnaireArchives();
+  }, [activePage, member.isLoggedIn]);
+
+  useEffect(() => {
+    if (member.isLoggedIn && ["strategy", "plan"].includes(activePage)) loadProfileArchives();
+  }, [activePage, member.isLoggedIn]);
+
+  useEffect(() => {
+    if (member.isLoggedIn && activePage === "plan") loadStrategyArchives();
+  }, [activePage, member.isLoggedIn]);
+
+  useEffect(() => {
     if (activePage === "library" && member.isLoggedIn) loadLibraryItems();
   }, [activePage, member.isLoggedIn, libraryView, libraryFolderId, librarySort, librarySortDir]);
 
@@ -2159,6 +2179,42 @@ function App() {
     } catch (error) {
       setAccountNotice(error.message || "学情陈述档案暂时无法读取。");
     }
+  }
+
+  async function loadProfileArchives() {
+    try {
+      const data = await apiRequest("/archive/learning-profiles");
+      setProfileArchives(data.records || []);
+    } catch (error) {
+      setAccountNotice(error.message || "学情画像档案暂时无法读取。");
+    }
+  }
+
+  async function loadStrategyArchives() {
+    try {
+      const data = await apiRequest("/archive/strategy-suggestions");
+      setStrategyArchives(data.records || []);
+    } catch (error) {
+      setAccountNotice(error.message || "学习任务建议档案暂时无法读取。");
+    }
+  }
+
+  function updateSourceSelection(field, value) {
+    setSourceSelection((prev) => ({ ...prev, [field]: value || "latest" }));
+  }
+
+  function buildSourceIds(feature) {
+    const base = {
+      questionnaireId: sourceSelection.questionnaireId || "latest",
+      statementId: sourceSelection.statementId || "latest",
+    };
+    if (feature === "profile") return base;
+    if (feature === "strategy") return { ...base, profileId: sourceSelection.profileId || "latest" };
+    return {
+      ...base,
+      profileId: sourceSelection.profileId || "latest",
+      strategyId: sourceSelection.strategyId || "latest",
+    };
   }
 
   async function removeQuestionnaireArchive(record) {
@@ -3074,7 +3130,7 @@ function App() {
     try {
       const data = await apiRequest("/ai/profile", {
         method: "POST",
-        body: JSON.stringify({ archiveSnapshot }),
+        body: JSON.stringify({ archiveSnapshot, sourceIds: buildSourceIds("profile") }),
       });
       const profile = data.profile || {};
       setAiInsight({
@@ -3214,6 +3270,7 @@ function App() {
         method: "POST",
         body: JSON.stringify({
           archiveSnapshot,
+          sourceIds: buildSourceIds("plan"),
           currentPlanRows: planRows,
           methodFocusRows,
           habitFocusRows,
@@ -3560,7 +3617,7 @@ function App() {
     try {
       const data = await apiRequest("/ai/strategy", {
         method: "POST",
-        body: JSON.stringify({ subject, archiveSnapshot }),
+        body: JSON.stringify({ subject, archiveSnapshot, sourceIds: buildSourceIds("strategy") }),
       });
       const result = data.result || {};
       const suggestion = formatTaskSuggestion(result) || "AI没有返回明确的学习任务建议，请点击重新生成再试一次。";
@@ -4032,6 +4089,10 @@ function App() {
             clearProfileDraft={clearProfileDraft}
             dailyReflectionArchive={dailyReflectionArchive}
             weeklyDiscussionArchive={weeklyDiscussionArchive}
+            questionnaireArchives={questionnaireArchives}
+            statementArchives={records}
+            sourceSelection={sourceSelection}
+            updateSourceSelection={updateSourceSelection}
           />
         )}
 
@@ -4051,6 +4112,11 @@ function App() {
             acceptStrategySuggestion={acceptStrategySuggestion}
             runStrategyAi={runStrategyAi}
             clearStrategyDraft={clearStrategyDraft}
+            questionnaireArchives={questionnaireArchives}
+            statementArchives={records}
+            profileArchives={profileArchives}
+            sourceSelection={sourceSelection}
+            updateSourceSelection={updateSourceSelection}
           />
         )}
 
@@ -4077,6 +4143,12 @@ function App() {
             updateDailyReflectionNote={updateDailyReflectionNote}
             updateWeeklyState={updateWeeklyState}
             updateWeeklyDiscussion={updateWeeklyDiscussion}
+            questionnaireArchives={questionnaireArchives}
+            statementArchives={records}
+            profileArchives={profileArchives}
+            strategyArchives={strategyArchives}
+            sourceSelection={sourceSelection}
+            updateSourceSelection={updateSourceSelection}
           />
         )}
 
@@ -6382,6 +6454,65 @@ function MessageStat({ records }) {
   );
 }
 
+function ArchiveSourceSelectors({
+  questionnaireArchives = [],
+  statementArchives = [],
+  profileArchives = [],
+  strategyArchives = [],
+  sourceSelection,
+  updateSourceSelection,
+  includeProfile = false,
+  includeStrategy = false,
+}) {
+  const groups = [
+    {
+      key: "questionnaireId",
+      label: "学情问卷",
+      records: questionnaireArchives,
+      optionLabel: (record) => `${formatArchiveDate(record.createdAt)} · 完成度 ${record.completion || 0}%`,
+    },
+    {
+      key: "statementId",
+      label: "学情陈述",
+      records: statementArchives,
+      optionLabel: (record) => `${formatArchiveDate(record.createdAt || record.time)} · ${record.title || "文字陈述"}`,
+    },
+  ];
+  if (includeProfile) {
+    groups.push({
+      key: "profileId",
+      label: "学情画像",
+      records: profileArchives,
+      optionLabel: (record) => `${formatArchiveDate(record.createdAt)} · ${record.title || "AI学情画像"}`,
+    });
+  }
+  if (includeStrategy) {
+    groups.push({
+      key: "strategyId",
+      label: "学习任务",
+      records: strategyArchives,
+      optionLabel: (record) => `${formatArchiveDate(record.createdAt)} · ${record.subject || "综合"}任务建议`,
+    });
+  }
+  return (
+    <div className="archive-source-selectors">
+      {groups.map((group) => (
+        <label key={group.key}>
+          <span>{group.label}</span>
+          <select value={sourceSelection[group.key] || "latest"} onChange={(event) => updateSourceSelection(group.key, event.target.value)}>
+            <option value="latest">默认最新档案</option>
+            {group.records.map((record) => (
+              <option key={record.id} value={record.id}>
+                {group.optionLabel(record)}
+              </option>
+            ))}
+          </select>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 function ModernProfilePage({
   answers,
   records,
@@ -6394,6 +6525,10 @@ function ModernProfilePage({
   clearProfileDraft,
   dailyReflectionArchive,
   weeklyDiscussionArchive,
+  questionnaireArchives,
+  statementArchives,
+  sourceSelection,
+  updateSourceSelection,
 }) {
   const studentName = answers.name || "这位同学";
   const [selfAssessment, setSelfAssessment] = useState({});
@@ -6452,6 +6587,12 @@ function ModernProfilePage({
               {aiStatus === "loading" ? "AI正在分析" : "AI统一分析画像"}
             </button>
           </div>
+          <ArchiveSourceSelectors
+            questionnaireArchives={questionnaireArchives}
+            statementArchives={statementArchives}
+            sourceSelection={sourceSelection}
+            updateSourceSelection={updateSourceSelection}
+          />
           <div className="profile-unified-body">
             <h3>{aiInsight?.core || "点击“AI统一分析画像”后，这里会显示学生学习问题的整体判断。"}</h3>
             <p>{aiInsight?.archiveConclusion || "AI会统一阅读学情问卷、学情陈述、每日反思和每周讨论，综合判断学生的基础、方法、执行、习惯、动机和情绪精力等情况。错题专项、知识笔记、学习日历和资料库保持独立，不进入画像分析。"}</p>
@@ -6550,6 +6691,11 @@ function StrategyDesignPage({
   acceptStrategySuggestion,
   runStrategyAi,
   clearStrategyDraft,
+  questionnaireArchives,
+  statementArchives,
+  profileArchives,
+  sourceSelection,
+  updateSourceSelection,
 }) {
   const workspace = workspaces[activeSubject];
   const studentName = answers.name || "这位同学";
@@ -6616,6 +6762,14 @@ function StrategyDesignPage({
               AI学习任务建议
             </button>
           </div>
+          <ArchiveSourceSelectors
+            questionnaireArchives={questionnaireArchives}
+            statementArchives={statementArchives}
+            profileArchives={profileArchives}
+            sourceSelection={sourceSelection}
+            updateSourceSelection={updateSourceSelection}
+            includeProfile
+          />
 
           {hasStrategySuggestion && (
             <div className="strategy-advice-box">
@@ -6730,6 +6884,12 @@ function StudyPlanPage({
   updateDailyReflectionNote,
   updateWeeklyState,
   updateWeeklyDiscussion,
+  questionnaireArchives,
+  statementArchives,
+  profileArchives,
+  strategyArchives,
+  sourceSelection,
+  updateSourceSelection,
 }) {
   const [activeStudySection, setActiveStudySection] = useState("plan");
   return (
@@ -6786,6 +6946,16 @@ function StudyPlanPage({
                 </button>
               </div>
             </div>
+            <ArchiveSourceSelectors
+              questionnaireArchives={questionnaireArchives}
+              statementArchives={statementArchives}
+              profileArchives={profileArchives}
+              strategyArchives={strategyArchives}
+              sourceSelection={sourceSelection}
+              updateSourceSelection={updateSourceSelection}
+              includeProfile
+              includeStrategy
+            />
 
             <label className="plan-note">
               <span>本周计划说明</span>
