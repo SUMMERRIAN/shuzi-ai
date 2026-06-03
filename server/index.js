@@ -693,6 +693,34 @@ function buildMistakeWorkflowPrompt({ taskType, taskText, subject, grade, title,
   ].join("\n");
 }
 
+function compactForPrompt(value, maxLength = 7000) {
+  const text = typeof value === "string" ? value : JSON.stringify(value || {});
+  return text.replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function buildMistakeFollowUpPrompt({ subject = "", grade = "", title = "", question = "", report = {}, history = [], questionScope = "auto" } = {}) {
+  const recentHistory = Array.isArray(history)
+    ? history
+        .slice(-6)
+        .map((item, index) => `第${index + 1}轮：学生问：${item.question || ""}\nAI答：${item.answer || ""}`)
+        .join("\n\n")
+    : "";
+  return [
+    "你是树子AI错题专项老师。现在是学生看完上一份错题讲解后的继续追问，不是首次上传分析。",
+    "严禁重新走错题图片识别流程，严禁重新生成完整错题报告，严禁生成相似题，严禁输出JSON。",
+    "只围绕学生本轮追问回答；如果追问涉及某一步，就把那一步讲清楚；如果学生表达了自己的想法，先判断这个想法哪里对、哪里需要修正。",
+    "讲解要像老师面对学生继续讲题：中文自然表达，步骤清楚，控制在1200字以内。",
+    getMistakeKnowledgeBoundary({ subject, grade }),
+    `科目：${subject || "未指定"}`,
+    `年级：${grade || "未指定"}`,
+    `标题：${title || "当前错题"}`,
+    `讲解范围：${getMistakeQuestionScopeText(questionScope)}`,
+    `当前错题报告摘要：${compactForPrompt(report, 7000)}`,
+    recentHistory ? `最近追问记录：\n${compactForPrompt(recentHistory, 3000)}` : "最近追问记录：无",
+    `学生本轮追问：${question}`,
+  ].join("\n");
+}
+
 function buildMistakeRecognitionPrompt({ subject, grade, title, prompt, documentText }) {
   return [
     "你现在只做第一步：识别题目。",
@@ -3669,6 +3697,90 @@ app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), asy
   }
 });
 
+app.post("/api/ai/mistakes/follow-up", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    ensureGeminiKey();
+    await assertTokenBalance(req.user.id, 6);
+    const student = await getPrimaryStudent(req.user);
+    const {
+      question = "",
+      report = {},
+      history = [],
+      subject = "",
+      grade = "",
+      title = "错题继续追问",
+      questionScope = "auto",
+    } = req.body || {};
+    const cleanQuestion = String(question || "").trim();
+    if (!cleanQuestion) return res.status(400).json({ error: "QUESTION_REQUIRED", message: "请先写下要追问的内容。" });
+    if (!report || !Object.keys(report).length) return res.status(400).json({ error: "REPORT_REQUIRED", message: "请先完成一次错题分析。" });
+    const jobPayload = {
+      question: cleanQuestion,
+      report,
+      history,
+      subject,
+      grade,
+      title,
+      questionScope,
+    };
+    const model = getMistakeGeminiModel("fast");
+    const { job, reused } = await createAiJob({
+      userId: req.user.id,
+      studentId: student.id,
+      feature: "mistake-follow-up",
+      provider: "gemini",
+      mode: "text-background",
+      tokenCost: 6,
+      input: jobPayload,
+      dedupeInput: jobPayload,
+      reuseActive: false,
+    });
+    if (!reused) {
+      startAiJob(job.id, async () => {
+        await assertTokenBalance(req.user.id, 6);
+        const usageEvents = [];
+        const collectUsage = (event) => usageEvents.push(event);
+        const result = await generateMistakeGeminiTextWithRetry({
+          model,
+          stage: "mistake-follow-up",
+          prompt: buildMistakeFollowUpPrompt(jobPayload),
+          files: [],
+          temperature: 0.2,
+          topP: 0.2,
+          responseMimeType: "",
+          thinkingBudget: Number(process.env.GEMINI_MISTAKE_FOLLOW_UP_THINKING_BUDGET || 512),
+          maxOutputTokens: Number(process.env.GEMINI_MISTAKE_FOLLOW_UP_MAX_OUTPUT_TOKENS || 2048),
+          onUsage: collectUsage,
+        });
+        const answer = normalizeStudentMathText(result.text || "");
+        await query(
+          `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
+           VALUES ($1, $2, 'mistake_follow_up', $3, $4)`,
+          [student.id, req.user.id, title || "错题继续追问", JSON.stringify({ question: cleanQuestion, answer, subject, grade, model: result.model })]
+        );
+        await recordAiUsageBilling(req.user.id, {
+          jobId: job.id,
+          note: "Mistake follow-up AI",
+          usageEvents,
+          fallbackTokenCost: 6,
+          meta: {
+            feature: "mistake-follow-up",
+            provider: "gemini",
+            model: result.model,
+            subject,
+            grade,
+          },
+        });
+        return { answer, model: result.model };
+      });
+    }
+    res.status(202).json(publicJob(job));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/ai/mistakes/analyze", requireAuth, upload.array("files", 6), async (req, res, next) => {
   try {
     await assertPaidMember(req.user.id);
@@ -3957,6 +4069,38 @@ function buildKnowledgeNotePrompt({ topic = "", grade = "", subject = "", useTem
   );
 }
 
+function buildKnowledgeRevisionPrompt({ revision = "", grade = "", subject = "", currentNote = {}, breakdown = null } = {}) {
+  const currentTitle = String(currentNote?.title || "当前知识图").trim();
+  const currentSubtitle = String(currentNote?.subtitle || "").trim();
+  const currentPoints = Array.isArray(currentNote?.points)
+    ? currentNote.points
+        .map((item, index) => {
+          if (Array.isArray(item)) return `${index + 1}. ${item[0] || ""}：${item[1] || ""}`;
+          return `${index + 1}. ${item?.name || item?.title || ""}：${item?.desc || ""}${item?.tip ? `；${item.tip}` : ""}`;
+        })
+        .filter((item) => item.replace(/[\d.：；\s]/g, ""))
+        .join("；")
+    : "";
+  const revisedPoints = Array.isArray(breakdown?.points) && breakdown.points.length
+    ? "\n修改后的核心知识点：" +
+      breakdown.points
+        .map((item, index) => `${index + 1}. ${item.name}：${item.desc}${item.tip ? `；学习提醒：${item.tip}` : ""}`)
+        .join("；")
+    : "";
+  return [
+    "制作一张中文学习知识图的修改版。现在不是首次生成，不要套用默认提示词模板；学生的修改意见优先级最高。",
+    `上一版主题：${currentTitle}`,
+    currentSubtitle ? `上一版说明：${currentSubtitle}` : "",
+    currentPoints ? `上一版核心内容：${currentPoints}` : "",
+    `学生修改意见：${revision}`,
+    `学科：${subject || "不限"}。年级：${grade || "中学生"}。`,
+    "要求：保留上一版主题的连续性，但按学生意见重新组织画面、重点和文字。白色背景，清楚大标题，中心结构图，5到7个短标签，底部一句学习总结。文字要少而准确，不要把中文写成乱码。",
+    breakdown?.summary ? `\n修改后的知识总结：${breakdown.summary}` : "",
+    revisedPoints,
+    breakdown?.imageBrief ? `\n画面说明：${breakdown.imageBrief}` : "",
+  ].filter(Boolean).join("\n");
+}
+
 app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
   try {
     await assertPaidMember(req.user.id);
@@ -4031,6 +4175,107 @@ app.post("/api/ai/knowledge-note", requireAuth, async (req, res, next) => {
       });
     }
     res.status(202).json({ ...publicJob(job), message: reused ? "已有知识图正在后台生成，已继续等待原任务，避免重复扣费。" : "知识图已进入后台生成，请稍候。" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/ai/knowledge-note/revise", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    ensureOpenAIKey();
+    await assertTokenBalance(req.user.id, 35);
+    const student = await getPrimaryStudent(req.user);
+    const payload = req.body || {};
+    const revision = String(payload.revision || "").trim();
+    const currentNote = payload.currentNote || {};
+    const currentTitle = String(currentNote.title || "").trim();
+    if (!revision) return res.status(400).json({ error: "REVISION_REQUIRED", message: "请先写下要怎样修改当前知识图。" });
+    if (!currentTitle && !Array.isArray(currentNote.points)) {
+      return res.status(400).json({ error: "CURRENT_NOTE_REQUIRED", message: "请先生成一张知识图，再继续修改。" });
+    }
+    const jobPayload = {
+      revision,
+      currentNote: {
+        title: currentTitle,
+        subtitle: currentNote.subtitle || "",
+        points: Array.isArray(currentNote.points) ? currentNote.points : [],
+        prompt: currentNote.prompt || "",
+      },
+      grade: payload.grade || "",
+      subject: payload.subject || "",
+    };
+    const { job, reused } = await createAiJob({
+      userId: req.user.id,
+      studentId: student.id,
+      feature: "knowledge-note-revision",
+      provider: "openai",
+      mode: "image-background",
+      tokenCost: 35,
+      input: jobPayload,
+      dedupeInput: jobPayload,
+    });
+    if (!reused) {
+      startAiJob(job.id, async ({ setExternalResponseId }) => {
+        ensureOpenAIKey();
+        await assertTokenBalance(req.user.id, 35);
+        const usageEvents = [];
+        const collectUsage = (event) => usageEvents.push(event);
+        const baseTopic = currentTitle || "知识图";
+        const imageQualityForRequest = resolveImageQuality(revision);
+        const breakdown = await generateKnowledgeBreakdown({
+          topic: baseTopic,
+          grade: jobPayload.grade,
+          subject: jobPayload.subject,
+          promptText: [
+            `上一版标题：${baseTopic}`,
+            jobPayload.currentNote.subtitle ? `上一版说明：${jobPayload.currentNote.subtitle}` : "",
+            `学生修改意见：${revision}`,
+          ].filter(Boolean).join("\n"),
+          onUsage: collectUsage,
+        });
+        const prompt = buildKnowledgeRevisionPrompt({ ...jobPayload, breakdown });
+        const imageBase64 = await generateOpenAIImageBackground(prompt, setExternalResponseId, imageQualityForRequest);
+        if (imageBase64) usageEvents.push(createImageUsageEvent({ quality: imageQualityForRequest }));
+        const note = {
+          topic: baseTopic,
+          title: breakdown.title || baseTopic,
+          subtitle: breakdown.subtitle,
+          summary: breakdown.summary,
+          points: breakdown.points,
+          imageBrief: breakdown.imageBrief,
+          quality: imageQualityForRequest,
+          prompt,
+          revision,
+          previousTitle: baseTopic,
+          text: breakdown.summary,
+          imageMimeType: "image/png",
+        };
+        const saved = (
+          await query(
+            `INSERT INTO knowledge_notes (student_id, user_id, topic, note, image_base64)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING id, student_id, user_id, topic, note, created_at`,
+            [student.id, req.user.id, `${baseTopic}（修改）`, JSON.stringify(note), imageBase64 || null]
+          )
+        ).rows[0];
+        await recordAiUsageBilling(req.user.id, {
+          jobId: job.id,
+          note: "AI knowledge image revision",
+          usageEvents,
+          fallbackTokenCost: 35,
+          meta: {
+            feature: "knowledge-note-revision",
+            provider: "openai",
+            noteId: saved.id,
+            imageModel,
+            imageQuality: imageQualityForRequest,
+          },
+        });
+        return { note, imageBase64, saved, points: breakdown.points, quality: imageQualityForRequest };
+      });
+    }
+    res.status(202).json({ ...publicJob(job), message: reused ? "已有知识图修改任务正在后台生成，已继续等待原任务，避免重复扣费。" : "知识图修改已进入后台生成，请稍候。" });
   } catch (error) {
     next(error);
   }

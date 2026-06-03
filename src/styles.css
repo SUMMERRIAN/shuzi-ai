@@ -2434,6 +2434,13 @@ p {
   margin-bottom: 16px;
 }
 
+.panel-action-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .panel-heading h2,
 .report-title h2 {
   margin-bottom: 0;
@@ -5270,6 +5277,59 @@ audio {
   color: #ffffff;
 }
 
+.mistake-follow-up-thread {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid #dfe5da;
+}
+
+.mistake-follow-up-thread h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.mistake-follow-up-item {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #dfe5da;
+  border-radius: 8px;
+  background: #fbfcfa;
+}
+
+.mistake-follow-up-question,
+.mistake-follow-up-answer {
+  display: grid;
+  gap: 6px;
+}
+
+.mistake-follow-up-question strong,
+.mistake-follow-up-answer strong {
+  color: #008653;
+  font-size: 13px;
+}
+
+.mistake-follow-up-question p,
+.mistake-follow-up-answer p {
+  margin: 0;
+}
+
+.mistake-follow-up-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #53625a;
+  font-weight: 800;
+}
+
+.mistake-reset-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
 .mistake-quick-actions button {
   display: flex;
   align-items: center;
@@ -5759,7 +5819,7 @@ audio {
 
 .knowledge-actions {
   display: grid;
-  grid-template-rows: minmax(150px, auto) auto;
+  grid-template-rows: auto auto;
   gap: 12px;
   align-items: start;
 }
@@ -5850,6 +5910,26 @@ audio {
   height: auto;
   border-radius: 8px;
   box-shadow: 0 18px 48px rgba(37, 48, 41, 0.08);
+}
+
+.knowledge-revision-list {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid #dfe5da;
+  border-radius: 8px;
+  background: #fbfcfa;
+}
+
+.knowledge-revision-list h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.knowledge-revision-list p {
+  margin: 0;
+  color: #3c4a43;
+  line-height: 1.6;
 }
 
 .knowledge-subtitle {

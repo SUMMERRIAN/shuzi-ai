@@ -1974,9 +1974,11 @@ function App() {
   const [mistakeTaskType, setMistakeTaskType] = useState("");
   const [mistakeQuestionScope, setMistakeQuestionScope] = useState("auto");
   const [mistakeResult, setMistakeResult] = useState(null);
+  const [mistakeFollowUps, setMistakeFollowUps] = useState([]);
   const [mistakeAiStatus, setMistakeAiStatus] = useState("idle");
   const [knowledgeQuestion, setKnowledgeQuestion] = useState("");
   const [knowledgeNote, setKnowledgeNote] = useState(createEmptyKnowledgeNote);
+  const [knowledgeRevisionHistory, setKnowledgeRevisionHistory] = useState([]);
   const [knowledgeAiStatus, setKnowledgeAiStatus] = useState("idle");
   const [knowledgeUseTemplate, setKnowledgeUseTemplate] = useState(false);
   const [knowledgePromptTemplate, setKnowledgePromptTemplate] = useState(defaultKnowledgePromptTemplate);
@@ -3526,6 +3528,7 @@ function App() {
       previewUrl: normalizedFiles[0].previewUrl || prev.previewUrl,
     }));
     setMistakeResult(null);
+    setMistakeFollowUps([]);
     event.target.value = "";
   }
 
@@ -3549,6 +3552,14 @@ function App() {
   }
 
   async function runMistakeWorkspaceAi() {
+    if (mistakeResult) {
+      if (!mistakePrompt.trim()) {
+        setAiNotice({ page: activePage, message: "请在输入框里写下你想继续问这道题的地方。" });
+        return;
+      }
+      await runMistakeFollowUpAi();
+      return;
+    }
     const activeMistakeTaskType = mistakeTaskType || "custom";
     const taskLabel = mistakeQuickTasks[mistakeTaskType]?.label || "AI处理错题";
     if (!requireMemberAction(taskLabel, runMistakeWorkspaceAi, "错题专项会调用AI分析材料并生成学习报告，需要登录并开通会员。")) return;
@@ -3617,6 +3628,74 @@ function App() {
     }
   }
 
+  async function runMistakeFollowUpAi() {
+    if (!requireMemberAction("继续追问错题", runMistakeFollowUpAi, "错题追问会调用AI继续讲解当前题目，需要登录并开通会员。")) return;
+    if (mistakeAiStatus === "loading") return;
+    const question = mistakePrompt.trim();
+    if (!question) {
+      setAiNotice({ page: activePage, message: "请先写下你想继续追问的内容。" });
+      return;
+    }
+    setMistakeAiStatus("loading");
+    try {
+      clearAiNotice();
+      const data = await apiRequest("/ai/mistakes/follow-up", {
+        method: "POST",
+        body: JSON.stringify({
+          question,
+          report: mistakeResult,
+          history: mistakeFollowUps.slice(-6),
+          subject: mistakeDraft.subject,
+          grade: mistakeDraft.grade,
+          title: mistakeResult?.title || mistakeDraft.title,
+          questionScope: mistakeQuestionScope,
+        }),
+        aiJobAttempts: 120,
+        aiJobIntervalMs: 4000,
+      });
+      setMistakeFollowUps((prev) => [
+        ...prev,
+        {
+          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          question,
+          answer: data.answer || "AI已经收到追问，但没有返回有效内容，请换一种问法再试。",
+          createdAt: new Date().toLocaleString(),
+        },
+      ]);
+      setMistakePrompt("");
+      setMistakeAiStatus("done");
+      clearAiNotice();
+    } catch (error) {
+      showAiError(error, "AI追问暂时不可用，请稍后再试。");
+      setMistakeAiStatus("idle");
+    }
+  }
+
+  function resetMistakeWorkspace() {
+    (mistakeDraft.files || []).forEach((item) => {
+      if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+    });
+    setMistakeDraft({
+      title: "新上传学习材料",
+      subject: "数学",
+      grade: "初中三年级",
+      source: "错题/作业/试卷",
+      reason: "",
+      method: "",
+      fileName: "",
+      type: "",
+      previewUrl: "",
+      files: [],
+    });
+    setMistakePrompt("");
+    setMistakeTaskType("");
+    setMistakeQuestionScope("auto");
+    setMistakeResult(null);
+    setMistakeFollowUps([]);
+    setMistakeAiStatus("idle");
+    clearAiNotice();
+  }
+
   function downloadMistakePdf() {
     if (!requireMemberAction("下载错题分析PDF", downloadMistakePdf, "下载AI分析PDF需要登录并开通会员。")) return;
     if (!mistakeResult) {
@@ -3662,6 +3741,14 @@ function App() {
     if (!requireMemberAction("AI生成知识图", generateKnowledgeNote, "知识图生成会调用AI图片与讲解能力，需要会员权限。")) return;
     if (knowledgeAiStatus === "loading") return;
     const topic = knowledgeQuestion.trim();
+    if (knowledgeNote?.svg) {
+      if (!topic) {
+        setAiNotice({ page: activePage, message: "请写下你想怎样修改当前知识图。" });
+        return;
+      }
+      await reviseKnowledgeNote();
+      return;
+    }
     if (!topic) {
       setAiNotice({ page: activePage, message: "请先输入一个想理解的知识点。" });
       return;
@@ -3710,6 +3797,69 @@ function App() {
       showAiError(error, "服务器知识图生成暂时不可用，请稍后重试。");
     }
     setKnowledgeAiStatus("idle");
+  }
+
+  async function reviseKnowledgeNote() {
+    const revision = knowledgeQuestion.trim();
+    if (!revision) {
+      setAiNotice({ page: activePage, message: "请写下你想怎样修改当前知识图。" });
+      return;
+    }
+    setKnowledgeAiStatus("loading");
+    try {
+      clearAiNotice();
+      const data = await apiRequest("/ai/knowledge-note/revise", {
+        method: "POST",
+        body: JSON.stringify({
+          revision,
+          grade: answers.grade,
+          subject: "",
+          currentNote: {
+            title: knowledgeNote.title,
+            subtitle: knowledgeNote.subtitle,
+            points: knowledgeNote.points,
+            prompt: knowledgeNote.prompt,
+          },
+        }),
+        aiJobAttempts: 180,
+        aiJobIntervalMs: 5000,
+      });
+      if (data.imageBase64) {
+        const points = normalizeKnowledgePointPairs(data.note?.points || data.points);
+        setKnowledgeNote({
+          title: data.note?.title || knowledgeNote.title || "AI知识图",
+          subtitle: data.note?.summary || data.note?.subtitle || "AI修改后的知识图",
+          points,
+          svg: `<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254"><image href="data:image/png;base64,${data.imageBase64}" width="1254" height="1254"/></svg>`,
+          prompt: data.note?.prompt || "",
+        });
+        setKnowledgeRevisionHistory((prev) => [
+          ...prev,
+          {
+            id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            request: revision,
+            createdAt: new Date().toLocaleString(),
+          },
+        ]);
+        setKnowledgeQuestion("");
+        setKnowledgeAiStatus("done");
+        clearAiNotice();
+        void loadAiJobs();
+        return;
+      }
+      throw new Error("知识图修改任务暂未返回图片，请稍后重试。");
+    } catch (error) {
+      showAiError(error, "知识图修改暂时不可用，请稍后再试。");
+      setKnowledgeAiStatus("idle");
+    }
+  }
+
+  function resetKnowledgeNote() {
+    setKnowledgeQuestion("");
+    setKnowledgeNote(createEmptyKnowledgeNote());
+    setKnowledgeRevisionHistory([]);
+    setKnowledgeAiStatus("idle");
+    clearAiNotice();
   }
 
   function downloadKnowledgeImage() {
@@ -4303,12 +4453,14 @@ function App() {
             setMistakeQuestionScope={setMistakeQuestionScope}
             applyMistakeQuickTask={applyMistakeQuickTask}
             mistakeResult={mistakeResult}
+            mistakeFollowUps={mistakeFollowUps}
             updateMistakeDraft={updateMistakeDraft}
             handleMistakeFile={handleMistakeFile}
             removeMistakeUpload={removeMistakeUpload}
             runMistakeWorkspaceAi={runMistakeWorkspaceAi}
             mistakeAiStatus={mistakeAiStatus}
             downloadMistakePdf={downloadMistakePdf}
+            resetMistakeWorkspace={resetMistakeWorkspace}
           />
         )}
 
@@ -4317,8 +4469,10 @@ function App() {
             knowledgeQuestion={knowledgeQuestion}
             setKnowledgeQuestion={setKnowledgeQuestion}
             knowledgeNote={knowledgeNote}
+            knowledgeRevisionHistory={knowledgeRevisionHistory}
             generateKnowledgeNote={generateKnowledgeNote}
             downloadKnowledgeImage={downloadKnowledgeImage}
+            resetKnowledgeNote={resetKnowledgeNote}
             status={knowledgeAiStatus}
             useTemplate={knowledgeUseTemplate}
             setUseTemplate={setKnowledgeUseTemplate}
@@ -7667,12 +7821,14 @@ function MistakeSpecialPage({
   setMistakeQuestionScope,
   applyMistakeQuickTask,
   mistakeResult,
+  mistakeFollowUps,
   updateMistakeDraft,
   handleMistakeFile,
   removeMistakeUpload,
   runMistakeWorkspaceAi,
   mistakeAiStatus,
   downloadMistakePdf,
+  resetMistakeWorkspace,
 }) {
   return (
     <section className="stack mistake-workspace">
@@ -7737,7 +7893,7 @@ function MistakeSpecialPage({
             <textarea
               value={mistakePrompt}
               onChange={(event) => setMistakePrompt(event.target.value)}
-              placeholder="有问题，尽管问。也可以先点下面的快捷任务，再补充自己的要求。"
+              placeholder={mistakeResult ? "继续问这道题，比如：第二步为什么这样做？还能不能换一种讲法？" : "有问题，尽管问。也可以先点下面的快捷任务，再补充自己的要求。"}
             />
             <button type="button" className="mistake-send-button" onClick={runMistakeWorkspaceAi} disabled={mistakeAiStatus === "loading"}>
               {mistakeAiStatus === "loading" ? <Loader2 className="spin" size={20} /> : <Send size={20} />}
@@ -7782,13 +7938,24 @@ function MistakeSpecialPage({
               <span className="eyebrow">AI输出</span>
               <h2>{mistakeResult?.title || "分析完成后，这里会生成干净完整的学习报告"}</h2>
             </div>
-            <button type="button" className="ghost-action" onClick={downloadMistakePdf} disabled={!mistakeResult}>
-              <FileDown size={17} />
-              下载PDF
-            </button>
+            <div className="panel-action-row">
+              <button type="button" className="ghost-action" onClick={downloadMistakePdf} disabled={!mistakeResult}>
+                <FileDown size={17} />
+                下载PDF
+              </button>
+            </div>
           </div>
           {mistakeResult ? (
-            <MistakeReportView report={mistakeResult} />
+            <>
+              <MistakeReportView report={mistakeResult} />
+              <MistakeFollowUpThread items={mistakeFollowUps} status={mistakeAiStatus} />
+              <div className="mistake-reset-row">
+                <button type="button" className="primary-action" onClick={resetMistakeWorkspace}>
+                  <Plus size={17} />
+                  开始新的错题
+                </button>
+              </div>
+            </>
           ) : mistakeAiStatus === "loading" ? (
             <div className="mistake-empty-result">
               <Loader2 className="spin" size={28} />
@@ -7946,6 +8113,34 @@ function MistakeReportView({ report }) {
         </section>
       )}
     </div>
+  );
+}
+
+function MistakeFollowUpThread({ items = [], status = "idle" }) {
+  const hasItems = Array.isArray(items) && items.length > 0;
+  if (!hasItems && status !== "loading") return null;
+  return (
+    <section className="mistake-follow-up-thread">
+      <h3>继续追问</h3>
+      {items.map((item) => (
+        <article key={item.id} className="mistake-follow-up-item">
+          <div className="mistake-follow-up-question">
+            <strong>学生追问</strong>
+            <p>{item.question}</p>
+          </div>
+          <div className="mistake-follow-up-answer">
+            <strong>AI继续讲解</strong>
+            <StructuredMistakeText text={item.answer} />
+          </div>
+        </article>
+      ))}
+      {status === "loading" && (
+        <div className="mistake-follow-up-loading">
+          <Loader2 className="spin" size={18} />
+          <span>AI正在继续讲这道题...</span>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -8112,8 +8307,10 @@ function ModernKnowledgeNotePage({
   knowledgeQuestion,
   setKnowledgeQuestion,
   knowledgeNote,
+  knowledgeRevisionHistory,
   generateKnowledgeNote,
   downloadKnowledgeImage,
+  resetKnowledgeNote,
   status,
   useTemplate,
   setUseTemplate,
@@ -8139,42 +8336,46 @@ function ModernKnowledgeNotePage({
               className="knowledge-topic-input"
               value={knowledgeQuestion}
               onChange={(event) => setKnowledgeQuestion(event.target.value)}
-              placeholder="例如：动物细胞结构、光合作用、二次函数图像、牛顿第一定律……"
+              placeholder={hasKnowledgeImage ? "写下修改意见，例如：重点更突出一点、加入易错提醒、颜色清淡一点。" : "例如：动物细胞结构、光合作用、二次函数图像、牛顿第一定律……"}
             />
-            <div className={useTemplate ? "knowledge-template-panel is-active" : "knowledge-template-panel"}>
-              <div className="knowledge-template-header">
-                <div>
-                  <span className="eyebrow">提示词模板</span>
-                  <h3>专业知识图提示词模板</h3>
+            {!hasKnowledgeImage && (
+              <div className={useTemplate ? "knowledge-template-panel is-active" : "knowledge-template-panel"}>
+                <div className="knowledge-template-header">
+                  <div>
+                    <span className="eyebrow">提示词模板</span>
+                    <h3>专业知识图提示词模板</h3>
+                  </div>
+                  <span>{useTemplate ? "已套用到本次生成" : "可查看，可修改"}</span>
                 </div>
-                <span>{useTemplate ? "已套用到本次生成" : "可查看，可修改"}</span>
+                <textarea
+                  value={promptTemplate}
+                  onChange={(event) => setPromptTemplate(event.target.value)}
+                  placeholder="这里可以放入知识图提示词模板，点击套用后会和上方主题一起用于生成。"
+                />
               </div>
-              <textarea
-                value={promptTemplate}
-                onChange={(event) => setPromptTemplate(event.target.value)}
-                placeholder="这里可以放入知识图提示词模板，点击套用后会和上方主题一起用于生成。"
-              />
-            </div>
+            )}
           </div>
           <div className="knowledge-actions">
             <button type="button" className="primary-action knowledge-generate-action" onClick={generateKnowledgeNote} disabled={status === "loading"}>
               {status === "loading" ? <Loader2 className="spin" size={19} /> : <Sparkles size={19} />}
-              {status === "loading" ? "AI正在生成" : "AI生成知识图"}
+              {status === "loading" ? (hasKnowledgeImage ? "AI正在修改" : "AI正在生成") : (hasKnowledgeImage ? "修改当前知识图" : "AI生成知识图")}
             </button>
-            <button
-              type="button"
-              className={useTemplate ? "template-action is-active" : "template-action"}
-              onClick={() => {
-                setUseTemplate((prev) => {
-                  if (!prev && !promptTemplate.trim()) setPromptTemplate(defaultKnowledgePromptTemplate);
-                  return !prev;
-                });
-              }}
-              aria-pressed={useTemplate}
-            >
-              <Sparkles size={18} />
-              {useTemplate ? "已套用模板" : "套用知识图模板"}
-            </button>
+            {!hasKnowledgeImage && (
+              <button
+                type="button"
+                className={useTemplate ? "template-action is-active" : "template-action"}
+                onClick={() => {
+                  setUseTemplate((prev) => {
+                    if (!prev && !promptTemplate.trim()) setPromptTemplate(defaultKnowledgePromptTemplate);
+                    return !prev;
+                  });
+                }}
+                aria-pressed={useTemplate}
+              >
+                <Sparkles size={18} />
+                {useTemplate ? "已套用模板" : "套用知识图模板"}
+              </button>
+            )}
           </div>
         </div>
       </section>
@@ -8186,10 +8387,18 @@ function ModernKnowledgeNotePage({
               <span className="eyebrow">图片预览</span>
               <h2>{knowledgeNote.title || "生成后显示知识图"}</h2>
             </div>
-            <button type="button" className="preview-download-button" onClick={downloadKnowledgeImage} disabled={!hasKnowledgeImage}>
-              <Download size={17} />
-              下载图片
-            </button>
+            <div className="panel-action-row">
+              <button type="button" className="preview-download-button" onClick={downloadKnowledgeImage} disabled={!hasKnowledgeImage}>
+                <Download size={17} />
+                下载图片
+              </button>
+              {hasKnowledgeImage && (
+                <button type="button" className="ghost-action" onClick={resetKnowledgeNote}>
+                  <Plus size={17} />
+                  新建知识图
+                </button>
+              )}
+            </div>
           </div>
           <div className="knowledge-image-frame">
             {hasKnowledgeImage ? (
@@ -8201,6 +8410,14 @@ function ModernKnowledgeNotePage({
               </div>
             )}
           </div>
+          {knowledgeRevisionHistory?.length > 0 && (
+            <div className="knowledge-revision-list">
+              <h3>修改记录</h3>
+              {knowledgeRevisionHistory.map((item, index) => (
+                <p key={item.id}>{index + 1}. {item.request}</p>
+              ))}
+            </div>
+          )}
         </article>
 
         <aside className="panel knowledge-points-panel">
