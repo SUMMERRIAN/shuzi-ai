@@ -2982,8 +2982,8 @@ p {
 .statement-entry-layout {
   display: grid;
   width: 100%;
-  max-width: 1680px;
-  grid-template-columns: minmax(720px, 1fr) minmax(320px, 380px);
+  max-width: none;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
   align-items: stretch;
   gap: 18px;
 }
@@ -2991,6 +2991,7 @@ p {
 .statement-entry-layout .statement-input-panel,
 .statement-entry-layout .statement-guide-panel {
   min-height: 620px;
+  min-width: 0;
 }
 
 .statement-guide-panel {
@@ -6197,8 +6198,8 @@ audio {
 
 .statement-focus-layout {
   width: 100%;
-  max-width: 1680px;
-  margin: 0 auto;
+  max-width: none;
+  margin: 0;
 }
 
 .combination-add {
@@ -6220,7 +6221,7 @@ audio {
 
 .statement-long-box textarea {
   width: 100%;
-  min-height: 370px;
+  min-height: 430px;
   max-height: 520px;
   overflow-y: auto;
   padding: 14px;
@@ -6232,16 +6233,17 @@ audio {
 }
 
 .statement-archive-panel {
-  max-width: 1680px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
 }
 
 .statement-archive-panel .record-list-wide {
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
 }
 
 .statement-archive-panel .record-list-wide article {
-  min-height: 160px;
+  min-height: 180px;
 }
 
 .profile-overall-grid {
