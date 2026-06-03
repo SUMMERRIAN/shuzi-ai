@@ -6157,7 +6157,7 @@ function ModernStatementPage({
       )}
 
       {activeStatementTab === "archive" && (
-        <section className="panel">
+        <section className="panel statement-archive-panel">
           <div className="panel-heading">
             <div>
               <span className="eyebrow">个人档案记录</span>
