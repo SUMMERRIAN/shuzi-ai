@@ -3873,6 +3873,13 @@ audio {
   color: #48534d;
 }
 
+.save-inline-note {
+  margin: 0;
+  color: #008653;
+  font-size: 13px;
+  font-weight: 900;
+}
+
 .mini-list {
   display: grid;
   gap: 6px;
@@ -4077,6 +4084,18 @@ audio {
   font-weight: 950;
 }
 
+.strategy-student-box > .strategy-box-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.strategy-box-head b {
+  font-size: 18px;
+}
+
 .strategy-advice-box p {
   margin-bottom: 0;
   color: #344039;
@@ -4187,6 +4206,11 @@ audio {
 .task-card label:nth-of-type(4) textarea,
 .task-card label:nth-of-type(5) textarea {
   min-height: 86px;
+}
+
+.task-card-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .flow-map {

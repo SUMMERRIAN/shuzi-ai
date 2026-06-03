@@ -1903,7 +1903,7 @@ function App() {
   const [currentStep, setCurrentStep] = useState(() => readDraftValue("questionnaireStep", 0));
   const [answers, setAnswers] = useState(() => readDraftValue("questionnaire", defaultAnswers));
   const [submitted, setSubmitted] = useState(false);
-  const [lastSaved, setLastSaved] = useState(() => (readDraftValue("questionnaire", null) ? "已恢复上次填写记录" : "尚未保存"));
+  const [lastSaved, setLastSaved] = useState("尚未保存");
   const [questionnaireArchives, setQuestionnaireArchives] = useState([]);
   const [questionnairePreview, setQuestionnairePreview] = useState(null);
   const [profileArchives, setProfileArchives] = useState([]);
@@ -1934,11 +1934,14 @@ function App() {
   ]);
   const [aiStatus, setAiStatus] = useState("idle");
   const [aiInsight, setAiInsight] = useState(() => readDraftValue("profile", null));
+  const [profileSaveStatus, setProfileSaveStatus] = useState("");
+  const [profileSelfArchive, setProfileSelfArchive] = useState(null);
   const [activeSubject, setActiveSubject] = useState("数学");
   const [strategyWorkspaces, setStrategyWorkspaces] = useState(() =>
     readDraftValue("strategy", Object.fromEntries(strategySubjects.map((subject) => [subject, createSubjectWorkspace(subject)])))
   );
   const [strategyAiStatus, setStrategyAiStatus] = useState("");
+  const [strategySaveStatus, setStrategySaveStatus] = useState("");
   const savedPlanDraft = readDraftValue("plan", null);
   const [planRows, setPlanRows] = useState(() => normalizePlanRows(savedPlanDraft?.planRows || defaultPlanRows));
   const [planNote, setPlanNote] = useState(savedPlanDraft?.planNote || "本周计划按默认作息生成：早晨7点前15-20分钟、课间最多10分钟轻任务、晚自习一节课、回家后约90分钟；学生可以按真实作息自行修改。");
@@ -2111,7 +2114,11 @@ function App() {
   }, [activePage, member.isLoggedIn]);
 
   useEffect(() => {
-    if (member.isLoggedIn && ["strategy", "plan"].includes(activePage)) loadProfileArchives();
+    if (member.isLoggedIn && ["profile", "strategy", "plan"].includes(activePage)) loadProfileArchives({ applyLatest: activePage === "profile" });
+  }, [activePage, member.isLoggedIn]);
+
+  useEffect(() => {
+    if (member.isLoggedIn && activePage === "profile") loadProfileSelfArchive();
   }, [activePage, member.isLoggedIn]);
 
   useEffect(() => {
@@ -2181,12 +2188,43 @@ function App() {
     }
   }
 
-  async function loadProfileArchives() {
+  function mapProfileArchiveToInsight(record) {
+    const profile = record?.report?.profile || record?.profile || {};
+    if (!profile || !Object.keys(profile).length) return null;
+    return {
+      summary: profile.summary || "AI已完成学情综合分析。",
+      core: profile.core || profile.core_problem || "当前需要继续区分问题主要来自基础、方法、习惯、动力还是情绪压力。",
+      reasons: Array.isArray(profile.reasons) ? profile.reasons : [],
+      evidence: Array.isArray(profile.evidence) ? profile.evidence : [],
+      tags: Array.isArray(profile.tags) ? profile.tags : [],
+      questions: Array.isArray(profile.questions) ? profile.questions : [],
+      next: profile.next || "建议先补充关键证据，再进入学习任务制定。",
+      archiveConclusion: profile.archiveConclusion || profile.archive_conclusion || "已根据当前档案形成阶段性学情判断。",
+      scores: profile.scores || {},
+      source: record?.id || "",
+    };
+  }
+
+  async function loadProfileArchives({ applyLatest = false } = {}) {
     try {
       const data = await apiRequest("/archive/learning-profiles");
-      setProfileArchives(data.records || []);
+      const records = data.records || [];
+      setProfileArchives(records);
+      if (applyLatest && records[0]) {
+        const latest = mapProfileArchiveToInsight(records[0]);
+        if (latest) setAiInsight(latest);
+      }
     } catch (error) {
       setAccountNotice(error.message || "学情画像档案暂时无法读取。");
+    }
+  }
+
+  async function loadProfileSelfArchive() {
+    try {
+      const data = await apiRequest("/archive/profile-self");
+      setProfileSelfArchive(data.record || null);
+    } catch (error) {
+      setAccountNotice(error.message || "学生自我画像暂时无法读取。");
     }
   }
 
@@ -2212,9 +2250,50 @@ function App() {
     if (feature === "strategy") return { ...base, profileId: sourceSelection.profileId || "latest" };
     return {
       ...base,
-      profileId: sourceSelection.profileId || "latest",
       strategyId: sourceSelection.strategyId || "latest",
     };
+  }
+
+  async function saveProfileSelfArchive({ selfPortrait, selfAssessment }) {
+    if (!requireMemberAction("保存学生自我画像", () => saveProfileSelfArchive({ selfPortrait, selfAssessment }), "学生自我画像会保存到云端，并作为后续AI参考，需要会员权限。")) return;
+    try {
+      await apiRequest("/archive/profile-self", {
+        method: "POST",
+        body: JSON.stringify({ selfPortrait, selfAssessment }),
+      });
+      setProfileSaveStatus("学生自我画像已保存到云端。");
+      await loadProfileSelfArchive();
+    } catch (error) {
+      setProfileSaveStatus(error.message || "学生自我画像保存失败。");
+    }
+  }
+
+  async function saveStrategyNoteArchive(subject) {
+    const note = strategyWorkspaces[subject]?.studentStrategy || "";
+    if (!requireMemberAction("保存学习任务补充说明", () => saveStrategyNoteArchive(subject), "学习任务补充说明会保存到云端，供后续AI制定学习计划参考。")) return;
+    try {
+      await apiRequest("/archive/strategy-note", {
+        method: "POST",
+        body: JSON.stringify({ subject, note }),
+      });
+      setStrategySaveStatus(`${subject}补充说明已保存。`);
+    } catch (error) {
+      setStrategySaveStatus(error.message || "学习任务补充说明保存失败。");
+    }
+  }
+
+  async function saveStrategyTaskArchive(subject, task) {
+    if (!requireMemberAction("保存学习任务", () => saveStrategyTaskArchive(subject, task), "学习任务会保存到云端，供后续AI制定学习计划参考。")) return;
+    try {
+      await apiRequest("/archive/strategy-task", {
+        method: "POST",
+        body: JSON.stringify({ subject, task }),
+      });
+      setStrategySaveStatus(`${subject}任务“${task.title || "未命名任务"}”已保存。`);
+      await loadStrategyArchives();
+    } catch (error) {
+      setStrategySaveStatus(error.message || "学习任务保存失败。");
+    }
   }
 
   async function removeQuestionnaireArchive(record) {
@@ -3146,6 +3225,7 @@ function App() {
         source: JSON.stringify(prompt),
       });
       setAiStatus("done");
+      await loadProfileArchives();
     } catch (error) {
       showAiError(error, "AI暂时没有完成学情画像分析，请稍后再试。");
       setAiStatus("idle");
@@ -3258,7 +3338,6 @@ function App() {
     const archiveSnapshot = buildPlanArchiveSnapshot({
       answers,
       records,
-      aiInsight,
       strategies: strategyWorkspaces,
       plans: { planRows, methodFocusRows, habitFocusRows },
       dailyReflections: dailyReflectionArchive,
@@ -3631,6 +3710,7 @@ function App() {
         aiNote: result.ai_note || "AI已根据当前学情画像生成本学科学习任务建议。",
       }));
       setStrategyAiStatus("AI建议已生成");
+      await loadStrategyArchives();
     } catch (error) {
       showAiError(error, "AI暂时没有完成学习任务建议，请稍后再试。");
       setStrategyAiStatus("AI建议暂不可用");
@@ -4093,6 +4173,9 @@ function App() {
             statementArchives={records}
             sourceSelection={sourceSelection}
             updateSourceSelection={updateSourceSelection}
+            profileSelfArchive={profileSelfArchive}
+            saveProfileSelfArchive={saveProfileSelfArchive}
+            profileSaveStatus={profileSaveStatus}
           />
         )}
 
@@ -4117,6 +4200,9 @@ function App() {
             profileArchives={profileArchives}
             sourceSelection={sourceSelection}
             updateSourceSelection={updateSourceSelection}
+            saveStrategyNoteArchive={saveStrategyNoteArchive}
+            saveStrategyTaskArchive={saveStrategyTaskArchive}
+            strategySaveStatus={strategySaveStatus}
           />
         )}
 
@@ -4145,7 +4231,6 @@ function App() {
             updateWeeklyDiscussion={updateWeeklyDiscussion}
             questionnaireArchives={questionnaireArchives}
             statementArchives={records}
-            profileArchives={profileArchives}
             strategyArchives={strategyArchives}
             sourceSelection={sourceSelection}
             updateSourceSelection={updateSourceSelection}
@@ -5763,10 +5848,6 @@ function QuestionnairePage({
               <h2>{step.title}</h2>
               <p>{step.description}</p>
             </div>
-            <div className="save-state">
-              <Save size={16} />
-              {lastSaved}
-            </div>
           </div>
 
           {step.sensitive && <div className="soft-note">这些问题只用于帮助你理解状态，不是为了批评你。你可以真实填写。</div>}
@@ -6185,10 +6266,6 @@ function ModernStatementPage({
         </div>
         <div className="hero-action-stack">
           <MessageStat records={records.length} />
-          <button type="button" className="ghost-action clear-page-action" onClick={clearStatementDraft}>
-            <Trash2 size={17} />
-            清空填写记录
-          </button>
         </div>
       </div>
 
@@ -6256,6 +6333,10 @@ function ModernStatementPage({
                 <button className="primary-action" onClick={saveStatement}>
                   <Save size={18} />
                   保存
+                </button>
+                <button type="button" className="ghost-action" onClick={clearStatementDraft}>
+                  <Trash2 size={17} />
+                  清空填写记录
                 </button>
               </div>
             </section>
@@ -6466,16 +6547,16 @@ function ArchiveSourceSelectors({
 }) {
   const groups = [
     {
-      key: "questionnaireId",
-      label: "学情问卷",
-      records: questionnaireArchives,
-      optionLabel: (record) => `${formatArchiveDate(record.createdAt)} · 完成度 ${record.completion || 0}%`,
-    },
-    {
       key: "statementId",
       label: "学情陈述",
       records: statementArchives,
       optionLabel: (record) => `${formatArchiveDate(record.createdAt || record.time)} · ${record.title || "文字陈述"}`,
+    },
+    {
+      key: "questionnaireId",
+      label: "学情问卷",
+      records: questionnaireArchives,
+      optionLabel: (record) => `${formatArchiveDate(record.createdAt)} · 完成度 ${record.completion || 0}%`,
     },
   ];
   if (includeProfile) {
@@ -6529,10 +6610,19 @@ function ModernProfilePage({
   statementArchives,
   sourceSelection,
   updateSourceSelection,
+  profileSelfArchive,
+  saveProfileSelfArchive,
+  profileSaveStatus,
 }) {
   const studentName = answers.name || "这位同学";
   const [selfAssessment, setSelfAssessment] = useState({});
   const [selfPortrait, setSelfPortrait] = useState("");
+
+  useEffect(() => {
+    if (!profileSelfArchive) return;
+    setSelfAssessment(profileSelfArchive.selfAssessment || {});
+    setSelfPortrait(profileSelfArchive.selfPortrait || "");
+  }, [profileSelfArchive?.id]);
 
   function updateSelfAssessment(title, field, value) {
     setSelfAssessment((prev) => ({
@@ -6557,10 +6647,6 @@ function ModernProfilePage({
             <strong>{submitted ? "已提交" : `${completion}%`}</strong>
             <span>问卷状态</span>
           </div>
-          <button type="button" className="ghost-action clear-page-action" onClick={clearProfileDraft}>
-            <Trash2 size={17} />
-            清空填写记录
-          </button>
         </div>
       </div>
 
@@ -6666,12 +6752,19 @@ function ModernProfilePage({
         </div>
 
         <section className="student-portrait-box">
-          <div>
-            <span className="eyebrow">学生自我画像</span>
-            <h3>我眼中的自己</h3>
-            <p>学生可以写下自己对学习状态、优势、困难和希望改变之处的理解。</p>
+          <div className="panel-heading-row">
+            <div>
+              <span className="eyebrow">学生自我画像</span>
+              <h3>我眼中的自己</h3>
+              <p>学生可以写下自己对学习状态、优势、困难和希望改变之处的理解。</p>
+            </div>
+            <button type="button" className="primary-action" onClick={() => saveProfileSelfArchive({ selfPortrait, selfAssessment })}>
+              <Save size={17} />
+              保存自我画像
+            </button>
           </div>
           <textarea value={selfPortrait} onChange={(event) => setSelfPortrait(event.target.value)} placeholder="例如：我觉得自己不是不想学，而是不知道怎么开始；我希望先把数学错题和晚上计划执行做好。" />
+          {profileSaveStatus && <p className="save-inline-note">{profileSaveStatus}</p>}
         </section>
       </section>
     </section>
@@ -6696,6 +6789,9 @@ function StrategyDesignPage({
   profileArchives,
   sourceSelection,
   updateSourceSelection,
+  saveStrategyNoteArchive,
+  saveStrategyTaskArchive,
+  strategySaveStatus,
 }) {
   const workspace = workspaces[activeSubject];
   const studentName = answers.name || "这位同学";
@@ -6709,7 +6805,7 @@ function StrategyDesignPage({
           <span className="eyebrow">学习任务</span>
           <h2>先把这个科目的学习任务安排清楚</h2>
           <p>
-            这一页以学情问卷、学情陈述和学情画像为基础，由AI先生成本学科任务建议，再由学生整理成自己能执行、能检查的具体学习任务。
+            这一页优先参考学生自己的学情陈述，再结合学情问卷和学情画像，由AI先生成本学科任务建议，再由学生整理成自己能执行、能检查的具体学习任务。
           </p>
         </div>
         <div className="hero-action-stack">
@@ -6771,35 +6867,40 @@ function StrategyDesignPage({
             includeProfile
           />
 
-          {hasStrategySuggestion && (
-            <div className="strategy-advice-box">
-              <div className="strategy-advice-head">
-                <div>
-                  <span className="eyebrow">AI学习任务建议</span>
-                  <strong>{workspace.acceptedStrategy ? "已接受当前建议" : "等待学生确认"}</strong>
-                </div>
-              </div>
-              <textarea
-                className="strategy-textarea strategy-suggestion-textarea"
-                value={isGeneratingStrategy ? "AI正在结合学情画像、学情陈述和当前科目生成学习任务建议..." : workspace.taskSuggestion || workspace.strategySuggestion}
-                readOnly
-                aria-label={`${activeSubject}AI学习任务建议`}
-              />
-              <div className="ai-action-row">
-                <button type="button" className="ghost-action" onClick={acceptStrategySuggestion} disabled={!(workspace.taskSuggestion || workspace.strategySuggestion) || isGeneratingStrategy}>
-                  <CheckCircle2 size={17} />
-                  接受建议
-                </button>
-                <button type="button" className="ghost-action" onClick={runStrategyAi} disabled={isGeneratingStrategy}>
-                  <WandSparkles size={17} />
-                  重新生成
-                </button>
+          <div className="strategy-advice-box">
+            <div className="strategy-advice-head">
+              <div>
+                <span className="eyebrow">AI学习任务建议</span>
+                <strong>{workspace.acceptedStrategy ? "已接受当前建议" : hasStrategySuggestion ? "等待学生确认" : "等待生成"}</strong>
               </div>
             </div>
-          )}
+            <textarea
+              className="strategy-textarea strategy-suggestion-textarea"
+              value={isGeneratingStrategy ? "AI正在结合学情陈述、学情问卷、学生自我画像和当前科目生成学习任务建议..." : workspace.taskSuggestion || workspace.strategySuggestion || ""}
+              readOnly
+              placeholder="点击“AI学习任务建议”后，这里会显示AI生成的学习任务建议。"
+              aria-label={`${activeSubject}AI学习任务建议`}
+            />
+            <div className="ai-action-row">
+              <button type="button" className="ghost-action" onClick={acceptStrategySuggestion} disabled={!(workspace.taskSuggestion || workspace.strategySuggestion) || isGeneratingStrategy}>
+                <CheckCircle2 size={17} />
+                接受建议
+              </button>
+              <button type="button" className="ghost-action" onClick={runStrategyAi} disabled={isGeneratingStrategy}>
+                <WandSparkles size={17} />
+                重新生成
+              </button>
+            </div>
+          </div>
 
           <label className="strategy-student-box">
-            <span>我对学习任务的补充说明</span>
+            <span className="strategy-box-head">
+              <b>我对学习任务的补充说明</b>
+              <button type="button" className="ghost-action is-compact" onClick={() => saveStrategyNoteArchive(activeSubject)}>
+                <Save size={15} />
+                保存
+              </button>
+            </span>
             <textarea
               className="strategy-textarea"
               value={workspace.studentStrategy}
@@ -6808,6 +6909,7 @@ function StrategyDesignPage({
               aria-label={`${activeSubject}学生自己的学习任务补充`}
             />
           </label>
+          {strategySaveStatus && <p className="save-inline-note">{strategySaveStatus}</p>}
         </article>
       </section>
 
@@ -6853,6 +6955,12 @@ function StrategyDesignPage({
                 <span>完成标准</span>
                 <textarea value={task.standard} onChange={(event) => updateStrategyTask(task.id, "standard", event.target.value)} />
               </label>
+              <div className="task-card-actions">
+                <button type="button" className="ghost-action is-compact" onClick={() => saveStrategyTaskArchive(activeSubject, task)}>
+                  <Save size={15} />
+                  保存任务
+                </button>
+              </div>
             </article>
           ))}
         </div>
@@ -6886,7 +6994,6 @@ function StudyPlanPage({
   updateWeeklyDiscussion,
   questionnaireArchives,
   statementArchives,
-  profileArchives,
   strategyArchives,
   sourceSelection,
   updateSourceSelection,
@@ -6907,10 +7014,6 @@ function StudyPlanPage({
             <strong>{planRows.length}</strong>
             <span>计划时间行</span>
           </div>
-          <button type="button" className="ghost-action clear-page-action" onClick={clearPlanDraft}>
-            <Trash2 size={17} />
-            清空填写记录
-          </button>
         </div>
       </div>
 
@@ -6949,11 +7052,9 @@ function StudyPlanPage({
             <ArchiveSourceSelectors
               questionnaireArchives={questionnaireArchives}
               statementArchives={statementArchives}
-              profileArchives={profileArchives}
               strategyArchives={strategyArchives}
               sourceSelection={sourceSelection}
               updateSourceSelection={updateSourceSelection}
-              includeProfile
               includeStrategy
             />
 

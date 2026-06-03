@@ -2332,6 +2332,96 @@ app.get("/api/archive/strategy-suggestions", requireAuth, async (req, res, next)
   }
 });
 
+app.get("/api/archive/profile-self", requireAuth, async (req, res, next) => {
+  try {
+    const student = await getPrimaryStudent(req.user);
+    const row = (
+      await query(
+        `SELECT id, payload, created_at
+         FROM student_archive_events
+         WHERE student_id = $1 AND user_id = $2 AND event_type = 'profile_self_portrait'
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [student.id, req.user.id]
+      )
+    ).rows[0];
+    res.json({
+      record: row
+        ? {
+            id: row.id,
+            selfPortrait: row.payload?.selfPortrait || "",
+            selfAssessment: row.payload?.selfAssessment || {},
+            createdAt: row.created_at,
+          }
+        : null,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/archive/profile-self", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    const student = await getPrimaryStudent(req.user);
+    const { selfPortrait = "", selfAssessment = {} } = req.body || {};
+    if (!String(selfPortrait).trim() && !Object.keys(selfAssessment || {}).length) {
+      return res.status(400).json({ error: "PROFILE_SELF_EMPTY", message: "请先填写学生自我画像。" });
+    }
+    const row = (
+      await query(
+        `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
+         VALUES ($1, $2, 'profile_self_portrait', '学生自我画像', $3)
+         RETURNING id, payload, created_at`,
+        [student.id, req.user.id, JSON.stringify({ selfPortrait, selfAssessment })]
+      )
+    ).rows[0];
+    res.json({ saved: { id: row.id, createdAt: row.created_at } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/archive/strategy-note", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    const student = await getPrimaryStudent(req.user);
+    const { subject = "", note = "" } = req.body || {};
+    if (!String(note).trim()) return res.status(400).json({ error: "STRATEGY_NOTE_EMPTY", message: "请先填写学习任务补充说明。" });
+    const row = (
+      await query(
+        `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
+         VALUES ($1, $2, 'student_strategy_note', $3, $4)
+         RETURNING id, payload, created_at`,
+        [student.id, req.user.id, `${subject || "学科"}学习任务补充说明`, JSON.stringify({ subject, note })]
+      )
+    ).rows[0];
+    res.json({ saved: { id: row.id, createdAt: row.created_at } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/archive/strategy-task", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    const student = await getPrimaryStudent(req.user);
+    const { subject = "", task = {} } = req.body || {};
+    if (!String(task.title || "").trim()) return res.status(400).json({ error: "STRATEGY_TASK_EMPTY", message: "请先填写任务标题。" });
+    const row = (
+      await query(
+        `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
+         VALUES ($1, $2, 'student_strategy_task', $3, $4)
+         RETURNING id, payload, created_at`,
+        [student.id, req.user.id, `${subject || "学科"}学习任务：${task.title}`, JSON.stringify({ subject, task })]
+      )
+    ).rows[0];
+    res.json({ saved: { id: row.id, createdAt: row.created_at } });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/archive", requireAuth, async (req, res) => {
   const student = (await query("SELECT * FROM students WHERE user_id = $1 ORDER BY created_at ASC LIMIT 1", [req.user.id])).rows[0];
   if (!student) return res.json({ events: [] });
@@ -2880,24 +2970,60 @@ async function buildArchiveSnapshotFromSourceIds({ feature, student, userId, sou
     idSql:
       "SELECT id, subject, scene, content, guided_answers, created_at FROM student_statements WHERE student_id = $1 AND user_id = $2 AND id = $3 LIMIT 1",
   });
-  const profile = await resolveSelectedRow({
-    studentId: student.id,
-    userId,
-    id: sourceIds.profileId,
-    latestSql:
-      "SELECT id, report, created_at FROM student_learning_profiles WHERE student_id = $1 AND user_id = $2 ORDER BY created_at DESC LIMIT 1",
-    idSql:
-      "SELECT id, report, created_at FROM student_learning_profiles WHERE student_id = $1 AND user_id = $2 AND id = $3 LIMIT 1",
-  });
-  const strategy = await resolveSelectedRow({
-    studentId: student.id,
-    userId,
-    id: sourceIds.strategyId,
-    latestSql:
-      "SELECT id, title, payload, created_at FROM student_archive_events WHERE student_id = $1 AND user_id = $2 AND event_type = 'subject_strategy_ai' ORDER BY created_at DESC LIMIT 1",
-    idSql:
-      "SELECT id, title, payload, created_at FROM student_archive_events WHERE student_id = $1 AND user_id = $2 AND event_type = 'subject_strategy_ai' AND id = $3 LIMIT 1",
-  });
+  let profile = null;
+  if (feature === "strategy") {
+    profile = await resolveSelectedRow({
+      studentId: student.id,
+      userId,
+      id: sourceIds.profileId,
+      latestSql:
+        "SELECT id, report, created_at FROM student_learning_profiles WHERE student_id = $1 AND user_id = $2 ORDER BY created_at DESC LIMIT 1",
+      idSql:
+        "SELECT id, report, created_at FROM student_learning_profiles WHERE student_id = $1 AND user_id = $2 AND id = $3 LIMIT 1",
+    });
+  }
+  let strategy = null;
+  if (feature === "study-plan") {
+    strategy = await resolveSelectedRow({
+      studentId: student.id,
+      userId,
+      id: sourceIds.strategyId,
+      latestSql:
+        "SELECT id, title, payload, created_at FROM student_archive_events WHERE student_id = $1 AND user_id = $2 AND event_type = 'subject_strategy_ai' ORDER BY created_at DESC LIMIT 1",
+      idSql:
+        "SELECT id, title, payload, created_at FROM student_archive_events WHERE student_id = $1 AND user_id = $2 AND event_type = 'subject_strategy_ai' AND id = $3 LIMIT 1",
+    });
+  }
+  const profileSelf = (
+    await query(
+      `SELECT id, payload, created_at
+       FROM student_archive_events
+       WHERE student_id = $1 AND user_id = $2 AND event_type = 'profile_self_portrait'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [student.id, userId]
+    )
+  ).rows[0] || null;
+  const studentStrategyNote = (
+    await query(
+      `SELECT id, payload, created_at
+       FROM student_archive_events
+       WHERE student_id = $1 AND user_id = $2 AND event_type = 'student_strategy_note'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [student.id, userId]
+    )
+  ).rows[0] || null;
+  const studentStrategyTasks = (
+    await query(
+      `SELECT id, payload, created_at
+       FROM student_archive_events
+       WHERE student_id = $1 AND user_id = $2 AND event_type = 'student_strategy_task'
+       ORDER BY created_at DESC
+       LIMIT 20`,
+      [student.id, userId]
+    )
+  ).rows;
   const answers = questionnaire?.answers || fallback.questionnaire || {};
   const selectedStatement = statement
     ? [
@@ -2916,9 +3042,16 @@ async function buildArchiveSnapshotFromSourceIds({ feature, student, userId, sou
   const selectedSources = {
     questionnaire: sourceMeta("学情问卷", questionnaire),
     statement: sourceMeta("学情陈述", statement),
-    profile: sourceMeta("学情画像", profile),
-    strategy: sourceMeta("学习任务建议", strategy),
+    profileSelf: sourceMeta("学生自我画像", profileSelf),
+    studentStrategyNote: sourceMeta("学生任务补充说明", studentStrategyNote),
+    studentStrategyTasks: studentStrategyTasks.map((row) => sourceMeta("学生保存任务", row)),
   };
+  if (feature === "strategy") {
+    selectedSources.profile = sourceMeta("学情画像", profile);
+  }
+  if (feature === "study-plan") {
+    selectedSources.strategy = sourceMeta("学习任务建议", strategy);
+  }
   const studentBase = {
     name: answers?.name || student.name || "",
     grade: answers?.grade || student.grade || "",
@@ -2935,6 +3068,8 @@ async function buildArchiveSnapshotFromSourceIds({ feature, student, userId, sou
       questionnaireMeta: selectedSources.questionnaire,
       statements: selectedStatement,
       statementMeta: selectedSources.statement,
+      studentSelfPortrait: profileSelf?.payload || null,
+      sourcePriority: ["学情陈述等学生原始表达", "学情问卷", "学生自我画像"],
       dailyReflections: fallback.dailyReflections || [],
       weeklyDiscussions: fallback.weeklyDiscussions || [],
     };
@@ -2944,10 +3079,12 @@ async function buildArchiveSnapshotFromSourceIds({ feature, student, userId, sou
       ...fallback,
       sourceMode: "selected_archive_ids",
       selectedSources,
+      sourcePriority: ["学情陈述等学生原始表达", "学情问卷", "学生自我画像", "学情画像AI结果"],
       student: studentBase,
       subject: subject || fallback.subject || "",
       profile: profile?.report?.profile || profile?.report || fallback.profile || null,
       profileMeta: selectedSources.profile,
+      studentSelfPortrait: profileSelf?.payload || null,
       questionnaireSummary: {
         weakSubjects: answers?.weakSubjects || [],
         coreProblemText: answers?.coreProblemText || "",
@@ -2962,9 +3099,8 @@ async function buildArchiveSnapshotFromSourceIds({ feature, student, userId, sou
       ...fallback,
       sourceMode: "selected_archive_ids",
       selectedSources,
+      sourcePriority: ["学情陈述等学生原始表达", "学情问卷", "学生保存的学习任务", "AI学习任务建议"],
       student: studentBase,
-      profile: profile?.report?.profile || profile?.report || fallback.profile || null,
-      profileMeta: selectedSources.profile,
       questionnaireSummary: {
         weakSubjects: answers?.weakSubjects || [],
         coreProblemText: answers?.coreProblemText || "",
@@ -2974,6 +3110,8 @@ async function buildArchiveSnapshotFromSourceIds({ feature, student, userId, sou
       statementMeta: selectedSources.statement,
       strategies: strategy?.payload?.result || fallback.strategies || null,
       strategyMeta: selectedSources.strategy,
+      studentStrategyNote: studentStrategyNote?.payload || null,
+      studentStrategyTasks: studentStrategyTasks.map((row) => row.payload?.task).filter(Boolean),
     };
   }
   return fallback;
@@ -3098,7 +3236,7 @@ app.post("/api/ai/strategy", requireAuth, async (req, res, next) => {
             {
               role: "system",
               content:
-                "你是树子AI的学习任务设计老师，服务中国大陆应试教育场景。你只负责为当前科目生成一组可执行的学习任务建议，不负责周计划、不分析错题图片、不生成资料推荐、不修改单个任务。必须结合学生的学情问卷、学情陈述、学情画像、学生补充说明和当前科目，判断学生在预习、上课、作业、错题、复习、巩固、试卷分析、方法训练等学习链条中的薄弱环节。数学、语文、英语、物理、化学等科目要按学科特点设计任务，不能只给一个笼统任务。每个任务必须具体、可执行、可检查，不能写空话，例如“多刷题”“认真复习”。返回严格 JSON，全部使用中文。",
+                "你是树子AI的学习任务设计老师，服务中国大陆应试教育场景。你只负责为当前科目生成一组可执行的学习任务建议，不负责周计划、不分析错题图片、不生成资料推荐、不修改单个任务。引用资料有明确优先级：第一优先读学生自己写的原始表达，尤其是学情陈述和任务补充；第二优先读学情问卷；第三才参考学生自我画像和AI学情画像。必须结合这些资料和当前科目，判断学生在预习、上课、作业、错题、复习、巩固、试卷分析、方法训练等学习链条中的薄弱环节。数学、语文、英语、物理、化学等科目要按学科特点设计任务，不能只给一个笼统任务。每个任务必须具体、可执行、可检查，不能写空话，例如“多刷题”“认真复习”。返回严格 JSON，全部使用中文。",
             },
             {
               role: "user",
@@ -3175,7 +3313,7 @@ app.post("/api/ai/study-plan", requireAuth, async (req, res, next) => {
             {
               role: "system",
               content:
-                "你是树子AI的学习计划制定老师，服务中国大陆中学生应试学习场景。你只负责把已经确认的学情画像、学习任务、方法习惯目标和默认可用时间安排成一份可修改的周学习计划。不要重新诊断学情，不要分析错题图片，不要生成相似题，不要写长篇报告。计划必须具体、可执行、可检查，并且不能把任务排得过满。返回严格 JSON，全部使用中文。",
+                "你是树子AI的学习计划制定老师，服务中国大陆中学生应试学习场景。你只负责把学情问卷、学情陈述、已保存学习任务、方法习惯目标和默认可用时间安排成一份可修改的周学习计划。不要引用或复述学情画像结果，不要重新诊断学情，不要分析错题图片，不要生成相似题，不要写长篇报告。计划必须具体、可执行、可检查，并且不能把任务排得过满。返回严格 JSON，全部使用中文。",
             },
             {
               role: "user",

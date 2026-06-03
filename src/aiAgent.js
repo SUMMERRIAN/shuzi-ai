@@ -82,8 +82,8 @@ export const aiTaskPrompts = {
   plan: {
     name: "学习计划制定",
     scope:
-      "只根据已确认学情画像、学习任务、默认可用时间规则、方法训练和习惯培养目标，生成可修改的周学习计划。",
-    mustUse: ["学情画像", "学习任务", "默认可用时间规则", "方法习惯目标"],
+      "只根据学情问卷、学情陈述、已保存学习任务、默认可用时间规则、方法训练和习惯培养目标，生成可修改的周学习计划。",
+    mustUse: ["学情问卷", "学情陈述", "学习任务", "默认可用时间规则", "方法习惯目标"],
     mustNot: ["重新诊断学情", "生成科目策略长报告", "分析错题图片", "生成相似题"],
     output: "JSON: note, rows, method_focus_suggestions, habit_focus_suggestions, execution_notes",
   },
@@ -170,7 +170,6 @@ export function buildStrategyArchiveSnapshot({
 export function buildPlanArchiveSnapshot({
   answers = {},
   records = [],
-  aiInsight = null,
   strategies = null,
   plans = null,
   dailyReflections = [],
@@ -178,12 +177,11 @@ export function buildPlanArchiveSnapshot({
 } = {}) {
   return {
     policy: {
-      basis: "根据已确认学情画像、学习任务、默认可用时间规则和方法习惯目标制定计划。没有明确作息时，不要求学生额外填写时间，先按默认中学生学习日节奏生成可修改计划。",
+      basis: "根据学情问卷、学情陈述、已保存学习任务、默认可用时间规则和方法习惯目标制定计划。没有明确作息时，不要求学生额外填写时间，先按默认中学生学习日节奏生成可修改计划。",
       excluded: ["错题图片分析", "知识图生成", "学习社区内容", "资料库文件内容"],
     },
     defaultTimePolicy: defaultStudyPlanTimePolicy,
     student: studentBase(answers),
-    profile: aiInsight,
     recentStatements: records || [],
     dailyReflections,
     weeklyDiscussions,
