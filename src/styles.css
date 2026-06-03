@@ -4809,28 +4809,86 @@ audio {
   gap: 16px;
 }
 
-.weekly-archive-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  align-items: start;
-}
-
-.weekly-archive-grid h3 {
-  margin-bottom: 2px;
-  font-size: 18px;
-}
-
-.weekly-archive-body {
+.weekly-archive-list {
   display: grid;
   gap: 12px;
-  padding: 0 14px 14px;
 }
 
-.weekly-archive-body > p {
+.weekly-archive-week {
+  border: 1px solid #dfe5da;
+  border-radius: 8px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.weekly-archive-week summary {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 70px;
+  padding: 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.weekly-archive-week summary::-webkit-details-marker {
+  display: none;
+}
+
+.weekly-archive-week[open] summary {
+  border-bottom: 1px solid #dfe5da;
+  background: #f7f9f4;
+}
+
+.weekly-archive-week[open] summary svg:last-child {
+  transform: rotate(180deg);
+}
+
+.weekly-archive-scroll {
+  display: grid;
+  gap: 14px;
+  max-height: 560px;
+  overflow: auto;
+  padding: 14px;
+}
+
+.weekly-archive-entry {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #e3e9e4;
+  border-radius: 8px;
+  background: #fbfcfa;
+}
+
+.weekly-archive-entry h4,
+.weekly-archive-entry h5 {
+  margin: 0;
+}
+
+.weekly-archive-entry h4 {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #102018;
+  font-size: 17px;
+}
+
+.weekly-archive-entry h5,
+.weekly-archive-focus h5 {
+  color: #008653;
+  font-size: 15px;
+}
+
+.weekly-archive-entry > p {
   margin: 0;
   color: #344039;
-  line-height: 1.7;
+}
+
+.weekly-archive-focus {
+  display: grid;
+  gap: 8px;
 }
 
 .reflection-table {
@@ -7117,7 +7175,6 @@ audio {
   .time-pickers,
   .free-time-summary,
   .weekly-focus-grid,
-  .weekly-archive-grid,
   .discussion-grid,
   .study-section-tabs,
   .download-card-grid,

@@ -1901,7 +1901,11 @@ function App() {
     message: "",
   });
   const [currentStep, setCurrentStep] = useState(() => readDraftValue("questionnaireStep", 0));
-  const [answers, setAnswers] = useState(() => readDraftValue("questionnaire", defaultAnswers));
+  const [answers, setAnswers] = useState(() => {
+    const saved = readDraftValue("questionnaire", null);
+    if (!saved) return emptyAnswers;
+    return JSON.stringify(saved) === JSON.stringify(defaultAnswers) ? emptyAnswers : saved;
+  });
   const [submitted, setSubmitted] = useState(false);
   const [lastSaved, setLastSaved] = useState("尚未保存");
   const [questionnaireArchives, setQuestionnaireArchives] = useState([]);
@@ -7455,9 +7459,84 @@ function summarizePlanArchive(payload = {}) {
   return { taskCount, methodCount, habitCount };
 }
 
+function startOfArchiveWeek(value) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return new Date();
+  const start = new Date(date);
+  const day = start.getDay() || 7;
+  start.setDate(start.getDate() - day + 1);
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
+function formatArchiveShortDate(value) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return "未记录日期";
+  return date.toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" });
+}
+
+function formatArchiveWeekRange(start) {
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  return `${formatArchiveShortDate(start)} 至 ${formatArchiveShortDate(end)}`;
+}
+
+function groupWeeklyLearningRecords(records = []) {
+  const groups = new Map();
+  records.forEach((record) => {
+    const start = startOfArchiveWeek(record.createdAt);
+    const key = start.toISOString().slice(0, 10);
+    if (!groups.has(key)) {
+      groups.set(key, { key, start, planRecords: [], reflectionRecords: [] });
+    }
+    const group = groups.get(key);
+    if (record.type === "weekly_plan_archive") group.planRecords.push(record);
+    if (record.type === "weekly_reflection_archive") group.reflectionRecords.push(record);
+  });
+  const ascending = Array.from(groups.values()).sort((a, b) => a.start - b.start);
+  const indexByKey = new Map(ascending.map((group, index) => [group.key, index + 1]));
+  return ascending
+    .reverse()
+    .map((group) => ({
+      ...group,
+      weekNumber: indexByKey.get(group.key),
+      planRecords: group.planRecords.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)),
+      reflectionRecords: group.reflectionRecords.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)),
+    }));
+}
+
+function focusArchiveRows(rows = []) {
+  return rows.filter((row) => row.enabled || row.custom || row.customTitle || Object.values(row.scores || {}).some(Boolean));
+}
+
+function focusArchiveTitle(row) {
+  if (isCustomFocusItem(row.item) && row.customTitle) return row.customTitle;
+  return row.item || "未命名训练";
+}
+
+function FocusArchiveList({ title, rows = [] }) {
+  const visibleRows = focusArchiveRows(rows);
+  if (!visibleRows.length) return null;
+  return (
+    <div className="weekly-archive-focus">
+      <h5>{title}</h5>
+      <div className="archive-answer-table">
+        {visibleRows.map((row) => (
+          <div key={row.id || focusArchiveTitle(row)}>
+            <strong>{focusArchiveTitle(row)}</strong>
+            <p>
+              {row.custom || "未填写具体说明"}
+              {Object.values(row.scores || {}).some(Boolean) ? `\n评分：${Object.entries(row.scores || {}).filter(([, score]) => score).map(([day, score]) => `${day}${score}`).join("、")}` : ""}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function WeeklyLearningArchivePanel({ records = [] }) {
-  const planRecords = records.filter((record) => record.type === "weekly_plan_archive");
-  const reflectionRecords = records.filter((record) => record.type === "weekly_reflection_archive");
+  const weeklyGroups = groupWeeklyLearningRecords(records);
   return (
     <section className="panel weekly-archive-panel">
       <div className="panel-heading">
@@ -7475,90 +7554,105 @@ function WeeklyLearningArchivePanel({ records = [] }) {
         </article>
       )}
 
-      <div className="weekly-archive-grid">
-        <div className="archive-section-stack">
-          <h3>学习计划档案</h3>
-          {planRecords.map((record) => {
-            const summary = summarizePlanArchive(record.payload);
-            return (
-              <details className="archive-section-card is-open" key={record.id}>
-                <summary className="archive-section-toggle">
-                  <span className="archive-section-index"><CalendarDays size={16} /></span>
-                  <span className="archive-section-copy">
-                    <strong>{formatArchiveDate(record.createdAt)}</strong>
-                    <small>{summary.taskCount} 个计划任务 · {summary.methodCount} 个方法训练 · {summary.habitCount} 个习惯训练</small>
-                  </span>
-                  <ChevronDown size={18} />
-                </summary>
-                <div className="weekly-archive-body">
-                  {record.payload?.planNote && <p>{record.payload.planNote}</p>}
-                  <div className="archive-answer-table">
-                    {(record.payload?.planRows || []).map((row, rowIndex) =>
-                      weekDays.map((day) => {
-                        const cell = row.cells?.[day] || {};
-                        if (!String(cell.task || "").trim() && !String(cell.note || "").trim()) return null;
-                        return (
-                          <div key={`${rowIndex}-${day}`}>
-                            <strong>{day} · {cell.start || "--"} 至 {cell.end || "--"}</strong>
-                            <p>{cell.task || "未填写任务"}{cell.note ? `\n备注：${cell.note}` : ""}</p>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              </details>
-            );
-          })}
-        </div>
-
-        <div className="archive-section-stack">
-          <h3>反思与讨论档案</h3>
-          {reflectionRecords.map((record) => {
-            const daily = record.payload?.dailyReflectionArchive || [];
+      <div className="weekly-archive-list">
+        {weeklyGroups.map((group) => {
+          const planSummary = group.planRecords.reduce(
+            (summary, record) => {
+              const item = summarizePlanArchive(record.payload);
+              return {
+                taskCount: summary.taskCount + item.taskCount,
+                methodCount: summary.methodCount + item.methodCount,
+                habitCount: summary.habitCount + item.habitCount,
+              };
+            },
+            { taskCount: 0, methodCount: 0, habitCount: 0 }
+          );
+          const reflectionCount = group.reflectionRecords.reduce((count, record) => {
             const weekly = record.payload?.weeklyDiscussionArchive || {};
-            return (
-              <details className="archive-section-card is-open" key={record.id}>
-                <summary className="archive-section-toggle">
-                  <span className="archive-section-index"><FileText size={16} /></span>
-                  <span className="archive-section-copy">
-                    <strong>{formatArchiveDate(record.createdAt)}</strong>
-                    <small>{daily.length} 条每日反思 · {(weekly.discussions || []).length} 条每周讨论</small>
-                  </span>
-                  <ChevronDown size={18} />
-                </summary>
-                <div className="weekly-archive-body">
-                  <div className="archive-answer-table">
-                    {daily.map((entry) => (
-                      <div key={entry.item}>
-                        <strong>{entry.item}</strong>
-                        <p>{entry.note || "未填写备注"}</p>
+            return count + (record.payload?.dailyReflectionArchive || []).length + (weekly.discussions || []).length + (weekly.problems || []).length;
+          }, 0);
+          return (
+            <details className="weekly-archive-week" key={group.key}>
+              <summary>
+                <span className="archive-section-index">{group.weekNumber}</span>
+                <span className="archive-section-copy">
+                  <strong>第 {group.weekNumber} 周学习档案 · {formatArchiveWeekRange(group.start)}</strong>
+                  <small>
+                    {group.planRecords.length ? `学习计划 ${group.planRecords.length} 份 · ${planSummary.taskCount} 个计划任务 · ${planSummary.methodCount + planSummary.habitCount} 个重点训练` : "未保存学习计划"}
+                    {" ｜ "}
+                    {group.reflectionRecords.length ? `反思讨论 ${group.reflectionRecords.length} 份 · ${reflectionCount} 条记录` : "未保存反思讨论"}
+                  </small>
+                </span>
+                <ChevronDown size={18} />
+              </summary>
+              <div className="weekly-archive-scroll">
+                {group.planRecords.map((record) => (
+                  <article className="weekly-archive-entry" key={record.id}>
+                    <h4><CalendarDays size={17} /> 学习计划档案 · {formatArchiveDate(record.createdAt)}</h4>
+                    {record.payload?.planNote && <p>{record.payload.planNote}</p>}
+                    <h5>本周学习计划</h5>
+                    <div className="archive-answer-table">
+                      {(record.payload?.planRows || []).map((row, rowIndex) =>
+                        weekDays.map((day) => {
+                          const cell = row.cells?.[day] || {};
+                          if (!String(cell.task || "").trim() && !String(cell.note || "").trim()) return null;
+                          return (
+                            <div key={`${record.id}-${rowIndex}-${day}`}>
+                              <strong>{day} · {cell.start || "--"} 至 {cell.end || "--"}</strong>
+                              <p>{cell.task || "未填写任务"}{cell.note ? `\n备注：${cell.note}` : ""}</p>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                    <FocusArchiveList title="本周重点训练的学习方法" rows={record.payload?.methodFocusRows || []} />
+                    <FocusArchiveList title="本周重点培养的学习习惯" rows={record.payload?.habitFocusRows || []} />
+                  </article>
+                ))}
+
+                {group.reflectionRecords.map((record) => {
+                  const daily = record.payload?.dailyReflectionArchive || [];
+                  const weekly = record.payload?.weeklyDiscussionArchive || {};
+                  return (
+                    <article className="weekly-archive-entry" key={record.id}>
+                      <h4><FileText size={17} /> 反思与讨论档案 · {formatArchiveDate(record.createdAt)}</h4>
+                      <h5>每日反思</h5>
+                      <div className="archive-answer-table">
+                        {daily.map((entry) => (
+                          <div key={entry.item}>
+                            <strong>{entry.item}</strong>
+                            <p>{entry.note || "未填写备注"}</p>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                    {(weekly.stateScores || []).map((entry) => (
-                      <div key={entry.item}>
-                        <strong>{entry.item}：{entry.score || "-"}</strong>
-                        <p>{entry.note || "未填写备注"}</p>
+                      <h5>每周讨论</h5>
+                      <div className="archive-answer-table">
+                        {(weekly.stateScores || []).map((entry) => (
+                          <div key={entry.item}>
+                            <strong>{entry.item}：{entry.score || "-"}</strong>
+                            <p>{entry.note || "未填写备注"}</p>
+                          </div>
+                        ))}
+                        {(weekly.discussions || []).map((entry) => (
+                          <div key={entry.step}>
+                            <strong>{entry.step}</strong>
+                            <p>{entry.content}</p>
+                          </div>
+                        ))}
+                        {(weekly.problems || []).map((entry) => (
+                          <div key={entry.topic}>
+                            <strong>{entry.topic}</strong>
+                            <p>{entry.content}</p>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                    {(weekly.discussions || []).map((entry) => (
-                      <div key={entry.step}>
-                        <strong>{entry.step}</strong>
-                        <p>{entry.content}</p>
-                      </div>
-                    ))}
-                    {(weekly.problems || []).map((entry) => (
-                      <div key={entry.topic}>
-                        <strong>{entry.topic}</strong>
-                        <p>{entry.content}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </details>
-            );
-          })}
-        </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </details>
+          );
+        })}
       </div>
     </section>
   );
@@ -8517,15 +8611,26 @@ function CompactTimePicker({ value, onChange }) {
 }
 
 function calculateCompletion(answers, steps) {
-  const allQuestions = steps.flatMap((step) => step.questions);
+  const allQuestions = steps.flatMap((step) => step.questions || []);
   const answered = allQuestions.filter((question) => {
     const value = answers[question.id];
-    if (question.type === "scoreTable") return value && Object.keys(value).length > 0;
-    if (question.type === "scoreMatrix" || question.type === "yesNoGrid") return value && Object.keys(value).length > 0;
+    if (question.type === "scoreTable") {
+      return Object.values(value || {}).some((item) => String(item?.score || "").trim() || String(item?.total || "").trim());
+    }
+    if (question.type === "scoreMatrix") {
+      return Object.values(value || {}).some((item) => String(item || "").trim() && String(item) !== "0");
+    }
+    if (question.type === "yesNoGrid") {
+      return Object.values(value || {}).some((item) => String(item || "").trim());
+    }
+    if (question.type === "scale") {
+      return value !== undefined && value !== null && String(value).trim() !== "" && String(value) !== "0";
+    }
     if (Array.isArray(value)) return value.length > 0;
-    return value !== undefined && value !== "";
+    if (value && typeof value === "object") return Object.values(value).some((item) => String(item || "").trim());
+    return value !== undefined && value !== null && String(value).trim() !== "";
   }).length;
-  return Math.round((answered / allQuestions.length) * 100);
+  return allQuestions.length ? Math.round((answered / allQuestions.length) * 100) : 0;
 }
 
 createRoot(document.getElementById("root")).render(<App />);
