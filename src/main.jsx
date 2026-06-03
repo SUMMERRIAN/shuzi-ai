@@ -1946,6 +1946,8 @@ function App() {
   const [planRows, setPlanRows] = useState(() => normalizePlanRows(savedPlanDraft?.planRows || defaultPlanRows));
   const [planNote, setPlanNote] = useState(savedPlanDraft?.planNote || "本周计划按默认作息生成：早晨7点前15-20分钟、课间最多10分钟轻任务、晚自习一节课、回家后约90分钟；学生可以按真实作息自行修改。");
   const [planAiStatus, setPlanAiStatus] = useState("idle");
+  const [weeklyArchiveStatus, setWeeklyArchiveStatus] = useState("");
+  const [weeklyLearningArchives, setWeeklyLearningArchives] = useState([]);
   const [methodFocusRows, setMethodFocusRows] = useState(() => savedPlanDraft?.methodFocusRows || createFocusRows("method", methodTrainingOptions));
   const [habitFocusRows, setHabitFocusRows] = useState(() => savedPlanDraft?.habitFocusRows || createFocusRows("habit", habitTrainingOptions));
   const [dailyReflectionDraft, setDailyReflectionDraft] = useState(() => createDailyReflectionDraft(savedPlanDraft?.dailyReflectionDraft));
@@ -2126,6 +2128,10 @@ function App() {
   }, [activePage, member.isLoggedIn]);
 
   useEffect(() => {
+    if (member.isLoggedIn && activePage === "plan") loadWeeklyLearningArchives();
+  }, [activePage, member.isLoggedIn]);
+
+  useEffect(() => {
     if (activePage === "library" && member.isLoggedIn) loadLibraryItems();
   }, [activePage, member.isLoggedIn, libraryView, libraryFolderId, librarySort, librarySortDir]);
 
@@ -2293,6 +2299,48 @@ function App() {
       await loadStrategyArchives();
     } catch (error) {
       setStrategySaveStatus(error.message || "学习任务保存失败。");
+    }
+  }
+
+  async function loadWeeklyLearningArchives() {
+    try {
+      const data = await apiRequest("/archive/weekly-learning");
+      setWeeklyLearningArchives(data.records || []);
+    } catch (error) {
+      setAccountNotice(error.message || "每周学习档案暂时无法读取。");
+    }
+  }
+
+  async function saveWeeklyPlanArchive() {
+    if (!requireMemberAction("保存学习计划档案", saveWeeklyPlanArchive, "学习计划档案会保存到云端，需要会员权限。")) return;
+    try {
+      await apiRequest("/archive/weekly-plan", {
+        method: "POST",
+        body: JSON.stringify({ planRows, planNote, methodFocusRows, habitFocusRows }),
+      });
+      setWeeklyArchiveStatus("本周学习计划档案已保存。");
+      await loadWeeklyLearningArchives();
+    } catch (error) {
+      setWeeklyArchiveStatus(error.message || "本周学习计划档案保存失败。");
+    }
+  }
+
+  async function saveWeeklyReflectionArchive() {
+    if (!requireMemberAction("保存本周反思和讨论", saveWeeklyReflectionArchive, "本周反思和讨论会保存到云端，需要会员权限。")) return;
+    try {
+      await apiRequest("/archive/weekly-reflection", {
+        method: "POST",
+        body: JSON.stringify({
+          dailyReflectionDraft,
+          weeklyDiscussionDraft,
+          dailyReflectionArchive,
+          weeklyDiscussionArchive,
+        }),
+      });
+      setWeeklyArchiveStatus("本周反思和讨论已保存。");
+      await loadWeeklyLearningArchives();
+    } catch (error) {
+      setWeeklyArchiveStatus(error.message || "本周反思和讨论保存失败。");
     }
   }
 
@@ -4234,6 +4282,10 @@ function App() {
             strategyArchives={strategyArchives}
             sourceSelection={sourceSelection}
             updateSourceSelection={updateSourceSelection}
+            weeklyLearningArchives={weeklyLearningArchives}
+            weeklyArchiveStatus={weeklyArchiveStatus}
+            saveWeeklyPlanArchive={saveWeeklyPlanArchive}
+            saveWeeklyReflectionArchive={saveWeeklyReflectionArchive}
           />
         )}
 
@@ -6264,9 +6316,6 @@ function ModernStatementPage({
           <h2>先让学生把问题说完整，再进入个人学习档案</h2>
           <p>学生可以选择主题和发生场景，把学习中的真实困扰写清楚；保存后的内容会进入个人学情档案，后续用于学情画像、学习任务和学习计划。</p>
         </div>
-        <div className="hero-action-stack">
-          <MessageStat records={records.length} />
-        </div>
       </div>
 
       <div className="statement-subtabs" role="tablist" aria-label="学情陈述分区">
@@ -6642,12 +6691,6 @@ function ModernProfilePage({
           <h2>先给出整体学习分析，再展开每个画像项目</h2>
           <p>报告同时面向学生和家长：先看整体判断，再查看成绩、方法、习惯、动机、情绪精力等细分维度。</p>
         </div>
-        <div className="hero-action-stack">
-          <div className="progress-card">
-            <strong>{submitted ? "已提交" : `${completion}%`}</strong>
-            <span>问卷状态</span>
-          </div>
-        </div>
       </div>
 
       <section className="panel report-panel">
@@ -6807,16 +6850,6 @@ function StrategyDesignPage({
           <p>
             这一页优先参考学生自己的学情陈述，再结合学情问卷和学情画像，由AI先生成本学科任务建议，再由学生整理成自己能执行、能检查的具体学习任务。
           </p>
-        </div>
-        <div className="hero-action-stack">
-          <div className="strategy-status">
-            <strong>{activeSubject}</strong>
-            <span>{strategyAiStatus || "等待AI学习任务建议"}</span>
-          </div>
-          <button type="button" className="ghost-action clear-page-action" onClick={clearStrategyDraft}>
-            <Trash2 size={17} />
-            清空填写记录
-          </button>
         </div>
       </div>
 
@@ -6997,6 +7030,10 @@ function StudyPlanPage({
   strategyArchives,
   sourceSelection,
   updateSourceSelection,
+  weeklyLearningArchives,
+  weeklyArchiveStatus,
+  saveWeeklyPlanArchive,
+  saveWeeklyReflectionArchive,
 }) {
   const [activeStudySection, setActiveStudySection] = useState("plan");
   return (
@@ -7009,12 +7046,6 @@ function StudyPlanPage({
             计划表参考学习计划本的结构：横排是星期，每个格子里竖着填写时间、任务和备注。时间用选择器，减少手写混乱，也方便后面让AI读取并优化计划。
           </p>
         </div>
-        <div className="hero-action-stack">
-          <div className="strategy-status">
-            <strong>{planRows.length}</strong>
-            <span>计划时间行</span>
-          </div>
-        </div>
       </div>
 
       <div className="study-section-tabs" role="tablist" aria-label="学习计划页面分区">
@@ -7023,6 +7054,9 @@ function StudyPlanPage({
         </button>
         <button type="button" className={activeStudySection === "reflection" ? "is-active" : ""} onClick={() => setActiveStudySection("reflection")}>
           学习反思与讨论
+        </button>
+        <button type="button" className={activeStudySection === "archive" ? "is-active" : ""} onClick={() => setActiveStudySection("archive")}>
+          每周学习档案
         </button>
       </div>
 
@@ -7035,6 +7069,10 @@ function StudyPlanPage({
                 <h2>每个星期下面都有时间、任务、备注</h2>
               </div>
               <div className="ai-action-row no-print">
+                <button type="button" className="ghost-action" onClick={saveWeeklyPlanArchive}>
+                  <Save size={17} />
+                  保存学习计划档案
+                </button>
                 <button type="button" className="ghost-action" onClick={() => printPage("下载学习计划PDF", "学习计划表和方法习惯训练表可以打印或另存为PDF，需要登录并开通会员后使用。")}>
                   <FileDown size={17} />
                   下载学习计划PDF
@@ -7049,6 +7087,7 @@ function StudyPlanPage({
                 </button>
               </div>
             </div>
+            {weeklyArchiveStatus && <p className="save-inline-note no-print">{weeklyArchiveStatus}</p>}
             <ArchiveSourceSelectors
               questionnaireArchives={questionnaireArchives}
               statementArchives={statementArchives}
@@ -7141,6 +7180,8 @@ function StudyPlanPage({
       {activeStudySection === "reflection" && (
         <ReflectionDiscussionSection
           downloadProtectedFile={downloadProtectedFile}
+          saveWeeklyReflectionArchive={saveWeeklyReflectionArchive}
+          weeklyArchiveStatus={weeklyArchiveStatus}
           dailyReflectionDraft={dailyReflectionDraft}
           weeklyDiscussionDraft={weeklyDiscussionDraft}
           updateDailyReflection={updateDailyReflection}
@@ -7148,6 +7189,10 @@ function StudyPlanPage({
           updateWeeklyState={updateWeeklyState}
           updateWeeklyDiscussion={updateWeeklyDiscussion}
         />
+      )}
+
+      {activeStudySection === "archive" && (
+        <WeeklyLearningArchivePanel records={weeklyLearningArchives} />
       )}
     </section>
   );
@@ -7236,6 +7281,8 @@ function FocusTrainingTable({ title, kind, rows, options, updateFocusRow, update
 
 function ReflectionDiscussionSection({
   downloadProtectedFile,
+  saveWeeklyReflectionArchive,
+  weeklyArchiveStatus,
   dailyReflectionDraft,
   weeklyDiscussionDraft,
   updateDailyReflection,
@@ -7245,6 +7292,19 @@ function ReflectionDiscussionSection({
 }) {
   return (
     <div className="reflection-stack">
+      <section className="panel reflection-save-panel">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">本周保存</span>
+            <h2>保存本周每日反思和每周讨论内容</h2>
+          </div>
+          <button type="button" className="primary-action" onClick={saveWeeklyReflectionArchive}>
+            <Save size={17} />
+            保存本周反思和讨论
+          </button>
+        </div>
+        {weeklyArchiveStatus && <p className="save-inline-note">{weeklyArchiveStatus}</p>}
+      </section>
       <section className="panel">
         <div className="panel-heading">
           <div>
@@ -7382,6 +7442,125 @@ function ReflectionDiscussionSection({
         </div>
       </section>
     </div>
+  );
+}
+
+function summarizePlanArchive(payload = {}) {
+  const rows = Array.isArray(payload.planRows) ? payload.planRows : [];
+  const taskCount = rows.reduce((count, row) => {
+    return count + weekDays.filter((day) => String(row.cells?.[day]?.task || "").trim()).length;
+  }, 0);
+  const methodCount = (payload.methodFocusRows || []).filter((row) => row.enabled).length;
+  const habitCount = (payload.habitFocusRows || []).filter((row) => row.enabled).length;
+  return { taskCount, methodCount, habitCount };
+}
+
+function WeeklyLearningArchivePanel({ records = [] }) {
+  const planRecords = records.filter((record) => record.type === "weekly_plan_archive");
+  const reflectionRecords = records.filter((record) => record.type === "weekly_reflection_archive");
+  return (
+    <section className="panel weekly-archive-panel">
+      <div className="panel-heading">
+        <div>
+          <span className="eyebrow">每周学习档案</span>
+          <h2>查阅过去保存的学习计划、每日反思和每周讨论</h2>
+        </div>
+        <BookOpen size={24} />
+      </div>
+
+      {!records.length && (
+        <article className="archive-card">
+          <strong>还没有每周学习档案</strong>
+          <p>保存学习计划或本周反思讨论后，这里会显示历史记录。</p>
+        </article>
+      )}
+
+      <div className="weekly-archive-grid">
+        <div className="archive-section-stack">
+          <h3>学习计划档案</h3>
+          {planRecords.map((record) => {
+            const summary = summarizePlanArchive(record.payload);
+            return (
+              <details className="archive-section-card is-open" key={record.id}>
+                <summary className="archive-section-toggle">
+                  <span className="archive-section-index"><CalendarDays size={16} /></span>
+                  <span className="archive-section-copy">
+                    <strong>{formatArchiveDate(record.createdAt)}</strong>
+                    <small>{summary.taskCount} 个计划任务 · {summary.methodCount} 个方法训练 · {summary.habitCount} 个习惯训练</small>
+                  </span>
+                  <ChevronDown size={18} />
+                </summary>
+                <div className="weekly-archive-body">
+                  {record.payload?.planNote && <p>{record.payload.planNote}</p>}
+                  <div className="archive-answer-table">
+                    {(record.payload?.planRows || []).map((row, rowIndex) =>
+                      weekDays.map((day) => {
+                        const cell = row.cells?.[day] || {};
+                        if (!String(cell.task || "").trim() && !String(cell.note || "").trim()) return null;
+                        return (
+                          <div key={`${rowIndex}-${day}`}>
+                            <strong>{day} · {cell.start || "--"} 至 {cell.end || "--"}</strong>
+                            <p>{cell.task || "未填写任务"}{cell.note ? `\n备注：${cell.note}` : ""}</p>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </details>
+            );
+          })}
+        </div>
+
+        <div className="archive-section-stack">
+          <h3>反思与讨论档案</h3>
+          {reflectionRecords.map((record) => {
+            const daily = record.payload?.dailyReflectionArchive || [];
+            const weekly = record.payload?.weeklyDiscussionArchive || {};
+            return (
+              <details className="archive-section-card is-open" key={record.id}>
+                <summary className="archive-section-toggle">
+                  <span className="archive-section-index"><FileText size={16} /></span>
+                  <span className="archive-section-copy">
+                    <strong>{formatArchiveDate(record.createdAt)}</strong>
+                    <small>{daily.length} 条每日反思 · {(weekly.discussions || []).length} 条每周讨论</small>
+                  </span>
+                  <ChevronDown size={18} />
+                </summary>
+                <div className="weekly-archive-body">
+                  <div className="archive-answer-table">
+                    {daily.map((entry) => (
+                      <div key={entry.item}>
+                        <strong>{entry.item}</strong>
+                        <p>{entry.note || "未填写备注"}</p>
+                      </div>
+                    ))}
+                    {(weekly.stateScores || []).map((entry) => (
+                      <div key={entry.item}>
+                        <strong>{entry.item}：{entry.score || "-"}</strong>
+                        <p>{entry.note || "未填写备注"}</p>
+                      </div>
+                    ))}
+                    {(weekly.discussions || []).map((entry) => (
+                      <div key={entry.step}>
+                        <strong>{entry.step}</strong>
+                        <p>{entry.content}</p>
+                      </div>
+                    ))}
+                    {(weekly.problems || []).map((entry) => (
+                      <div key={entry.topic}>
+                        <strong>{entry.topic}</strong>
+                        <p>{entry.content}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </details>
+            );
+          })}
+        </div>
+      </div>
+    </section>
   );
 }
 

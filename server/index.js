@@ -2422,6 +2422,84 @@ app.post("/api/archive/strategy-task", requireAuth, async (req, res, next) => {
   }
 });
 
+app.get("/api/archive/weekly-learning", requireAuth, async (req, res, next) => {
+  try {
+    const student = await getPrimaryStudent(req.user);
+    const rows = (
+      await query(
+        `SELECT id, event_type, title, payload, created_at
+         FROM student_archive_events
+         WHERE student_id = $1
+           AND user_id = $2
+           AND event_type IN ('weekly_plan_archive', 'weekly_reflection_archive')
+         ORDER BY created_at DESC
+         LIMIT 80`,
+        [student.id, req.user.id]
+      )
+    ).rows;
+    res.json({
+      records: rows.map((row) => ({
+        id: row.id,
+        type: row.event_type,
+        title: row.title || "",
+        payload: row.payload || {},
+        createdAt: row.created_at,
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/archive/weekly-plan", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    const student = await getPrimaryStudent(req.user);
+    const { planRows = [], planNote = "", methodFocusRows = [], habitFocusRows = [] } = req.body || {};
+    if (!Array.isArray(planRows) || !planRows.length) {
+      return res.status(400).json({ error: "WEEKLY_PLAN_EMPTY", message: "请先填写本周学习计划。" });
+    }
+    const row = (
+      await query(
+        `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
+         VALUES ($1, $2, 'weekly_plan_archive', '本周学习计划档案', $3)
+         RETURNING id, payload, created_at`,
+        [student.id, req.user.id, JSON.stringify({ planRows, planNote, methodFocusRows, habitFocusRows })]
+      )
+    ).rows[0];
+    res.json({ saved: { id: row.id, createdAt: row.created_at } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/archive/weekly-reflection", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    const student = await getPrimaryStudent(req.user);
+    const { dailyReflectionDraft = {}, weeklyDiscussionDraft = {}, dailyReflectionArchive = [], weeklyDiscussionArchive = {} } = req.body || {};
+    const hasDaily = Array.isArray(dailyReflectionArchive) && dailyReflectionArchive.length > 0;
+    const hasWeekly =
+      Array.isArray(weeklyDiscussionArchive?.stateScores) && weeklyDiscussionArchive.stateScores.length > 0
+      || Array.isArray(weeklyDiscussionArchive?.discussions) && weeklyDiscussionArchive.discussions.length > 0
+      || Array.isArray(weeklyDiscussionArchive?.problems) && weeklyDiscussionArchive.problems.length > 0;
+    if (!hasDaily && !hasWeekly) {
+      return res.status(400).json({ error: "WEEKLY_REFLECTION_EMPTY", message: "请先填写本周反思或讨论内容。" });
+    }
+    const row = (
+      await query(
+        `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
+         VALUES ($1, $2, 'weekly_reflection_archive', '本周反思与讨论档案', $3)
+         RETURNING id, payload, created_at`,
+        [student.id, req.user.id, JSON.stringify({ dailyReflectionDraft, weeklyDiscussionDraft, dailyReflectionArchive, weeklyDiscussionArchive })]
+      )
+    ).rows[0];
+    res.json({ saved: { id: row.id, createdAt: row.created_at } });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/archive", requireAuth, async (req, res) => {
   const student = (await query("SELECT * FROM students WHERE user_id = $1 ORDER BY created_at ASC LIMIT 1", [req.user.id])).rows[0];
   if (!student) return res.json({ events: [] });
