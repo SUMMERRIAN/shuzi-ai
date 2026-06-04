@@ -5099,6 +5099,14 @@ audio {
   line-height: 1.65;
 }
 
+.no-answer-mode-note {
+  margin: 0;
+  color: #68736b;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
 .mistake-upload-strip article {
   display: grid;
   grid-template-columns: 46px minmax(160px, 1fr) 30px;

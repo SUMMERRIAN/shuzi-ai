@@ -2004,7 +2004,7 @@ function App() {
     files: [],
   });
   const [noAnswerPrompt, setNoAnswerPrompt] = useState("");
-  const [noAnswerTaskType, setNoAnswerTaskType] = useState("guide");
+  const [noAnswerTaskType, setNoAnswerTaskType] = useState("");
   const [noAnswerQuestionScope, setNoAnswerQuestionScope] = useState("auto");
   const [noAnswerResult, setNoAnswerResult] = useState(null);
   const [noAnswerFollowUps, setNoAnswerFollowUps] = useState([]);
@@ -3778,11 +3778,11 @@ function App() {
 
   function applyNoAnswerQuickTask(taskType) {
     if (!noAnswerQuickTasks[taskType]) return;
-    setNoAnswerTaskType(taskType);
+    setNoAnswerTaskType((current) => (current === taskType ? "" : taskType));
   }
 
   async function runNoAnswerAi() {
-    const taskLabel = noAnswerQuickTasks[noAnswerTaskType]?.label || "AI引导思考";
+    const taskLabel = noAnswerQuickTasks[noAnswerTaskType]?.label || "没有答案自由交流";
     if (!requireMemberAction(taskLabel, runNoAnswerAi, "没有答案会调用AI识别题目并引导思考，需要登录并开通会员。")) return;
     if (noAnswerAiStatus === "loading") return;
     if (!noAnswerPrompt.trim() && !(noAnswerDraft.files || []).length && !noAnswerResult) {
@@ -3795,7 +3795,7 @@ function App() {
       const formData = new FormData();
       const taskPrompt = noAnswerQuickTasks[noAnswerTaskType]?.prompt || "";
       const combinedPrompt = [taskPrompt, noAnswerPrompt.trim()].filter(Boolean).join("\n");
-      formData.append("taskType", noAnswerTaskType || "guide");
+      formData.append("taskType", noAnswerTaskType || "free");
       formData.append("prompt", combinedPrompt);
       formData.append("studentQuestion", noAnswerPrompt.trim());
       formData.append("subject", noAnswerDraft.subject);
@@ -3826,6 +3826,7 @@ function App() {
         setNoAnswerResult(result);
       }
       setNoAnswerPrompt("");
+      setNoAnswerTaskType("");
       setNoAnswerAiStatus("done");
       clearAiNotice();
       void loadAiJobs();
@@ -3850,7 +3851,7 @@ function App() {
       files: [],
     });
     setNoAnswerPrompt("");
-    setNoAnswerTaskType("guide");
+    setNoAnswerTaskType("");
     setNoAnswerQuestionScope("auto");
     setNoAnswerResult(null);
     setNoAnswerFollowUps([]);
@@ -8011,6 +8012,7 @@ function NoAnswerPage({
   noAnswerAiStatus,
   resetNoAnswerWorkspace,
 }) {
+  const activeNoAnswerMode = noAnswerQuickTasks[noAnswerTaskType]?.label || "自由交流";
   return (
     <section className="stack mistake-workspace no-answer-workspace">
       <section className="mistake-ai-stage">
@@ -8100,6 +8102,7 @@ function NoAnswerPage({
           </div>
 
           <div className="mistake-quick-actions">
+            <p className="no-answer-mode-note">当前模式：{activeNoAnswerMode}{noAnswerTaskType ? "；再次点击已选按钮可取消，发送后自动回到自由交流。" : "；直接输入文字时，AI只按你的话继续引导。"}</p>
             {Object.entries(noAnswerQuickTasks).map(([key, task]) => (
               <button
                 key={key}
