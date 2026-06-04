@@ -3426,6 +3426,7 @@ app.post("/api/ai/profile", requireAuth, async (req, res, next) => {
                 "\n2. 再阅读学情陈述，找出学生自己反复提到的真实困扰、场景、情绪和已尝试方法。" +
                 "\n3. 最后形成画像，必须区分证据和推断；不能引用每日反思、每周讨论、学生自我画像或其他页面资料。" +
                 "\n4. evidence 写具体证据，不要写空泛判断；questions 写后续还需要追问的问题。" +
+                "\n5. summary、core、next、archiveConclusion 必须是字符串，不能是对象；reasons、evidence、tags、questions 必须是字符串数组，数组元素不能是对象。" +
                 "\nStudent profile archive snapshot:\n" + JSON.stringify(resolvedArchiveSnapshot),
             },
           ],

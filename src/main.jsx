@@ -2284,21 +2284,55 @@ function App() {
     }
   }
 
+  function normalizeProfileText(value, fallback = "") {
+    if (typeof value === "string") return value.trim() || fallback;
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    if (Array.isArray(value)) return value.map((item) => normalizeProfileText(item, "")).filter(Boolean).join("；") || fallback;
+    if (value && typeof value === "object") {
+      return Object.entries(value)
+        .map(([key, item]) => {
+          const text = normalizeProfileText(item, "");
+          return text ? `${key}：${text}` : "";
+        })
+        .filter(Boolean)
+        .join("；") || fallback;
+    }
+    return fallback;
+  }
+
+  function normalizeProfileList(value) {
+    if (!Array.isArray(value)) return value ? [normalizeProfileText(value, "")].filter(Boolean) : [];
+    return value.map((item) => normalizeProfileText(item, "")).filter(Boolean);
+  }
+
+  function normalizeProfileScores(scores = {}) {
+    if (!scores || typeof scores !== "object" || Array.isArray(scores)) return {};
+    return Object.fromEntries(
+      Object.entries(scores)
+        .map(([key, value]) => [key, Number(value)])
+        .filter(([, value]) => Number.isFinite(value))
+    );
+  }
+
+  function normalizeProfileInsight(profile = {}, source = "") {
+    return {
+      summary: normalizeProfileText(profile.summary, "AI已完成学情综合分析。"),
+      core: normalizeProfileText(profile.core || profile.core_problem, "当前需要继续区分问题主要来自基础、方法、习惯、动力还是情绪压力。"),
+      reasons: normalizeProfileList(profile.reasons),
+      evidence: normalizeProfileList(profile.evidence),
+      tags: normalizeProfileList(profile.tags),
+      questions: normalizeProfileList(profile.questions),
+      next: normalizeProfileText(profile.next, "建议先补充关键证据，再进入学习任务制定。"),
+      archiveConclusion: normalizeProfileText(profile.archiveConclusion || profile.archive_conclusion, "已根据当前档案形成阶段性学情判断。"),
+      scores: normalizeProfileScores(profile.scores),
+      source,
+    };
+  }
+
   function mapProfileArchiveToInsight(record) {
     const profile = record?.report?.profile || record?.profile || {};
     if (!profile || !Object.keys(profile).length) return null;
-    return {
-      summary: profile.summary || "AI已完成学情综合分析。",
-      core: profile.core || profile.core_problem || "当前需要继续区分问题主要来自基础、方法、习惯、动力还是情绪压力。",
-      reasons: Array.isArray(profile.reasons) ? profile.reasons : [],
-      evidence: Array.isArray(profile.evidence) ? profile.evidence : [],
-      tags: Array.isArray(profile.tags) ? profile.tags : [],
-      questions: Array.isArray(profile.questions) ? profile.questions : [],
-      next: profile.next || "建议先补充关键证据，再进入学习任务制定。",
-      archiveConclusion: profile.archiveConclusion || profile.archive_conclusion || "已根据当前档案形成阶段性学情判断。",
-      scores: profile.scores || {},
-      source: record?.id || "",
-    };
+    return normalizeProfileInsight(profile, record?.id || "");
   }
 
   async function loadProfileArchives({ applyLatest = false } = {}) {
@@ -3350,18 +3384,7 @@ function App() {
         body: JSON.stringify({ archiveSnapshot, sourceIds: buildSourceIds("profile") }),
       });
       const profile = data.profile || {};
-      setAiInsight({
-        summary: profile.summary || "AI已完成学情综合分析。",
-        core: profile.core || profile.core_problem || "当前需要继续区分问题主要来自基础、方法、习惯、动力还是情绪压力。",
-        reasons: Array.isArray(profile.reasons) ? profile.reasons : [],
-        evidence: Array.isArray(profile.evidence) ? profile.evidence : [],
-        tags: Array.isArray(profile.tags) ? profile.tags : [],
-        questions: Array.isArray(profile.questions) ? profile.questions : [],
-        next: profile.next || "建议先补充关键证据，再进入学习任务制定。",
-        archiveConclusion: profile.archiveConclusion || profile.archive_conclusion || "已根据当前档案形成阶段性学情判断。",
-        scores: profile.scores || {},
-        source: JSON.stringify(prompt),
-      });
+      setAiInsight(normalizeProfileInsight(profile, JSON.stringify(prompt)));
       setAiStatus("done");
       await loadProfileArchives();
     } catch (error) {
