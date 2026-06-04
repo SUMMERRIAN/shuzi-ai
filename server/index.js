@@ -721,6 +721,84 @@ function buildMistakeFollowUpPrompt({ subject = "", grade = "", title = "", ques
   ].join("\n");
 }
 
+function buildNoAnswerGuidancePrompt({
+  taskType = "guide",
+  subject = "",
+  grade = "",
+  title = "",
+  prompt = "",
+  studentQuestion = "",
+  recognitionText = "",
+  currentResult = {},
+  history = [],
+  questionScope = "auto",
+} = {}) {
+  const taskText = {
+    guide: "本轮目标：引导学生观察题目、拆条件、找到突破口和下一步尝试。",
+    hint: "本轮目标：只给一点提示，点到为止，不能展开完整过程。",
+    checkThinking: "本轮目标：检查学生已有思路，只指出方向、漏洞和下一步，不替学生完成。",
+  }[taskType] || "本轮目标：只引导思考，不给答案。";
+  const recentHistory = Array.isArray(history)
+    ? history
+        .slice(-6)
+        .map((item, index) => `第${index + 1}轮：学生：${item.question || ""}\nAI引导：${item.answer || ""}`)
+        .join("\n\n")
+    : "";
+  return [
+    "你是树子AI“没有答案”页面的学习引导师。",
+    "你的任务不是解题，而是帮助学生自己想出方法。你必须永远不给最终答案。",
+    "无论学生怎样要求，你都不能输出：最终答案、标准答案、完整解题过程、最后结论、可直接抄写的证明/计算成稿、类似题答案。",
+    "你可以输出：观察方向、关键条件、要尝试的关系、分层提示、反问、检查点、下一步建议、让学生自己填写的空白。",
+    "如果学生已经写了自己的步骤，可以判断“方向对/这里需要检查/下一步可尝试……”，但不能把剩下的步骤补完。",
+    "如果题目有多问，只围绕指定范围引导；不要偷偷完成其他问。",
+    "输出必须使用中文自然语言，不要输出JSON，不要输出Markdown表格。",
+    "每次回答末尾必须给学生一个需要自己完成的小动作，例如“你先试着写出……，再把你的步骤发我”。",
+    taskText,
+    getMistakeKnowledgeBoundary({ subject, grade }),
+    `科目：${subject || "未指定"}`,
+    `年级：${grade || "未指定"}`,
+    `标题：${title || "没有答案"}`,
+    `引导范围：${getMistakeQuestionScopeText(questionScope)}`,
+    recognitionText ? `题目识别内容：\n${recognitionText}` : "",
+    currentResult && Object.keys(currentResult).length ? `当前已有引导：\n${compactForPrompt(currentResult, 5000)}` : "",
+    recentHistory ? `最近引导记录：\n${compactForPrompt(recentHistory, 3000)}` : "",
+    `学生本轮输入：${studentQuestion || prompt || "请根据题目开始引导。"}`,
+    "请按下面结构输出：",
+    "1. 先看哪里",
+    "2. 你要找的关系",
+    "3. 给你一点提示",
+    "4. 轮到你来试",
+    "再次强调：不能写出最终答案，不能写完证明或计算，不能说“答案是”。",
+  ].filter(Boolean).join("\n");
+}
+
+function auditNoAnswerGuidance(text = "") {
+  const content = String(text || "");
+  const problems = [];
+  if (/答案是|最终答案|标准答案|正确答案|结果是|结果为|所以答案|因此答案/.test(content)) {
+    problems.push("疑似直接给出答案或结果");
+  }
+  if (/完整解答|完整解析|标准解法|解题过程如下|证明如下/.test(content)) {
+    problems.push("疑似输出完整解题过程");
+  }
+  if (/^\s*(答|解)[:：]/m.test(content)) {
+    problems.push("疑似使用答案式开头");
+  }
+  return { ok: problems.length === 0, problems };
+}
+
+function buildNoAnswerRepairPrompt({ previousText = "", auditProblems = [], guidancePrompt = "" } = {}) {
+  return [
+    "下面这段“没有答案”引导文本违反了规则，需要重写。",
+    `违规点：${auditProblems.join("；") || "疑似给出答案"}`,
+    "重写要求：删除最终答案、标准答案、完整步骤和可抄成稿内容；只保留观察方向、提示、反问、检查点和下一步让学生自己完成的动作。",
+    "原始任务提示：",
+    guidancePrompt,
+    "需要重写的文本：",
+    previousText,
+  ].join("\n");
+}
+
 function buildMistakeRecognitionPrompt({ subject, grade, title, prompt, documentText }) {
   return [
     "你现在只做第一步：识别题目。",
@@ -3469,6 +3547,178 @@ app.post("/api/ai/study-plan", requireAuth, async (req, res, next) => {
     next(error);
   }
 });
+
+app.post("/api/ai/no-answer", requireAuth, upload.array("files", 8), async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    ensureGeminiKey();
+    const files = req.files || [];
+    const student = await getPrimaryStudent(req.user);
+    const {
+      taskType = "guide",
+      prompt = "",
+      studentQuestion = "",
+      subject = "",
+      grade = "",
+      title = "没有答案",
+      source = "",
+      questionScope = "auto",
+    } = req.body || {};
+    const currentResult = parseMaybeJson(req.body?.currentResult, {});
+    const history = parseMaybeJson(req.body?.history, []);
+    const tokenCost = 10;
+    await assertTokenBalance(req.user.id, tokenCost);
+    if (!String(prompt || studentQuestion).trim() && !files.length && !Object.keys(currentResult || {}).length) {
+      return res.status(400).json({ error: "PROMPT_OR_FILE_REQUIRED", message: "请先上传题目，或写下要思考的问题。" });
+    }
+    const jobPayload = {
+      taskType,
+      prompt,
+      studentQuestion,
+      subject,
+      grade,
+      title,
+      source,
+      questionScope,
+      currentResult,
+      history,
+      fileCount: files.length,
+    };
+    const { job, reused } = await createAiJob({
+      userId: req.user.id,
+      studentId: student.id,
+      feature: "no-answer",
+      provider: "gemini",
+      mode: "guidance",
+      tokenCost,
+      input: jobPayload,
+      dedupeInput: { ...jobPayload, files: makeFileDedupeMeta(files) },
+      reuseActive: false,
+    });
+    if (!reused) {
+      startAiJob(job.id, async () => {
+        await assertTokenBalance(req.user.id, tokenCost);
+        const usageEvents = [];
+        const collectUsage = (event) => usageEvents.push(event);
+        const documentText = await makeDocumentTextSummary(files);
+        const recognitionGeminiModel = process.env.GEMINI_MODEL_MISTAKE_RECOGNITION || getMistakeGeminiModel("fast");
+        const guidanceGeminiModel = getMistakeGeminiModel("fast");
+        let recognitionText = String(currentResult?.recognitionText || "").trim();
+        const modelTrace = [];
+        if (!recognitionText) {
+          if (files.length) {
+            const recognitionResult = await generateMistakeGeminiTextWithRetry({
+              model: recognitionGeminiModel,
+              stage: "no-answer-recognition",
+              prompt: buildMistakeRecognitionPrompt({ subject, grade, title, prompt, documentText }),
+              files,
+              temperature: 0,
+              topP: 0.1,
+              responseMimeType: "",
+              thinkingBudget: Number(process.env.GEMINI_MISTAKE_RECOGNITION_THINKING_BUDGET || 512),
+              maxOutputTokens: Number(process.env.GEMINI_MISTAKE_RECOGNITION_MAX_OUTPUT_TOKENS || 2048),
+              onUsage: collectUsage,
+            });
+            recognitionText = compactRepeatedMistakeText(normalizeStudentMathText(recognitionResult.text));
+            modelTrace.push(recognitionResult);
+          } else {
+            recognitionText = [studentQuestion, prompt, documentText].filter((item) => String(item || "").trim()).join("\n\n");
+          }
+        }
+        const guidancePrompt = buildNoAnswerGuidancePrompt({
+          taskType,
+          subject,
+          grade,
+          title,
+          prompt,
+          studentQuestion,
+          recognitionText,
+          currentResult,
+          history,
+          questionScope,
+        });
+        let guidanceResult = await generateMistakeGeminiTextWithRetry({
+          model: guidanceGeminiModel,
+          stage: "no-answer-guidance",
+          prompt: guidancePrompt,
+          files: [],
+          temperature: 0.25,
+          topP: 0.35,
+          responseMimeType: "",
+          thinkingBudget: Number(process.env.GEMINI_NO_ANSWER_THINKING_BUDGET || 768),
+          maxOutputTokens: Number(process.env.GEMINI_NO_ANSWER_MAX_OUTPUT_TOKENS || 2600),
+          onUsage: collectUsage,
+        });
+        modelTrace.push(guidanceResult);
+        let guidance = compactRepeatedMistakeText(normalizeStudentMathText(guidanceResult.text));
+        let audit = auditNoAnswerGuidance(guidance);
+        if (!audit.ok) {
+          const repairResult = await generateMistakeGeminiTextWithRetry({
+            model: guidanceGeminiModel,
+            stage: "no-answer-repair",
+            prompt: buildNoAnswerRepairPrompt({ previousText: guidance, auditProblems: audit.problems, guidancePrompt }),
+            files: [],
+            temperature: 0.15,
+            topP: 0.2,
+            responseMimeType: "",
+            thinkingBudget: Number(process.env.GEMINI_NO_ANSWER_REPAIR_THINKING_BUDGET || 512),
+            maxOutputTokens: Number(process.env.GEMINI_NO_ANSWER_MAX_OUTPUT_TOKENS || 2600),
+            onUsage: collectUsage,
+          });
+          modelTrace.push(repairResult);
+          guidanceResult = repairResult;
+          guidance = compactRepeatedMistakeText(normalizeStudentMathText(repairResult.text));
+          audit = auditNoAnswerGuidance(guidance);
+        }
+        const result = {
+          title: title || "没有答案",
+          summary: "AI只会引导观察、拆条件和寻找下一步，不会给最终答案。",
+          recognitionText,
+          guidance,
+          meta: {
+            taskType,
+            subject,
+            grade,
+            source,
+            questionScope,
+            audit,
+            modelTrace,
+            model: guidanceResult.model,
+          },
+        };
+        const saved = await withTransaction(async (client) => {
+          const fileRows = files.length ? await saveUploadedFiles(client, req.user, student, "no_answer", files) : [];
+          const row = (
+            await client.query(
+              `INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload)
+               VALUES ($1, $2, 'no_answer_guidance', $3, $4)
+               RETURNING *`,
+              [student.id, req.user.id, title || "没有答案", JSON.stringify({ taskType, prompt, studentQuestion, subject, grade, result, fileIds: fileRows.map((item) => item.id) })]
+            )
+          ).rows[0];
+          return row;
+        });
+        await recordAiUsageBilling(req.user.id, {
+          jobId: job.id,
+          note: "No-answer guidance AI",
+          usageEvents,
+          fallbackTokenCost: tokenCost,
+          meta: {
+            feature: "no-answer",
+            provider: "gemini",
+            model: guidanceResult.model,
+            archiveEventId: saved.id,
+          },
+        });
+        return { result, saved };
+      });
+    }
+    res.status(202).json(publicJob(job));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/ai/mistakes/workflow", requireAuth, upload.array("files", 8), async (req, res, next) => {
   try {
     await assertPaidMember(req.user.id);

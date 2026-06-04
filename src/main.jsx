@@ -71,6 +71,7 @@ const subPages = [
   { id: "strategy", label: "学习任务", icon: BookOpen },
   { id: "plan", label: "学习计划", icon: CalendarDays },
   { id: "mistakes", label: "错题专项", icon: Library },
+  { id: "noAnswer", label: "没有答案", icon: Brain },
   { id: "notes", label: "知识笔记", icon: ImageIcon },
   { id: "calendar", label: "学习日历", icon: CalendarDays },
   { id: "library", label: "学习资料库", icon: FolderOpen },
@@ -89,6 +90,7 @@ const aiJobFeatureLabels = {
   "mistake-workflow": "错题专项",
   "mistake-analyze": "错题分析",
   "mistake-practice": "相似题",
+  "no-answer": "没有答案",
   "knowledge-note": "知识图",
   "free-ask": "AI自由问",
 };
@@ -1568,6 +1570,21 @@ const mistakeQuickTasks = {
   },
 };
 
+const noAnswerQuickTasks = {
+  guide: {
+    label: "AI引导思考",
+    prompt: "请只引导我观察题目、找到突破口和下一步尝试，不要给出答案。",
+  },
+  hint: {
+    label: "给我一点提示",
+    prompt: "请只给一层提示，点到为止，不要展开完整过程，也不要给出答案。",
+  },
+  checkThinking: {
+    label: "检查我的思路",
+    prompt: "请检查我写的思路是否正确，只指出方向、漏洞和下一步，不要替我完成答案。",
+  },
+};
+
 const mistakeQuestionScopes = [
   { id: "auto", label: "自动" },
   { id: "q1", label: "第1问" },
@@ -1976,6 +1993,22 @@ function App() {
   const [mistakeResult, setMistakeResult] = useState(null);
   const [mistakeFollowUps, setMistakeFollowUps] = useState([]);
   const [mistakeAiStatus, setMistakeAiStatus] = useState("idle");
+  const [noAnswerDraft, setNoAnswerDraft] = useState({
+    title: "新的思考题目",
+    subject: "数学",
+    grade: "初中三年级",
+    source: "题目/作业/试卷",
+    fileName: "",
+    type: "",
+    previewUrl: "",
+    files: [],
+  });
+  const [noAnswerPrompt, setNoAnswerPrompt] = useState("");
+  const [noAnswerTaskType, setNoAnswerTaskType] = useState("guide");
+  const [noAnswerQuestionScope, setNoAnswerQuestionScope] = useState("auto");
+  const [noAnswerResult, setNoAnswerResult] = useState(null);
+  const [noAnswerFollowUps, setNoAnswerFollowUps] = useState([]);
+  const [noAnswerAiStatus, setNoAnswerAiStatus] = useState("idle");
   const [knowledgeQuestion, setKnowledgeQuestion] = useState("");
   const [knowledgeNote, setKnowledgeNote] = useState(createEmptyKnowledgeNote);
   const [knowledgeRevisionHistory, setKnowledgeRevisionHistory] = useState([]);
@@ -3696,6 +3729,135 @@ function App() {
     clearAiNotice();
   }
 
+  function updateNoAnswerDraft(field, value) {
+    setNoAnswerDraft((prev) => ({ ...prev, [field]: value }));
+  }
+
+  async function handleNoAnswerFile(event) {
+    if (!requireMemberAction("上传题目到没有答案", null, "没有答案会调用AI识别题目并引导思考，需要会员权限。")) {
+      event.target.value = "";
+      return;
+    }
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    const preparedFiles = await Promise.all(files.map(compressMistakeImage));
+    const normalizedFiles = preparedFiles.map((file) => ({
+      id: `${file.name}-${file.size}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      file,
+      name: file.name,
+      type: file.type || "文件",
+      size: file.size,
+      previewUrl: (file.type || "").startsWith("image/") ? URL.createObjectURL(file) : "",
+    }));
+    setNoAnswerDraft((prev) => ({
+      ...prev,
+      fileName: normalizedFiles.map((item) => item.name).join("、"),
+      type: normalizedFiles.length > 1 ? "多文件" : normalizedFiles[0].type,
+      files: [...(prev.files || []), ...normalizedFiles],
+      title: prev.title === "新的思考题目" ? normalizedFiles[0].name.replace(/\.[^.]+$/, "") : prev.title,
+      previewUrl: normalizedFiles[0].previewUrl || prev.previewUrl,
+    }));
+    setNoAnswerResult(null);
+    setNoAnswerFollowUps([]);
+    event.target.value = "";
+  }
+
+  function removeNoAnswerUpload(fileId) {
+    setNoAnswerDraft((prev) => {
+      const removed = (prev.files || []).find((item) => item.id === fileId);
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+      const files = (prev.files || []).filter((item) => item.id !== fileId);
+      return {
+        ...prev,
+        files,
+        fileName: files.map((item) => item.name).join("、"),
+        previewUrl: files.find((item) => item.previewUrl)?.previewUrl || "",
+      };
+    });
+  }
+
+  function applyNoAnswerQuickTask(taskType) {
+    if (!noAnswerQuickTasks[taskType]) return;
+    setNoAnswerTaskType(taskType);
+  }
+
+  async function runNoAnswerAi() {
+    const taskLabel = noAnswerQuickTasks[noAnswerTaskType]?.label || "AI引导思考";
+    if (!requireMemberAction(taskLabel, runNoAnswerAi, "没有答案会调用AI识别题目并引导思考，需要登录并开通会员。")) return;
+    if (noAnswerAiStatus === "loading") return;
+    if (!noAnswerPrompt.trim() && !(noAnswerDraft.files || []).length && !noAnswerResult) {
+      setAiNotice({ page: activePage, message: "请先上传题目，或者在输入框里写清楚你想思考的问题。" });
+      return;
+    }
+    setNoAnswerAiStatus("loading");
+    try {
+      clearAiNotice();
+      const formData = new FormData();
+      const taskPrompt = noAnswerQuickTasks[noAnswerTaskType]?.prompt || "";
+      const combinedPrompt = [taskPrompt, noAnswerPrompt.trim()].filter(Boolean).join("\n");
+      formData.append("taskType", noAnswerTaskType || "guide");
+      formData.append("prompt", combinedPrompt);
+      formData.append("studentQuestion", noAnswerPrompt.trim());
+      formData.append("subject", noAnswerDraft.subject);
+      formData.append("grade", noAnswerDraft.grade);
+      formData.append("questionScope", noAnswerQuestionScope);
+      formData.append("title", noAnswerDraft.title);
+      formData.append("source", noAnswerDraft.source);
+      formData.append("currentResult", JSON.stringify(noAnswerResult || {}));
+      formData.append("history", JSON.stringify(noAnswerFollowUps.slice(-6)));
+      (noAnswerResult ? [] : noAnswerDraft.files || []).forEach((item) => formData.append("files", item.file));
+      const data = await apiRequest("/ai/no-answer", {
+        method: "POST",
+        body: formData,
+        aiJobAttempts: 150,
+        aiJobIntervalMs: 4000,
+      });
+      const result = data.result || {};
+      if (noAnswerResult) {
+        setNoAnswerFollowUps((prev) => [
+          ...prev,
+          {
+            id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            question: noAnswerPrompt.trim() || taskLabel,
+            answer: result.guidance || "AI已给出新的思考提示，请继续尝试。",
+          },
+        ]);
+      } else {
+        setNoAnswerResult(result);
+      }
+      setNoAnswerPrompt("");
+      setNoAnswerAiStatus("done");
+      clearAiNotice();
+      void loadAiJobs();
+    } catch (error) {
+      showAiError(error, "没有答案暂时不可用，请稍后再试。");
+      setNoAnswerAiStatus("idle");
+    }
+  }
+
+  function resetNoAnswerWorkspace() {
+    (noAnswerDraft.files || []).forEach((item) => {
+      if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+    });
+    setNoAnswerDraft({
+      title: "新的思考题目",
+      subject: "数学",
+      grade: "初中三年级",
+      source: "题目/作业/试卷",
+      fileName: "",
+      type: "",
+      previewUrl: "",
+      files: [],
+    });
+    setNoAnswerPrompt("");
+    setNoAnswerTaskType("guide");
+    setNoAnswerQuestionScope("auto");
+    setNoAnswerResult(null);
+    setNoAnswerFollowUps([]);
+    setNoAnswerAiStatus("idle");
+    clearAiNotice();
+  }
+
   function downloadMistakePdf() {
     if (!requireMemberAction("下载错题分析PDF", downloadMistakePdf, "下载AI分析PDF需要登录并开通会员。")) return;
     if (!mistakeResult) {
@@ -4461,6 +4623,26 @@ function App() {
             mistakeAiStatus={mistakeAiStatus}
             downloadMistakePdf={downloadMistakePdf}
             resetMistakeWorkspace={resetMistakeWorkspace}
+          />
+        )}
+
+        {activePage === "noAnswer" && (
+          <NoAnswerPage
+            noAnswerDraft={noAnswerDraft}
+            noAnswerPrompt={noAnswerPrompt}
+            setNoAnswerPrompt={setNoAnswerPrompt}
+            noAnswerTaskType={noAnswerTaskType}
+            noAnswerQuestionScope={noAnswerQuestionScope}
+            setNoAnswerQuestionScope={setNoAnswerQuestionScope}
+            applyNoAnswerQuickTask={applyNoAnswerQuickTask}
+            noAnswerResult={noAnswerResult}
+            noAnswerFollowUps={noAnswerFollowUps}
+            updateNoAnswerDraft={updateNoAnswerDraft}
+            handleNoAnswerFile={handleNoAnswerFile}
+            removeNoAnswerUpload={removeNoAnswerUpload}
+            runNoAnswerAi={runNoAnswerAi}
+            noAnswerAiStatus={noAnswerAiStatus}
+            resetNoAnswerWorkspace={resetNoAnswerWorkspace}
           />
         )}
 
@@ -7810,6 +7992,223 @@ function WeeklyLearningArchivePanel({ records = [] }) {
       </div>
     </section>
   );
+}
+
+function NoAnswerPage({
+  noAnswerDraft,
+  noAnswerPrompt,
+  setNoAnswerPrompt,
+  noAnswerTaskType,
+  noAnswerQuestionScope,
+  setNoAnswerQuestionScope,
+  applyNoAnswerQuickTask,
+  noAnswerResult,
+  noAnswerFollowUps,
+  updateNoAnswerDraft,
+  handleNoAnswerFile,
+  removeNoAnswerUpload,
+  runNoAnswerAi,
+  noAnswerAiStatus,
+  resetNoAnswerWorkspace,
+}) {
+  return (
+    <section className="stack mistake-workspace no-answer-workspace">
+      <section className="mistake-ai-stage">
+        <div className="mistake-chat-shell">
+          <p className="no-answer-intro">上传题目或写下问题，AI只引导你思考，不给最终答案。</p>
+          <div className="mistake-upload-strip">
+            {(noAnswerDraft.files || []).length ? (
+              noAnswerDraft.files.map((item) => (
+                <article key={item.id}>
+                  {item.previewUrl ? <img src={item.previewUrl} alt={item.name} /> : <FileText size={24} />}
+                  <div>
+                    <strong>{item.name}</strong>
+                    <span>{formatBytes(item.size)}</span>
+                  </div>
+                  <button type="button" onClick={() => removeNoAnswerUpload(item.id)} aria-label="移除文件">
+                    <Trash2 size={15} />
+                  </button>
+                </article>
+              ))
+            ) : (
+              <p>可以上传图片、PDF、Word、Excel，也可以只输入问题。</p>
+            )}
+          </div>
+
+          <div className="mistake-meta-row">
+            <label>
+              <span>科目</span>
+              <select value={noAnswerDraft.subject} onChange={(event) => updateNoAnswerDraft("subject", event.target.value)}>
+                {mistakeSubjects.map((subject) => (
+                  <option key={subject} value={subject}>
+                    {subject}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>题目所属年级</span>
+              <select value={noAnswerDraft.grade} onChange={(event) => updateNoAnswerDraft("grade", event.target.value)}>
+                {mistakeGradeOptions.map((grade) => (
+                  <option key={grade} value={grade}>
+                    {grade}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>标题</span>
+              <input value={noAnswerDraft.title} onChange={(event) => updateNoAnswerDraft("title", event.target.value)} />
+            </label>
+          </div>
+
+          <div className="mistake-prompt-box">
+            <label className="mistake-plus-button">
+              <Plus size={22} />
+              <input
+                type="file"
+                multiple
+                accept="image/*,.pdf,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+                onChange={handleNoAnswerFile}
+              />
+            </label>
+            <textarea
+              value={noAnswerPrompt}
+              onChange={(event) => setNoAnswerPrompt(event.target.value)}
+              placeholder={noAnswerResult ? "继续写你的想法或卡住的位置，AI只会继续引导，不给答案。" : "写下题目、你的想法，或上传题目后选择一种引导方式。"}
+            />
+            <button type="button" className="mistake-send-button" onClick={runNoAnswerAi} disabled={noAnswerAiStatus === "loading"}>
+              {noAnswerAiStatus === "loading" ? <Loader2 className="spin" size={20} /> : <Send size={20} />}
+            </button>
+          </div>
+
+          <div className="mistake-scope-actions">
+            <span>引导范围</span>
+            <div>
+              {mistakeQuestionScopes.map((scope) => (
+                <button
+                  key={scope.id}
+                  type="button"
+                  className={noAnswerQuestionScope === scope.id ? "is-active" : ""}
+                  onClick={() => setNoAnswerQuestionScope(scope.id)}
+                >
+                  {scope.label}
+                </button>
+              ))}
+            </div>
+            <p>AI只围绕当前范围提问、提示和检查思路，不给最终答案。</p>
+          </div>
+
+          <div className="mistake-quick-actions">
+            {Object.entries(noAnswerQuickTasks).map(([key, task]) => (
+              <button
+                key={key}
+                type="button"
+                className={noAnswerTaskType === key ? "is-active" : ""}
+                onClick={() => applyNoAnswerQuickTask(key)}
+              >
+                <Sparkles size={16} />
+                {task.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <article className="mistake-result-panel no-answer-result-panel">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">没有答案</span>
+              <h2>{noAnswerResult?.title || "这里只有引导，没有最终答案"}</h2>
+            </div>
+            <div className="panel-action-row">
+              {noAnswerResult && (
+                <button type="button" className="primary-action" onClick={resetNoAnswerWorkspace}>
+                  <Plus size={17} />
+                  开始新的题目
+                </button>
+              )}
+            </div>
+          </div>
+          {noAnswerResult ? (
+            <>
+              <NoAnswerResultView result={noAnswerResult} />
+              <NoAnswerFollowUpThread items={noAnswerFollowUps} status={noAnswerAiStatus} />
+            </>
+          ) : noAnswerAiStatus === "loading" ? (
+            <div className="mistake-empty-result">
+              <Loader2 className="spin" size={28} />
+              <p>AI正在识别题目并准备引导问题。它不会直接给答案。</p>
+            </div>
+          ) : (
+            <div className="mistake-empty-result">
+              <Brain size={30} />
+              <p>上传题目或写下问题后，点击“AI引导思考”。这里会生成观察方向、关键问题和下一步尝试。</p>
+            </div>
+          )}
+        </article>
+      </section>
+    </section>
+  );
+}
+
+function NoAnswerResultView({ result }) {
+  return (
+    <div className="mistake-report-view no-answer-report-view">
+      {result.summary && <p className="mistake-report-summary no-answer-summary">{result.summary}</p>}
+      {result.recognitionText && (
+        <details className="mistake-recognition-detail">
+          <summary>
+            <span>AI识别到的题目</span>
+            <em>展开核对题目</em>
+          </summary>
+          <StructuredMistakeText text={result.recognitionText} />
+        </details>
+      )}
+      <section>
+        <h3>思考引导</h3>
+        <StructuredMistakeText text={result.guidance || "先尝试说出题目在问什么，再找已知条件之间的关系。"} />
+      </section>
+    </div>
+  );
+}
+
+function NoAnswerFollowUpThread({ items = [], status = "idle" }) {
+  const hasItems = Array.isArray(items) && items.length > 0;
+  if (!hasItems && status !== "loading") return null;
+  return (
+    <section className="mistake-follow-up-thread no-answer-follow-up-thread">
+      <h3>继续引导</h3>
+      {items.map((item, index) => (
+        <details key={item.id} className="mistake-follow-up-item no-answer-follow-up-item" open={index === items.length - 1}>
+          <summary>
+            <span>第 {index + 1} 次思考</span>
+            <strong>{item.question}</strong>
+          </summary>
+          <div className="mistake-follow-up-question">
+            <strong>学生想法</strong>
+            <p>{item.question}</p>
+          </div>
+          <div className="mistake-follow-up-answer">
+            <strong>AI引导</strong>
+            <StructuredMistakeText text={item.answer} />
+          </div>
+        </details>
+      ))}
+      {status === "loading" && (
+        <div className="mistake-follow-up-loading">
+          <Loader2 className="spin" size={18} />
+          <span>AI正在继续引导...</span>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function formatBytes(size = 0) {
+  const bytes = Number(size || 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 KB";
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function MistakeSpecialPage({

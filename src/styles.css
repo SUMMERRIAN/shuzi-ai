@@ -5092,6 +5092,13 @@ audio {
   color: #68736b;
 }
 
+.no-answer-intro {
+  margin: 0;
+  color: #344039;
+  font-weight: 800;
+  line-height: 1.65;
+}
+
 .mistake-upload-strip article {
   display: grid;
   grid-template-columns: 46px minmax(160px, 1fr) 30px;
@@ -5460,6 +5467,21 @@ audio {
   background: #f4f8ff;
   color: #243040;
   font-weight: 800;
+}
+
+.no-answer-result-panel {
+  border-color: #b7dbc6;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdf9 100%);
+}
+
+.no-answer-summary {
+  border-left-color: #008653;
+  background: #f2fbf5;
+}
+
+.no-answer-report-view .mistake-recognition-detail,
+.no-answer-follow-up-item {
+  border-color: #cfe6d7;
 }
 
 .mistake-report-view section {
