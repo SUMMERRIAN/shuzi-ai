@@ -278,6 +278,10 @@ export async function ensureSchema() {
       content TEXT NOT NULL,
       file_ids UUID[] NOT NULL DEFAULT '{}',
       likes INTEGER NOT NULL DEFAULT 0,
+      is_pinned BOOLEAN NOT NULL DEFAULT false,
+      pinned_at TIMESTAMPTZ,
+      pinned_by TEXT,
+      last_activity_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
@@ -308,6 +312,7 @@ export async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_library_items_user_parent ON library_items(user_id, parent_id);
     CREATE INDEX IF NOT EXISTS idx_library_items_user_view ON library_items(user_id, is_trashed, is_starred, updated_at);
     CREATE INDEX IF NOT EXISTS idx_forum_posts_created_at ON forum_posts(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_forum_posts_activity ON forum_posts(is_pinned DESC, pinned_at DESC, last_activity_at DESC, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_forum_replies_post_id ON forum_replies(post_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_ai_generation_jobs_user_feature ON ai_generation_jobs(user_id, feature, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_free_ask_conversations_user_last ON free_ask_conversations(user_id, is_archived, last_message_at DESC);
@@ -332,5 +337,12 @@ export async function ensureSchema() {
     ALTER TABLE users ADD CONSTRAINT users_channel_check CHECK (channel IN ('username', 'email', 'phone'));
   `);
   await query(`ALTER TABLE library_items ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''`);
+  await query(`ALTER TABLE forum_posts ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT false`);
+  await query(`ALTER TABLE forum_posts ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMPTZ`);
+  await query(`ALTER TABLE forum_posts ADD COLUMN IF NOT EXISTS pinned_by TEXT`);
+  await query(`ALTER TABLE forum_posts ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ NOT NULL DEFAULT now()`);
+  await query(`UPDATE forum_posts SET last_activity_at = COALESCE(updated_at, created_at, now()) WHERE last_activity_at IS NULL`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_forum_posts_activity
+    ON forum_posts(is_pinned DESC, pinned_at DESC, last_activity_at DESC, created_at DESC)`);
   await query(`ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`);
 }

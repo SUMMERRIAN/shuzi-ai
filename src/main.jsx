@@ -328,6 +328,22 @@ const defaultForumPosts = [
   },
 ];
 
+function forumActivityTime(post) {
+  return new Date(post.lastActivityAt || post.updatedAt || post.createdAt || 0).getTime() || 0;
+}
+
+function forumPinnedTime(post) {
+  return new Date(post.pinnedAt || post.createdAt || 0).getTime() || 0;
+}
+
+function sortForumPosts(posts = []) {
+  return [...posts].sort((a, b) => {
+    if (Boolean(a.isPinned) !== Boolean(b.isPinned)) return b.isPinned ? 1 : -1;
+    if (a.isPinned && b.isPinned) return forumPinnedTime(b) - forumPinnedTime(a);
+    return forumActivityTime(b) - forumActivityTime(a);
+  });
+}
+
 const statementGuideQuestions = [
   "你现在最困扰的学习问题是什么？",
   "这个问题大概从什么时候开始的？",
@@ -4108,14 +4124,14 @@ function App() {
     try {
       setForumStatus("loading");
       const data = await apiRequest("/forum/posts");
-      const nextPosts = data.posts?.length ? data.posts : defaultForumPosts;
+      const nextPosts = sortForumPosts(data.posts?.length ? data.posts : defaultForumPosts);
       setForumPosts(nextPosts);
       setActiveForumPostId((current) => (nextPosts.some((post) => post.id === current) ? current : nextPosts[0]?.id || ""));
       setForumStatus("idle");
     } catch (error) {
       setForumStatus("error");
       setAccountNotice(error.message || "学习社区暂时无法读取，已显示示例帖子。");
-      setForumPosts(defaultForumPosts);
+      setForumPosts(sortForumPosts(defaultForumPosts));
       setActiveForumPostId(defaultForumPosts[0]?.id || "");
     }
   }
@@ -4160,7 +4176,7 @@ function App() {
       (forumDraft.images || []).forEach((image) => {
         if (image.url?.startsWith("blob:")) URL.revokeObjectURL(image.url);
       });
-      setForumPosts((prev) => [next, ...prev.filter((post) => !String(post.id).startsWith("post-"))]);
+      setForumPosts((prev) => sortForumPosts([next, ...prev.filter((post) => !String(post.id).startsWith("post-"))]));
       setActiveForumPostId(next.id);
       setForumDraft((prev) => ({ ...prev, title: "", content: "", images: [] }));
       setForumStatus("idle");
@@ -4182,12 +4198,58 @@ function App() {
       });
       const reply = data.reply;
       if (!reply) throw new Error("留言保存失败。");
-      setForumPosts((prev) => prev.map((post) => (post.id === activeForumPostId ? { ...post, replies: [...post.replies, reply] } : post)));
+      const lastActivityAt = data.lastActivityAt || reply.createdAt || new Date().toISOString();
+      setForumPosts((prev) =>
+        sortForumPosts(
+          prev.map((post) =>
+            post.id === activeForumPostId
+              ? { ...post, replies: [...post.replies, reply], lastActivityAt, updatedAt: lastActivityAt }
+              : post
+          )
+        )
+      );
       setForumDraft((prev) => ({ ...prev, reply: "" }));
       setForumStatus("idle");
     } catch (error) {
       setForumStatus("error");
       setAccountNotice(error.message || "留言没有保存成功，请稍后再试。");
+    }
+  }
+
+  async function deleteForumPost(postId) {
+    if (!postId) return;
+    if (!window.confirm("确定删除这篇帖子吗？删除后帖子和回复都会从云端移除。")) return;
+    try {
+      setForumStatus("saving");
+      await apiRequest(`/forum/posts/${postId}`, { method: "DELETE" });
+      const nextPosts = forumPosts.filter((post) => post.id !== postId);
+      setForumPosts(nextPosts);
+      if (activeForumPostId === postId) setActiveForumPostId(nextPosts[0]?.id || "");
+      setForumStatus("idle");
+    } catch (error) {
+      setForumStatus("error");
+      setAccountNotice(error.message || "帖子没有删除成功，请稍后再试。");
+    }
+  }
+
+  async function toggleForumPin(post) {
+    const token = adminPanel.token.trim();
+    if (!token) {
+      setAccountNotice("请先在管理员中心登录，再进行社区置顶操作。");
+      return;
+    }
+    try {
+      setForumStatus("saving");
+      await apiRequest(`/admin/forum/posts/${post.id}/pin`, {
+        method: "POST",
+        headers: { "x-admin-token": token },
+        body: JSON.stringify({ pinned: !post.isPinned }),
+      });
+      await loadForumPosts();
+      setForumStatus("idle");
+    } catch (error) {
+      setForumStatus("error");
+      setAccountNotice(error.message || "置顶状态没有更新成功。");
     }
   }
 
@@ -4734,6 +4796,9 @@ function App() {
             removeImage={removeForumImage}
             createPost={createForumPost}
             addReply={addForumReply}
+            deletePost={deleteForumPost}
+            togglePin={toggleForumPin}
+            adminToken={adminPanel.token}
             member={member}
             requireMemberAction={requireMemberAction}
           />
@@ -5525,33 +5590,42 @@ function LearningLibraryPage({
   );
 }
 
-function LearningForumPage({ posts, activePostId, setActivePostId, draft, status, updateDraft, handleImages, removeImage, createPost, addReply, member, requireMemberAction }) {
+function LearningForumPage({ posts, activePostId, setActivePostId, draft, status, updateDraft, handleImages, removeImage, createPost, addReply, deletePost, togglePin, adminToken, member, requireMemberAction }) {
   const canInteract = member.isLoggedIn && member.isPaid;
   const [activeForumTab, setActiveForumTab] = useState("all");
   const [composeOpen, setComposeOpen] = useState(false);
   const [forumPage, setForumPage] = useState(1);
   const [expandedForumImage, setExpandedForumImage] = useState(null);
-  const viewerName = member.identifier || "";
+  const isAdminMode = Boolean(adminToken?.trim());
   const forumTabs = [
-    { id: "all", label: "全部留言" },
-    { id: "others", label: "其他人的帖子" },
-    { id: "mine", label: "我发的帖子" },
+    { id: "all", label: "全部" },
+    { id: "pinned", label: "置顶" },
+    { id: "learning", label: "学习问题" },
+    { id: "experience", label: "经验分享" },
     { id: "moderator", label: "向版主提问" },
+    { id: "mine", label: "我发的帖子" },
   ];
-  const filteredPosts = posts.filter((post) => {
-    if (activeForumTab === "others") return !viewerName || post.author !== viewerName;
-    if (activeForumTab === "mine") return viewerName && post.author === viewerName;
+  const composeTypes = isAdminMode
+    ? ["学习问题", "学习心得", "向版主提问", "资料交流", "计划打卡", "站内公告"]
+    : ["学习问题", "学习心得", "向版主提问", "资料交流", "计划打卡"];
+  const tabFilteredPosts = posts.filter((post) => {
+    if (activeForumTab === "pinned") return post.isPinned;
+    if (activeForumTab === "learning") return post.type === "学习问题";
+    if (activeForumTab === "experience") return post.type === "学习心得" || post.type === "资料交流" || post.type === "计划打卡";
     if (activeForumTab === "moderator") return post.type === "向版主提问";
+    if (activeForumTab === "mine") return post.canDelete || (member.id && post.authorId === member.id);
     return true;
   });
+  const pinnedPosts = activeForumTab === "all" ? tabFilteredPosts.filter((post) => post.isPinned) : [];
+  const listedPosts = activeForumTab === "all" ? tabFilteredPosts.filter((post) => !post.isPinned) : tabFilteredPosts;
   const forumPageSize = 15;
-  const totalForumPages = Math.max(1, Math.ceil(filteredPosts.length / forumPageSize));
+  const totalForumPages = Math.max(1, Math.ceil(listedPosts.length / forumPageSize));
   const currentForumPage = Math.min(forumPage, totalForumPages);
-  const visibleForumPosts = filteredPosts.slice((currentForumPage - 1) * forumPageSize, currentForumPage * forumPageSize);
+  const visibleForumPosts = listedPosts.slice((currentForumPage - 1) * forumPageSize, currentForumPage * forumPageSize);
 
   useEffect(() => {
     setForumPage(1);
-  }, [activeForumTab, viewerName, posts.length]);
+  }, [activeForumTab, member.id, posts.length]);
 
   function openCompose(type = draft.type) {
     if (!canInteract) {
@@ -5562,6 +5636,101 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, status
     setComposeOpen(true);
   }
 
+  function renderThread(post, options = {}) {
+    const isActive = activePostId === post.id;
+    const repliesToShow = isActive ? post.replies : post.replies.slice(-2);
+    return (
+      <article key={post.id} className={`${isActive ? "panel forum-thread-card is-active" : "panel forum-thread-card"}${post.isPinned ? " is-pinned" : ""}${options.compact ? " is-compact" : ""}`}>
+        <div className="forum-thread-main">
+          <div className="forum-thread-head">
+            <button type="button" className="forum-thread-title-button" onClick={() => setActivePostId(post.id)}>
+              <div className="forum-author-row">
+                <span className="forum-avatar"><UserRound size={16} /></span>
+                <strong>{post.author}</strong>
+                <em>{post.time}</em>
+                {post.isPinned && <span className="forum-pin-badge">置顶</span>}
+                <span className="forum-tag">{post.type}</span>
+              </div>
+              <h2>{post.title}</h2>
+            </button>
+            <div className="forum-thread-actions">
+              {isAdminMode && (
+                <button type="button" className="ghost-action is-compact" onClick={() => togglePin(post)} disabled={status === "saving"}>
+                  <Star size={14} />
+                  {post.isPinned ? "取消置顶" : "置顶"}
+                </button>
+              )}
+              {post.canDelete && (
+                <button type="button" className="ghost-action is-compact forum-danger-action" onClick={() => deletePost(post.id)} disabled={status === "saving"}>
+                  <Trash2 size={14} />
+                  删除
+                </button>
+              )}
+            </div>
+          </div>
+
+          <button type="button" className="forum-post-body-button" onClick={() => setActivePostId(post.id)}>
+            <p className="forum-post-content">{post.content}</p>
+          </button>
+
+          {post.images?.length > 0 && (
+            <div className="forum-thumbnail-grid is-post">
+              {post.images.slice(0, 6).map((image) => (
+                <img
+                  key={image.id}
+                  src={image.url}
+                  alt={image.name}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setExpandedForumImage(image);
+                  }}
+                />
+              ))}
+            </div>
+          )}
+
+          <div className="forum-thread-metrics">
+            <span>{post.replies.length} 条回复</span>
+            <span>{post.likes} 赞</span>
+            {post.lastActivityAt && <span>最后活跃 {formatArchiveDate(post.lastActivityAt)}</span>}
+          </div>
+        </div>
+
+        {repliesToShow.length > 0 && (
+          <div className="reply-list">
+            {repliesToShow.map((reply) => (
+              <article key={reply.id} className={reply.role === "moderator" ? "reply-card is-moderator" : "reply-card"}>
+                <div>
+                  <strong>{reply.author}</strong>
+                  <span>{reply.role === "moderator" ? "版主回复" : "会员留言"} · {reply.time}</span>
+                </div>
+                <p>{reply.content}</p>
+              </article>
+            ))}
+            {!isActive && post.replies.length > repliesToShow.length && (
+              <button type="button" className="forum-more-replies" onClick={() => setActivePostId(post.id)}>
+                展开全部 {post.replies.length} 条回复
+              </button>
+            )}
+          </div>
+        )}
+
+        {isActive && (
+          <div className="reply-compose">
+            <label>
+              <span>留言回复</span>
+              <textarea value={draft.reply} onChange={(event) => updateDraft("reply", event.target.value)} placeholder="会员可以在这里留言、追问版主，或补充自己的经验。" />
+            </label>
+            <button type="button" className="primary-action" onClick={addReply} disabled={status === "saving"}>
+              <Send size={17} />
+              发表留言
+            </button>
+          </div>
+        )}
+      </article>
+    );
+  }
+
   return (
     <section className="stack forum-page">
       <section className="forum-feed-layout">
@@ -5570,6 +5739,7 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, status
             <div>
               <span className="eyebrow">留言版块</span>
               <h2>学习问题与心得交流</h2>
+              <p className="forum-toolbar-note">置顶公告固定在最上方；普通帖子按最新发帖和最新回复自动前移。</p>
               {status !== "idle" && <p className="forum-status-text">{status === "loading" ? "正在读取社区帖子..." : status === "saving" ? "正在保存..." : "社区数据暂时不可用"}</p>}
             </div>
             <button type="button" className="primary-action forum-new-post-button" onClick={() => openCompose(activeForumTab === "moderator" ? "向版主提问" : "学习问题")} disabled={status === "saving"}>
@@ -5601,7 +5771,7 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, status
                 <label>
                   <span>帖子类型</span>
                   <select value={draft.type} onChange={(event) => updateDraft("type", event.target.value)}>
-                    {["学习问题", "学习心得", "向版主提问", "资料交流", "计划打卡"].map((type) => (
+                    {composeTypes.map((type) => (
                       <option key={type} value={type}>
                         {type}
                       </option>
@@ -5642,8 +5812,18 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, status
             </article>
           )}
 
+          {pinnedPosts.length > 0 && (
+            <section className="forum-pinned-section">
+              <div className="forum-pinned-head">
+                <span>置顶留言</span>
+                <em>管理员公告、版本说明和重要提醒</em>
+              </div>
+              {pinnedPosts.map((post) => renderThread(post, { compact: true }))}
+            </section>
+          )}
+
           <div className="forum-thread-list">
-            {filteredPosts.length === 0 && (
+            {tabFilteredPosts.length === 0 && (
               <article className="panel forum-empty-state">
                 <strong>{activeForumTab === "mine" ? "你还没有发布帖子" : "这个分类下暂时没有帖子"}</strong>
                 <p>{activeForumTab === "mine" ? "开通会员后，可以把自己的学习问题、学习心得和向版主提问都保存在这里。" : "可以切换到其他分类查看，或点击发帖创建新的讨论。"}</p>
@@ -5654,65 +5834,11 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, status
               </article>
             )}
 
-            {visibleForumPosts.map((post) => (
-              <article key={post.id} className={activePostId === post.id ? "panel forum-thread-card is-active" : "panel forum-thread-card"}>
-                <button type="button" className="forum-thread-main" onClick={() => setActivePostId(post.id)}>
-                  <div className="forum-thread-head">
-                    <div>
-                      <span className="forum-tag">{post.type}</span>
-                      <h2>{post.title}</h2>
-                      <p>{post.author} · {post.time} · {post.replies.length}条回复 · {post.likes}赞</p>
-                    </div>
-                    <UserRound size={24} />
-                  </div>
-                  <p className="forum-post-content">{post.content}</p>
-                  {post.images?.length > 0 && (
-                    <div className="forum-thumbnail-grid is-post">
-                      {post.images.map((image) => (
-                        <img
-                          key={image.id}
-                          src={image.url}
-                          alt={image.name}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setExpandedForumImage(image);
-                          }}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </button>
-
-                <div className="reply-list">
-                  {post.replies.map((reply) => (
-                    <article key={reply.id} className={reply.role === "moderator" ? "reply-card is-moderator" : "reply-card"}>
-                      <div>
-                        <strong>{reply.author}</strong>
-                        <span>{reply.role === "moderator" ? "版主回复" : "会员留言"} · {reply.time}</span>
-                      </div>
-                      <p>{reply.content}</p>
-                    </article>
-                  ))}
-                </div>
-
-                {activePostId === post.id && (
-                  <div className="reply-compose">
-                    <label>
-                      <span>留言回复</span>
-                      <textarea value={draft.reply} onChange={(event) => updateDraft("reply", event.target.value)} placeholder="会员可以在这里留言、追问版主，或补充自己的经验。" />
-                    </label>
-                    <button type="button" className="primary-action" onClick={addReply} disabled={status === "saving"}>
-                      <Send size={17} />
-                      发表留言
-                    </button>
-                  </div>
-                )}
-              </article>
-            ))}
-            {filteredPosts.length > forumPageSize && (
+            {visibleForumPosts.map((post) => renderThread(post))}
+            {listedPosts.length > forumPageSize && (
               <div className="forum-pagination">
                 <span>
-                  第 {currentForumPage} / {totalForumPages} 页，共 {filteredPosts.length} 个帖子
+                  第 {currentForumPage} / {totalForumPages} 页，共 {listedPosts.length} 个帖子
                 </span>
                 <div>
                   <button className="ghost-action is-compact" type="button" onClick={() => setForumPage((page) => Math.max(1, page - 1))} disabled={currentForumPage <= 1}>

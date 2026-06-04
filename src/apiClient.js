@@ -106,7 +106,9 @@ export function mapAccountToMember(account) {
     return {
       isLoggedIn: false,
       isPaid: false,
+      id: "",
       identifier: "",
+      role: "guest",
       provider: "用户名",
       plan: "",
       ltBalance: 0,
@@ -116,7 +118,9 @@ export function mapAccountToMember(account) {
   return {
     isLoggedIn: true,
     isPaid: Boolean(account.membership?.isPaid),
+    id: account.user.id,
     identifier: account.user.identifier,
+    role: account.user.role || "member",
     provider: account.user.provider || "用户名",
     plan: account.membership?.planName || "免费用户",
     membershipStatus: account.membership?.status || "free",

@@ -6649,6 +6649,257 @@ audio {
   color: #48534d;
 }
 
+.forum-board-toolbar h2 {
+  font-size: 24px;
+  line-height: 1.25;
+}
+
+.forum-toolbar-note {
+  margin: 6px 0 0;
+  color: #53625a;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.forum-board-tabs {
+  gap: 6px;
+  padding: 0 0 8px;
+  border: 0;
+  border-bottom: 1px solid #dfe5da;
+  border-radius: 0;
+}
+
+.forum-board-tabs button {
+  min-height: 38px;
+  padding: 0 16px;
+  border-radius: 0;
+}
+
+.forum-board-tabs button:hover,
+.forum-board-tabs button.is-active {
+  border-color: transparent;
+  border-bottom-color: #2e5bff;
+  background: transparent;
+  color: #111820;
+}
+
+.forum-pinned-section {
+  display: grid;
+  gap: 8px;
+  padding: 12px 0;
+  border-bottom: 1px solid #dfe5da;
+}
+
+.forum-pinned-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.forum-pinned-head span {
+  color: #008653;
+  font-size: 14px;
+  font-weight: 950;
+}
+
+.forum-pinned-head em {
+  color: #68736b;
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.forum-thread-list {
+  gap: 10px;
+  max-height: none;
+  overflow: visible;
+  padding-right: 0;
+}
+
+.forum-thread-card {
+  gap: 10px;
+  padding: 14px 16px;
+  box-shadow: none;
+}
+
+.forum-thread-card.is-pinned {
+  border-color: rgba(0, 134, 83, 0.28);
+  background: #fbfdf9;
+}
+
+.forum-thread-card.is-compact {
+  padding: 12px 14px;
+}
+
+.forum-thread-main {
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.forum-thread-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.forum-thread-title-button,
+.forum-post-body-button {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.forum-author-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-height: 24px;
+}
+
+.forum-avatar {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 50%;
+  background: #eef3ea;
+  color: #53625a;
+}
+
+.forum-author-row strong {
+  color: #111820;
+  font-size: 14px;
+  font-weight: 950;
+}
+
+.forum-author-row em {
+  color: #7a847d;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.forum-pin-badge {
+  display: inline-flex;
+  min-height: 20px;
+  align-items: center;
+  padding: 0 6px;
+  border: 1px solid rgba(46, 91, 255, 0.2);
+  border-radius: 4px;
+  background: #f0f4ff;
+  color: #2e5bff;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.forum-thread-head h2 {
+  margin: 7px 0 0;
+  color: #111820;
+  font-size: 18px;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+
+.forum-thread-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.forum-danger-action {
+  color: #b42318;
+}
+
+.forum-tag {
+  min-height: 20px;
+  padding: 0 7px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.forum-post-content {
+  display: -webkit-box;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  color: #1f2a24;
+  font-size: 15px;
+  line-height: 1.72;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.forum-thread-card.is-active .forum-post-content {
+  display: block;
+  overflow: visible;
+}
+
+.forum-thread-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  color: #68736b;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.reply-list {
+  gap: 6px;
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+}
+
+.reply-card {
+  gap: 5px;
+  padding: 9px 11px;
+  background: #fbfcfa;
+}
+
+.reply-card strong {
+  font-size: 13px;
+}
+
+.reply-card p {
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.forum-more-replies {
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #2e5bff;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.forum-thumbnail-grid.is-post {
+  grid-template-columns: repeat(auto-fill, minmax(130px, 180px));
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.forum-thumbnail-grid.is-post img {
+  width: 100%;
+  max-width: 180px;
+  height: 124px;
+  border-radius: 8px;
+}
+
 .statement-focus-layout {
   width: 100%;
   max-width: none;

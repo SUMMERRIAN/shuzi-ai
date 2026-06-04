@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 import mammoth from "mammoth";
 import { PDFParse } from "pdf-parse";
 import ExcelJS from "exceljs";
@@ -1509,7 +1510,7 @@ function toForumImage(file) {
   };
 }
 
-function toForumPost(row, replies = [], images = []) {
+function toForumPost(row, replies = [], images = [], viewerUserId = "") {
   return {
     id: row.id,
     type: row.post_type,
@@ -1519,11 +1520,28 @@ function toForumPost(row, replies = [], images = []) {
     authorId: row.user_id,
     time: formatForumTime(row.created_at),
     likes: Number(row.likes || 0),
+    isPinned: Boolean(row.is_pinned),
+    pinnedAt: row.pinned_at || null,
+    pinnedBy: row.pinned_by || "",
+    lastActivityAt: row.last_activity_at || row.updated_at || row.created_at,
+    canDelete: Boolean(viewerUserId && row.user_id === viewerUserId),
     images: images.map(toForumImage).filter(Boolean),
     replies,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+async function getOptionalForumViewer(req) {
+  try {
+    const header = req.headers.authorization || "";
+    const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+    if (!token) return null;
+    const payload = jwt.verify(token, process.env.JWT_SECRET || "dev-only-change-me");
+    return (await query("SELECT id, role FROM users WHERE id = $1", [payload.sub])).rows[0] || null;
+  } catch {
+    return null;
+  }
 }
 
 function makeImageInputs(files) {
@@ -2767,12 +2785,13 @@ app.get("/api/forum/files/:id", async (req, res, next) => {
 
 app.get("/api/forum/posts", async (req, res, next) => {
   try {
+    const viewer = await getOptionalForumViewer(req);
     const posts = (
       await query(
         `SELECT p.*, u.identifier, u.display_name
          FROM forum_posts p
          JOIN users u ON u.id = p.user_id
-         ORDER BY p.created_at DESC
+         ORDER BY p.is_pinned DESC, p.pinned_at DESC NULLS LAST, p.last_activity_at DESC, p.created_at DESC
          LIMIT 100`
       )
     ).rows;
@@ -2812,7 +2831,8 @@ app.get("/api/forum/posts", async (req, res, next) => {
         toForumPost(
           post,
           repliesByPost.get(post.id) || [],
-          (post.file_ids || []).map((id) => filesById.get(id)).filter(Boolean)
+          (post.file_ids || []).map((id) => filesById.get(id)).filter(Boolean),
+          viewer?.id || ""
         )
       ),
     });
@@ -2848,7 +2868,8 @@ app.post("/api/forum/posts", requireAuth, upload.array("images", 6), async (req,
       post: toForumPost(
         { ...saved.post, identifier: req.user.identifier, display_name: req.user.display_name },
         [],
-        saved.fileRows
+        saved.fileRows,
+        req.user.id
       ),
     });
   } catch (error) {
@@ -2864,14 +2885,21 @@ app.post("/api/forum/posts/:id/replies", requireAuth, async (req, res, next) => 
     const post = (await query("SELECT id FROM forum_posts WHERE id = $1", [req.params.id])).rows[0];
     if (!post) return res.status(404).json({ error: "POST_NOT_FOUND", message: "帖子不存在。" });
     const role = req.user.role === "admin" || req.user.role === "teacher" ? "moderator" : "member";
-    const reply = (
-      await query(
-        `INSERT INTO forum_replies (post_id, user_id, role, content)
-         VALUES ($1, $2, $3, $4)
-         RETURNING *`,
-        [req.params.id, req.user.id, role, content.trim()]
-      )
-    ).rows[0];
+    const reply = await withTransaction(async (client) => {
+      const created = (
+        await client.query(
+          `INSERT INTO forum_replies (post_id, user_id, role, content)
+           VALUES ($1, $2, $3, $4)
+           RETURNING *`,
+          [req.params.id, req.user.id, role, content.trim()]
+        )
+      ).rows[0];
+      await client.query("UPDATE forum_posts SET last_activity_at = $2, updated_at = $2 WHERE id = $1", [
+        req.params.id,
+        created.created_at,
+      ]);
+      return created;
+    });
     res.json({
       reply: {
         id: reply.id,
@@ -2881,7 +2909,44 @@ app.post("/api/forum/posts/:id/replies", requireAuth, async (req, res, next) => 
         content: reply.content,
         createdAt: reply.created_at,
       },
+      lastActivityAt: reply.created_at,
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/forum/posts/:id", requireAuth, async (req, res, next) => {
+  try {
+    const post = (await query("SELECT id, user_id FROM forum_posts WHERE id = $1", [req.params.id])).rows[0];
+    if (!post) return res.status(404).json({ error: "POST_NOT_FOUND", message: "帖子不存在。" });
+    if (post.user_id !== req.user.id) {
+      return res.status(403).json({ error: "POST_DELETE_FORBIDDEN", message: "只能删除自己发布的帖子。" });
+    }
+    await query("DELETE FROM forum_posts WHERE id = $1 AND user_id = $2", [req.params.id, req.user.id]);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/admin/forum/posts/:id/pin", requireAdminToken, async (req, res, next) => {
+  try {
+    const { pinned = true } = req.body || {};
+    const post = (
+      await query(
+        `UPDATE forum_posts
+         SET is_pinned = $2,
+             pinned_at = CASE WHEN $2 THEN now() ELSE NULL END,
+             pinned_by = CASE WHEN $2 THEN 'admin' ELSE NULL END,
+             updated_at = now()
+         WHERE id = $1
+         RETURNING *`,
+        [req.params.id, Boolean(pinned)]
+      )
+    ).rows[0];
+    if (!post) return res.status(404).json({ error: "POST_NOT_FOUND", message: "帖子不存在。" });
+    res.json({ ok: true, post });
   } catch (error) {
     next(error);
   }
