@@ -312,7 +312,6 @@ export async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_library_items_user_parent ON library_items(user_id, parent_id);
     CREATE INDEX IF NOT EXISTS idx_library_items_user_view ON library_items(user_id, is_trashed, is_starred, updated_at);
     CREATE INDEX IF NOT EXISTS idx_forum_posts_created_at ON forum_posts(created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_forum_posts_activity ON forum_posts(is_pinned DESC, pinned_at DESC, last_activity_at DESC, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_forum_replies_post_id ON forum_replies(post_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_ai_generation_jobs_user_feature ON ai_generation_jobs(user_id, feature, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_free_ask_conversations_user_last ON free_ask_conversations(user_id, is_archived, last_message_at DESC);
