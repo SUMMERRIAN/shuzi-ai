@@ -3319,7 +3319,10 @@ async function buildArchiveSnapshotFromSourceIds({ feature, student, userId, sou
   };
   if (feature === "profile") {
     return {
-      ...fallback,
+      policy: {
+        include: ["学情问卷", "学情陈述"],
+        exclude: ["每日反思", "每周讨论", "学生自我画像", "错题专项", "知识笔记", "学习日历", "学习资料库", "学习社区", "AI自由问"],
+      },
       sourceMode: "selected_archive_ids",
       selectedSources,
       student: studentBase,
@@ -3327,15 +3330,14 @@ async function buildArchiveSnapshotFromSourceIds({ feature, student, userId, sou
       questionnaireMeta: selectedSources.questionnaire,
       statements: selectedStatement,
       statementMeta: selectedSources.statement,
-      studentSelfPortrait: profileSelf?.payload || null,
-      sourcePriority: ["学情陈述等学生原始表达", "学情问卷", "学生自我画像"],
-      dailyReflections: fallback.dailyReflections || [],
-      weeklyDiscussions: fallback.weeklyDiscussions || [],
+      sourcePriority: ["学情陈述等学生原始表达", "学情问卷"],
     };
   }
   if (feature === "strategy") {
     return {
-      ...fallback,
+      policy: {
+        basis: "优先使用学生原始表达，再结合问卷、学生自我画像和学情画像，为当前科目设计学习任务。",
+      },
       sourceMode: "selected_archive_ids",
       selectedSources,
       sourcePriority: ["学情陈述等学生原始表达", "学情问卷", "学生自我画像", "学情画像AI结果"],
@@ -3355,7 +3357,10 @@ async function buildArchiveSnapshotFromSourceIds({ feature, student, userId, sou
   }
   if (feature === "study-plan") {
     return {
-      ...fallback,
+      policy: {
+        basis: "根据学情问卷、学情陈述、已保存学习任务、AI学习任务建议、默认可用时间规则和方法习惯目标制定计划。",
+        excluded: ["学情画像结果", "每日反思", "每周讨论", "错题图片分析", "知识图生成", "学习社区内容", "资料库文件内容"],
+      },
       sourceMode: "selected_archive_ids",
       selectedSources,
       sourcePriority: ["学情陈述等学生原始表达", "学情问卷", "学生保存的学习任务", "AI学习任务建议"],
@@ -3409,13 +3414,19 @@ app.post("/api/ai/profile", requireAuth, async (req, res, next) => {
             {
               role: "system",
               content:
-                "You are the Shuzi AI learning profile agent. Only integrate questionnaire, student statements, daily reflections, and weekly discussions, with recent one to two months as priority. Do not use mistake practice, knowledge notes, calendar, library, community, or free-chat content as profile evidence. Separate confirmed facts, AI inference, and follow-up questions. Return strict JSON in Chinese.",
+                "You are the Shuzi AI learning profile agent. Only integrate the student intake questionnaire and student statements. Do not use daily reflections, weekly discussions, student self portrait, mistake practice, knowledge notes, calendar, library, community, or free-chat content as profile evidence. The questionnaire can be long: first read the core questionnaire and weak-subject sections completely, then organize evidence by learning chain such as class, homework, mistakes, review, exam, motivation, execution, environment, and subject-specific weak points. Student statements have priority when they describe concrete events or feelings. Separate confirmed facts, AI inference, and follow-up questions. Return strict JSON in Chinese.",
             },
             {
               role: "user",
               content: jsonInstruction(
                 "{summary, core, reasons:[string], evidence:[string], tags:[string], questions:[string], next, archiveConclusion, scores:{motivation:number, method:number, habit:number, execution:number, subject_strategy:number, emotion:number}}"
-              ) + "\nStudent profile archive snapshot:\n" + JSON.stringify(resolvedArchiveSnapshot),
+              ) +
+                "\n分析步骤要求：" +
+                "\n1. 先从学情问卷中提取核心事实：基础、课堂、作业、错题、复习、考试、学习环境和薄弱科目。" +
+                "\n2. 再阅读学情陈述，找出学生自己反复提到的真实困扰、场景、情绪和已尝试方法。" +
+                "\n3. 最后形成画像，必须区分证据和推断；不能引用每日反思、每周讨论、学生自我画像或其他页面资料。" +
+                "\n4. evidence 写具体证据，不要写空泛判断；questions 写后续还需要追问的问题。" +
+                "\nStudent profile archive snapshot:\n" + JSON.stringify(resolvedArchiveSnapshot),
             },
           ],
         });

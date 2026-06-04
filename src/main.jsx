@@ -300,6 +300,41 @@ function fileTypeLabel(item) {
   if (mime.includes("presentation") || mime.includes("powerpoint")) return "PPT";
   return "文件";
 }
+
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, message: "" };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, message: error?.message || "页面渲染异常" };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("Page render failed", error, info);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <main className="app-error-fallback">
+          <section className="panel">
+            <span className="eyebrow">页面暂时出错</span>
+            <h1>页面没有正常显示</h1>
+            <p>请先刷新页面。如果刚刚点击了 AI 分析，任务可能仍在后台处理中，刷新后可以重新进入对应页面查看。</p>
+            <small>{this.state.message}</small>
+            <button type="button" className="primary-action" onClick={() => window.location.reload()}>
+              刷新页面
+            </button>
+          </section>
+        </main>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const defaultForumPosts = [
   {
     id: "post-1",
@@ -3302,10 +3337,10 @@ function App() {
   }
 
   async function generateProfileAnalysis() {
-    if (!requireMemberAction("AI统一分析画像", generateProfileAnalysis, "学情画像会统一分析学情问卷、学情陈述、每日反思和每周讨论，需要会员权限。")) return;
+    if (!requireMemberAction("AI统一分析画像", generateProfileAnalysis, "学情画像会统一分析学情问卷和学情陈述，需要会员权限。")) return;
     if (aiStatus === "loading") return;
     clearAiNotice();
-    const archiveSnapshot = buildProfileArchiveSnapshot({ answers, records, dailyReflections: dailyReflectionArchive, weeklyDiscussions: weeklyDiscussionArchive });
+    const archiveSnapshot = buildProfileArchiveSnapshot({ answers, records });
     const prompt = buildAgentPrompt("profile", archiveSnapshot);
     console.info("学情画像AI提示词", prompt);
     setAiStatus("loading");
@@ -3434,7 +3469,7 @@ function App() {
   }
 
   async function runPlanAi() {
-    if (!requireMemberAction("AI生成学习计划", runPlanAi, "AI会根据学情画像和学习任务生成学习计划和方法习惯训练表，需要会员权限。")) return;
+    if (!requireMemberAction("AI生成学习计划", runPlanAi, "AI会根据学情问卷、学情陈述和已保存学习任务生成学习计划和方法习惯训练表，需要会员权限。")) return;
     if (planAiStatus === "loading") return;
     setPlanAiStatus("loading");
     clearAiNotice();
@@ -3443,8 +3478,6 @@ function App() {
       records,
       strategies: strategyWorkspaces,
       plans: { planRows, methodFocusRows, habitFocusRows },
-      dailyReflections: dailyReflectionArchive,
-      weeklyDiscussions: weeklyDiscussionArchive,
     });
     console.info("学习计划AI提示词", buildAgentPrompt("plan", archiveSnapshot));
     try {
@@ -4069,8 +4102,6 @@ function App() {
       aiInsight,
       strategies: strategyWorkspaces,
       activeSubject: subject,
-      dailyReflections: dailyReflectionArchive,
-      weeklyDiscussions: weeklyDiscussionArchive,
     });
     console.info("策略任务AI提示词", buildAgentPrompt("strategy", archiveSnapshot));
     setStrategyAiStatus("AI正在生成建议...");
@@ -4594,8 +4625,6 @@ function App() {
             printPage={printPage}
             generateProfileAnalysis={generateProfileAnalysis}
             clearProfileDraft={clearProfileDraft}
-            dailyReflectionArchive={dailyReflectionArchive}
-            weeklyDiscussionArchive={weeklyDiscussionArchive}
             questionnaireArchives={questionnaireArchives}
             statementArchives={records}
             sourceSelection={sourceSelection}
@@ -7246,8 +7275,6 @@ function ModernProfilePage({
   printPage,
   generateProfileAnalysis,
   clearProfileDraft,
-  dailyReflectionArchive,
-  weeklyDiscussionArchive,
   questionnaireArchives,
   statementArchives,
   sourceSelection,
@@ -7259,6 +7286,7 @@ function ModernProfilePage({
   const studentName = answers.name || "这位同学";
   const [selfAssessment, setSelfAssessment] = useState({});
   const [selfPortrait, setSelfPortrait] = useState("");
+  const statementCount = Array.isArray(records) ? records.length : 0;
 
   useEffect(() => {
     if (!profileSelfArchive) return;
@@ -7302,7 +7330,7 @@ function ModernProfilePage({
           <div className="profile-unified-head">
             <div>
               <span className="eyebrow">AI统一分析画像</span>
-              <h2>整合问卷、陈述、每日反思和每周讨论，形成完整学习判断</h2>
+              <h2>整合学情问卷和学情陈述，形成完整学习判断</h2>
             </div>
             <button className="primary-action" onClick={generateProfileAnalysis} disabled={aiStatus === "loading"}>
               {aiStatus === "loading" ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
@@ -7316,8 +7344,12 @@ function ModernProfilePage({
             updateSourceSelection={updateSourceSelection}
           />
           <div className="profile-unified-body">
-            <h3>{aiInsight?.core || "点击“AI统一分析画像”后，这里会显示学生学习问题的整体判断。"}</h3>
-            <p>{aiInsight?.archiveConclusion || "AI会统一阅读学情问卷、学情陈述、每日反思和每周讨论，综合判断学生的基础、方法、执行、习惯、动机和情绪精力等情况。错题专项、知识笔记、学习日历和资料库保持独立，不进入画像分析。"}</p>
+            <h3>{aiStatus === "loading" ? "AI正在阅读完整问卷和学情陈述，生成学生整体画像。" : aiInsight?.core || "点击“AI统一分析画像”后，这里会显示学生学习问题的整体判断。"}</h3>
+            <p>
+              {aiStatus === "loading"
+                ? "学情问卷内容较多时，分析可能需要几十秒到几分钟。请不要刷新页面；AI会先梳理基础、课堂、作业、错题、复习、考试、学习环境和薄弱科目，再结合学生自己的陈述形成判断。"
+                : aiInsight?.archiveConclusion || "AI只阅读学情问卷和学情陈述，综合判断学生的基础、方法、执行、习惯、动机和情绪精力等情况。每日反思、每周讨论、错题专项、知识笔记、学习日历和资料库保持独立，不进入画像分析。"}
+            </p>
             {aiInsight?.summary && <p>{aiInsight.summary}</p>}
             {aiInsight?.reasons?.length > 0 && (
               <ul className="profile-unified-list">
@@ -7326,7 +7358,7 @@ function ModernProfilePage({
                 ))}
               </ul>
             )}
-            <p className="profile-source-note">当前画像来源：学情陈述 {records.length} 条，问卷完成度 {completion}%，每日反思 {dailyReflectionArchive.length} 条，每周讨论 {weeklyDiscussionArchive.discussions.length + weeklyDiscussionArchive.problems.length} 条。</p>
+            <p className="profile-source-note">当前画像来源：学情陈述 {statementCount} 条，问卷完成度 {completion}%。</p>
           </div>
         </section>
 
@@ -7502,7 +7534,7 @@ function StrategyDesignPage({
             </div>
             <textarea
               className="strategy-textarea strategy-suggestion-textarea"
-              value={isGeneratingStrategy ? "AI正在结合学情陈述、学情问卷、学生自我画像和当前科目生成学习任务建议..." : workspace.taskSuggestion || workspace.strategySuggestion || ""}
+              value={isGeneratingStrategy ? "AI正在生成学习任务建议。这个过程可能需要几十秒到几分钟，请不要刷新页面。\n\n系统会优先阅读学生自己写的学情陈述和任务补充，再结合学情问卷、学生自我画像、学情画像和当前科目，生成具体、可执行、可检查的学习任务。" : workspace.taskSuggestion || workspace.strategySuggestion || ""}
               readOnly
               placeholder="点击“AI学习任务建议”后，这里会显示AI生成的学习任务建议。"
               aria-label={`${activeSubject}AI学习任务建议`}
@@ -7689,6 +7721,11 @@ function StudyPlanPage({
               updateSourceSelection={updateSourceSelection}
               includeStrategy
             />
+            {planAiStatus === "loading" && (
+              <p className="ai-waiting-note no-print">
+                AI正在制定本周学习计划，可能需要几十秒到几分钟。系统会读取学情问卷、学情陈述、已保存学习任务和AI学习任务建议，并按默认中学生作息生成可修改的周计划；请不要刷新页面。
+              </p>
+            )}
 
             <label className="plan-note">
               <span>本周计划说明</span>
@@ -9508,4 +9545,8 @@ function calculateCompletion(answers, steps) {
   return allQuestions.length ? Math.round((answered / allQuestions.length) * 100) : 0;
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+createRoot(document.getElementById("root")).render(
+  <AppErrorBoundary>
+    <App />
+  </AppErrorBoundary>
+);

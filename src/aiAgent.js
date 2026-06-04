@@ -4,8 +4,8 @@ export const shuziLearningCoachAgent = {
   mission:
     "先通过学生档案理解学生，再形成学情画像，并把画像转化为学习任务、学习计划和方法习惯训练。",
   coreLogic: [
-    "学情画像只整合学情问卷、学情陈述、每日反思和每周讨论；最近1-2个月的信息优先作为动态记忆。",
-    "学习任务只根据最新学情画像和当前科目生成可执行建议，不重新诊断，也不处理错题图片。",
+    "学情画像只整合学情问卷和学情陈述，不引用每日反思、每周讨论、错题、知识笔记、日历、资料库、社区或自由问内容。",
+    "学习任务优先读取学生自己写的原始表达，再结合学情问卷、学生自我画像和学情画像，为当前科目生成可执行建议，不处理错题图片。",
     "学习计划只把已确认的策略、任务、默认可用时间规则、方法习惯目标安排进周计划。",
     "错题专项、知识笔记、学习日历、学习资料库、学习社区、AI自由问不参与学情画像和学习计划判断。",
     "错题专项独立使用 Gemini，负责当前错题或试卷材料分析、相似题和错题档案。",
@@ -14,7 +14,7 @@ export const shuziLearningCoachAgent = {
     "学习日历、学习资料库和学习社区只做记录、资料和交流管理，不调用 AI。",
   ],
   dataMemory:
-    "每个学生必须拥有独立 student_id。问卷、陈述、反思、讨论、AI画像、策略任务、计划、错题、知识图、资料和社区记录都写入 PostgreSQL；但只有问卷、陈述、每日反思和每周讨论进入学情画像分析。",
+    "每个学生必须拥有独立 student_id。问卷、陈述、反思、讨论、AI画像、策略任务、计划、错题、知识图、资料和社区记录都写入 PostgreSQL；但只有学情问卷和学情陈述进入学情画像分析。",
   guardrails: [
     "不能把一次陈述当成全部结论，必须区分已确认事实、AI推断和需要继续追问的问题。",
     "所有建议必须具体、可执行、可检查，避免空泛鼓励。",
@@ -57,16 +57,16 @@ export const postgresqlArchiveTables = [
 ];
 
 export const profileSourcePolicy = {
-  include: ["学情问卷", "学情陈述", "每日反思", "每周讨论"],
-  exclude: ["错题专项", "知识笔记", "学习日历", "学习资料库", "学习社区", "AI自由问"],
-  memoryWindow: "优先参考最近1-2个月记录；旧记录只作为背景。",
+  include: ["学情问卷", "学情陈述"],
+  exclude: ["每日反思", "每周讨论", "学生自我画像", "错题专项", "知识笔记", "学习日历", "学习资料库", "学习社区", "AI自由问"],
+  memoryWindow: "学情陈述按最近记录优先；问卷内容较长时必须完整阅读核心问卷和薄弱科目问卷。",
 };
 
 export const aiTaskPrompts = {
   profile: {
     name: "学情画像统一分析",
     scope:
-      "只整合学情问卷、学情陈述、每日反思和每周讨论，形成学情画像、核心判断、维度评分、证据、追问问题和下一步优先级。",
+      "只整合学情问卷和学情陈述，形成学情画像、核心判断、维度评分、证据、追问问题和下一步优先级。",
     mustUse: [...profileSourcePolicy.include, profileSourcePolicy.memoryWindow],
     mustNot: [...profileSourcePolicy.exclude, "直接制定完整周计划", "生成相似题", "输出知识图片"],
     output: "JSON: summary, core, reasons, evidence, tags, questions, next, archiveConclusion, scores",
@@ -74,8 +74,8 @@ export const aiTaskPrompts = {
   strategy: {
     name: "学习任务建议",
     scope:
-      "只根据最新学情画像、学情问卷、学情陈述和当前科目，为学生制定一组具体、可执行、可检查的学习任务建议。",
-    mustUse: ["最新学情画像", "学情问卷", "学情陈述", "当前科目", "已确认的学习目标"],
+      "优先根据学生自己写的学情陈述和任务补充，再结合学情问卷、学生自我画像、学情画像和当前科目，为学生制定一组具体、可执行、可检查的学习任务建议。",
+    mustUse: ["学情陈述等学生原始表达", "学情问卷", "学生自我画像", "学情画像", "当前科目", "已确认的学习目标"],
     mustNot: ["重新做整体画像", "安排具体周历时间", "分析错题图片", "生成每日反思表", "生成资料推荐", "只生成单个任务"],
     output: "JSON: strategy_suggestion, ai_note, tasks",
   },
@@ -126,16 +126,12 @@ function studentBase(answers = {}) {
 export function buildProfileArchiveSnapshot({
   answers = {},
   records = [],
-  dailyReflections = [],
-  weeklyDiscussions = [],
 } = {}) {
   return {
     policy: profileSourcePolicy,
     student: studentBase(answers),
     questionnaire: answers || {},
     statements: records || [],
-    dailyReflections,
-    weeklyDiscussions,
   };
 }
 
@@ -145,8 +141,6 @@ export function buildStrategyArchiveSnapshot({
   aiInsight = null,
   strategies = null,
   activeSubject = "",
-  dailyReflections = [],
-  weeklyDiscussions = [],
 } = {}) {
   return {
     policy: {
@@ -161,8 +155,6 @@ export function buildStrategyArchiveSnapshot({
       coreProblemText: answers?.coreProblemText || "",
     },
     recentStatements: records || [],
-    dailyReflections,
-    weeklyDiscussions,
     strategies,
   };
 }
@@ -172,8 +164,6 @@ export function buildPlanArchiveSnapshot({
   records = [],
   strategies = null,
   plans = null,
-  dailyReflections = [],
-  weeklyDiscussions = [],
 } = {}) {
   return {
     policy: {
@@ -183,8 +173,6 @@ export function buildPlanArchiveSnapshot({
     defaultTimePolicy: defaultStudyPlanTimePolicy,
     student: studentBase(answers),
     recentStatements: records || [],
-    dailyReflections,
-    weeklyDiscussions,
     strategies,
     plans,
   };

@@ -34,6 +34,48 @@ button:disabled {
   opacity: 0.45;
 }
 
+.app-error-fallback {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background: #eef3f7;
+}
+
+.app-error-fallback .panel {
+  width: min(620px, 100%);
+  display: grid;
+  gap: 12px;
+}
+
+.app-error-fallback h1 {
+  margin: 0;
+  color: #111820;
+  font-size: 28px;
+}
+
+.app-error-fallback p,
+.app-error-fallback small {
+  margin: 0;
+  color: #48534d;
+  line-height: 1.7;
+}
+
+.app-error-fallback small {
+  color: #7a847d;
+}
+
+.ai-waiting-note {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(46, 91, 255, 0.18);
+  border-radius: 8px;
+  background: #f7f9ff;
+  color: #344039;
+  font-weight: 800;
+  line-height: 1.7;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: 268px minmax(0, 1fr);
