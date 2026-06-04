@@ -901,6 +901,7 @@ const profileSections = [
   {
     index: "一",
     title: "学情主诉",
+    scoreKeys: ["execution", "method", "habit", "motivation", "emotion"],
     score: 6.5,
     question: "孩子的学习主要的问题是？",
     finding: "学生已经能说出自己的学习困扰，但问题还需要继续拆到科目、场景和错因。",
@@ -913,6 +914,7 @@ const profileSections = [
   {
     index: "二",
     title: "心智发展水平",
+    scoreKeys: ["motivation", "execution", "emotion"],
     score: 6.2,
     question: "孩子当前心理发展水平是否适应学习要求？",
     finding: "孩子能配合学习，但面对挫折、压力和长期任务时稳定性不足。",
@@ -925,6 +927,7 @@ const profileSections = [
   {
     index: "三",
     title: "学习动机",
+    scoreKeys: ["motivation"],
     score: 6.0,
     question: "孩子的学习动机如何？",
     finding: "学习意愿存在，但更依赖外部压力，内部成就感还不稳定。",
@@ -937,6 +940,7 @@ const profileSections = [
   {
     index: "四",
     title: "知识基础与能力",
+    scoreKeys: ["method", "subject_strategy"],
     score: 5.7,
     question: "知识储备和能力水平是否具备进一步学习的基础？",
     finding: "部分科目存在前置知识漏洞，尤其是综合题、模型题和错题复现。",
@@ -949,6 +953,7 @@ const profileSections = [
   {
     index: "五",
     title: "科目学习策略",
+    scoreKeys: ["subject_strategy"],
     score: 5.8,
     question: "孩子的科目学习策略是否正确？",
     finding: "当前学习方式偏被动，科目之间缺少差异化策略。",
@@ -961,6 +966,7 @@ const profileSections = [
   {
     index: "六",
     title: "学习链完整度",
+    scoreKeys: ["execution"],
     score: 5.4,
     question: "孩子是否具有相对稳定的知识生产流程？",
     finding: "预习、上课、作业、改错、复习、测试之间没有形成完整闭环。",
@@ -973,6 +979,7 @@ const profileSections = [
   {
     index: "七",
     title: "学习秩序与任务处理",
+    scoreKeys: ["execution", "habit"],
     score: 6.1,
     question: "孩子面对繁杂任务时，是否能持续、有效、有序地学习？",
     finding: "孩子有一定学习意愿，但任务安排、时间管理和反馈机制不够稳定。",
@@ -985,6 +992,7 @@ const profileSections = [
   {
     index: "八",
     title: "学习方法与习惯",
+    scoreKeys: ["method", "habit"],
     score: 6.3,
     question: "孩子是否具有提高学习效率的核心方法或素质？",
     finding: "孩子有部分方法意识，但错题复测、总结反思和主动复习还不稳定。",
@@ -997,6 +1005,7 @@ const profileSections = [
   {
     index: "九",
     title: "核心能力训练",
+    scoreKeys: ["method", "subject_strategy"],
     score: 5.9,
     question: "孩子日常学习任务中，是否安排有提高核心能力的关键事项？",
     finding: "核心能力训练还不够明确，需要把数学逻辑、语文分析、英语输入等训练长期化。",
@@ -1009,6 +1018,7 @@ const profileSections = [
   {
     index: "十",
     title: "情绪精力与关系管理",
+    scoreKeys: ["emotion"],
     score: 6.4,
     question: "孩子的情绪、精力、人际关系管理如何？",
     finding: "精力、压力、手机和关系因素可能影响晚间学习效率。",
@@ -1019,6 +1029,83 @@ const profileSections = [
     suggestion: "如果该项影响明显，先处理睡眠、手机、家庭沟通和情绪压力，再安排高强度学习任务。",
   },
 ];
+
+const profileStructuredFieldLabels = {
+  riskPoints: "主要风险",
+  aiInferences: "AI判断",
+  priorityFocus: "优先改进",
+  confirmedFacts: "主要证据",
+  followUpQuestions: "后续追问",
+};
+
+const profileStructuredFieldKeys = Object.keys(profileStructuredFieldLabels);
+
+function isPlainProfileObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function hasProfileStructuredKeys(value) {
+  return isPlainProfileObject(value) && profileStructuredFieldKeys.some((key) => Object.prototype.hasOwnProperty.call(value, key));
+}
+
+function flattenProfileValue(value) {
+  if (typeof value === "string") return value.trim() ? [value.trim()] : [];
+  if (typeof value === "number" || typeof value === "boolean") return [String(value)];
+  if (Array.isArray(value)) return value.flatMap((item) => flattenProfileValue(item));
+  if (isPlainProfileObject(value)) return Object.values(value).flatMap((item) => flattenProfileValue(item));
+  return [];
+}
+
+function dedupeProfileItems(items, max = 8) {
+  const seen = new Set();
+  return items
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => {
+      if (!item || seen.has(item)) return false;
+      seen.add(item);
+      return true;
+    })
+    .slice(0, max);
+}
+
+function collectProfileStructuredFields(profile) {
+  const result = Object.fromEntries(profileStructuredFieldKeys.map((key) => [key, []]));
+  const visit = (value, depth = 0) => {
+    if (depth > 4 || !value) return;
+    if (Array.isArray(value)) {
+      value.forEach((item) => visit(item, depth + 1));
+      return;
+    }
+    if (!isPlainProfileObject(value)) return;
+    Object.entries(value).forEach(([key, item]) => {
+      if (profileStructuredFieldKeys.includes(key)) {
+        result[key].push(...flattenProfileValue(item));
+      } else if (isPlainProfileObject(item) || Array.isArray(item)) {
+        visit(item, depth + 1);
+      }
+    });
+  };
+  visit(profile);
+  return Object.fromEntries(Object.entries(result).map(([key, items]) => [key, dedupeProfileItems(items, 10)]));
+}
+
+function normalizeProfileScoreValue(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  const scaled = number > 10 && number <= 100 ? number / 10 : number;
+  return Math.min(10, Math.max(1, scaled));
+}
+
+function resolveProfileSectionScore(section, scores = {}) {
+  const values = (section.scoreKeys || [])
+    .map((key) => normalizeProfileScoreValue(scores[key]))
+    .filter((value) => value !== null);
+  if (!values.length) {
+    return { value: section.score, source: "参考评分" };
+  }
+  const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+  return { value: Number(average.toFixed(1)), source: "AI评分" };
+}
 
 const strategySubjects = ["语文", "数学", "英语", "物理", "化学", "生物", "历史", "政治", "体育"];
 const mistakeGradeOptions = [
@@ -2288,12 +2375,10 @@ function App() {
     if (typeof value === "string") return value.trim() || fallback;
     if (typeof value === "number" || typeof value === "boolean") return String(value);
     if (Array.isArray(value)) return value.map((item) => normalizeProfileText(item, "")).filter(Boolean).join("；") || fallback;
+    if (hasProfileStructuredKeys(value)) return "";
     if (value && typeof value === "object") {
-      return Object.entries(value)
-        .map(([key, item]) => {
-          const text = normalizeProfileText(item, "");
-          return text ? `${key}：${text}` : "";
-        })
+      return Object.values(value)
+        .map((item) => normalizeProfileText(item, ""))
         .filter(Boolean)
         .join("；") || fallback;
     }
@@ -2315,15 +2400,29 @@ function App() {
   }
 
   function normalizeProfileInsight(profile = {}, source = "") {
+    const structured = collectProfileStructuredFields(profile);
+    const riskItems = structured.riskPoints.map((item) => `${profileStructuredFieldLabels.riskPoints}：${item}`);
+    const inferenceItems = structured.aiInferences.map((item) => `${profileStructuredFieldLabels.aiInferences}：${item}`);
+    const focusItems = structured.priorityFocus.map((item) => `${profileStructuredFieldLabels.priorityFocus}：${item}`);
+    const factItems = structured.confirmedFacts.map((item) => item);
+    const followUpItems = structured.followUpQuestions.map((item) => item);
+    const reasons = dedupeProfileItems([...normalizeProfileList(profile.reasons), ...riskItems, ...inferenceItems, ...focusItems], 8);
+    const evidence = dedupeProfileItems([...normalizeProfileList(profile.evidence), ...factItems], 8);
+    const questions = dedupeProfileItems([...normalizeProfileList(profile.questions), ...followUpItems], 6);
+    const coreText = normalizeProfileText(profile.core || profile.core_problem, "");
+    const summaryText = normalizeProfileText(profile.summary, "");
+    const nextText = normalizeProfileText(profile.next, "");
+    const archiveConclusionText = normalizeProfileText(profile.archiveConclusion || profile.archive_conclusion, "");
+
     return {
-      summary: normalizeProfileText(profile.summary, "AI已完成学情综合分析。"),
-      core: normalizeProfileText(profile.core || profile.core_problem, "当前需要继续区分问题主要来自基础、方法、习惯、动力还是情绪压力。"),
-      reasons: normalizeProfileList(profile.reasons),
-      evidence: normalizeProfileList(profile.evidence),
+      summary: summaryText || (evidence.length ? "AI已完成学情综合分析，以下判断来自问卷和学情陈述中的具体证据。" : "AI已完成学情综合分析。"),
+      core: coreText || structured.priorityFocus[0] || structured.riskPoints[0] || "当前需要继续区分问题主要来自基础、方法、习惯、动力还是情绪压力。",
+      reasons,
+      evidence,
       tags: normalizeProfileList(profile.tags),
-      questions: normalizeProfileList(profile.questions),
-      next: normalizeProfileText(profile.next, "建议先补充关键证据，再进入学习任务制定。"),
-      archiveConclusion: normalizeProfileText(profile.archiveConclusion || profile.archive_conclusion, "已根据当前档案形成阶段性学情判断。"),
+      questions,
+      next: nextText || focusItems[0]?.replace(`${profileStructuredFieldLabels.priorityFocus}：`, "") || "建议先补充关键证据，再进入学习任务制定。",
+      archiveConclusion: archiveConclusionText || "已根据当前档案形成阶段性学情判断。",
       scores: normalizeProfileScores(profile.scores),
       source,
     };
@@ -7327,6 +7426,14 @@ function ModernProfilePage({
     }));
   }
 
+  const profileEvidence = aiInsight?.evidence?.slice(0, 4) || [];
+  const profileReasons = aiInsight?.reasons?.slice(0, 5) || [];
+  const profileQuestions = aiInsight?.questions?.slice(0, 4) || [];
+  const profileSectionRows = profileSections.map((section) => {
+    const score = resolveProfileSectionScore(section, aiInsight?.scores);
+    return { ...section, displayScore: score.value, scoreSource: score.source };
+  });
+
   return (
     <section className="stack">
       <div className="hero-band compact">
@@ -7367,26 +7474,64 @@ function ModernProfilePage({
             updateSourceSelection={updateSourceSelection}
           />
           <div className="profile-unified-body">
-            <h3>{aiStatus === "loading" ? "AI正在阅读完整问卷和学情陈述，生成学生整体画像。" : aiInsight?.core || "点击“AI统一分析画像”后，这里会显示学生学习问题的整体判断。"}</h3>
-            <p>
+            <div className="profile-analysis-grid">
+              <article className="profile-analysis-card is-primary">
+                <span>核心判断</span>
+                <h3>{aiStatus === "loading" ? "AI正在阅读完整问卷和学情陈述。" : aiInsight?.core || "点击“AI统一分析画像”后，这里会显示学生学习问题的整体判断。"}</h3>
+                <p>
+                  {aiStatus === "loading"
+                    ? "学情问卷内容较多，分析可能需要几十秒到几分钟。AI会先整理证据，再形成判断。"
+                    : aiInsight?.summary || "AI只阅读学情问卷和学情陈述，不引用每日反思、每周讨论或其他页面资料。"}
+                </p>
+              </article>
+              <article className="profile-analysis-card">
+                <span>主要证据</span>
+                {profileEvidence.length > 0 ? (
+                  <ul>
+                    {profileEvidence.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>生成画像后，这里会列出来自问卷和学情陈述的具体证据。</p>
+                )}
+              </article>
+              <article className="profile-analysis-card">
+                <span>优先改进</span>
+                {profileReasons.length > 0 ? (
+                  <ul>
+                    {profileReasons.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>AI会把最需要先处理的问题放在这里，避免一次改太多。</p>
+                )}
+              </article>
+              <article className="profile-analysis-card">
+                <span>后续追问</span>
+                {profileQuestions.length > 0 ? (
+                  <ul>
+                    {profileQuestions.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>如果证据还不够，AI会列出需要继续确认的问题。</p>
+                )}
+              </article>
+            </div>
+            <p className="profile-analysis-summary">
               {aiStatus === "loading"
-                ? "学情问卷内容较多时，分析可能需要几十秒到几分钟。请不要刷新页面；AI会先梳理基础、课堂、作业、错题、复习、考试、学习环境和薄弱科目，再结合学生自己的陈述形成判断。"
-                : aiInsight?.archiveConclusion || "AI只阅读学情问卷和学情陈述，综合判断学生的基础、方法、执行、习惯、动机和情绪精力等情况。每日反思、每周讨论、错题专项、知识笔记、学习日历和资料库保持独立，不进入画像分析。"}
+                ? "分析期间请不要刷新页面。完成后系统会保存最近一次画像，学生下次进入时默认看到最新结果。"
+                : aiInsight?.archiveConclusion || "画像分析只用于形成阶段性学习判断，后续仍需要结合学生反馈不断修正。"}
             </p>
-            {aiInsight?.summary && <p>{aiInsight.summary}</p>}
-            {aiInsight?.reasons?.length > 0 && (
-              <ul className="profile-unified-list">
-                {aiInsight.reasons.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            )}
             <p className="profile-source-note">当前画像来源：学情陈述 {statementCount} 条，问卷完成度 {completion}%。</p>
           </div>
         </section>
 
         <div className="profile-accordion">
-          {profileSections.map((section) => (
+          {profileSectionRows.map((section) => (
             <details className="profile-detail" key={section.title} id={`profile-${section.index}`}>
               <summary>
                 <div className="profile-summary-main">
@@ -7397,8 +7542,9 @@ function ModernProfilePage({
                   </div>
                 </div>
                 <div className="profile-score">
-                  <b>{section.score.toFixed(1)} / 10</b>
-                  <i style={{ "--value": `${section.score * 10}%` }} />
+                  <b>{section.displayScore.toFixed(1)} / 10</b>
+                  <small>{section.scoreSource}</small>
+                  <i style={{ "--value": `${section.displayScore * 10}%` }} />
                 </div>
               </summary>
               <div className="profile-detail-body">
