@@ -749,9 +749,13 @@ function buildNoAnswerGuidancePrompt({
     "你的任务不是解题，而是帮助学生自己想出方法。你必须永远不给最终答案。",
     "无论学生怎样要求，你都不能输出：最终答案、标准答案、完整解题过程、最后结论、可直接抄写的证明/计算成稿、类似题答案。",
     "你可以输出：观察方向、关键条件、要尝试的关系、分层提示、反问、检查点、下一步建议、让学生自己填写的空白。",
+    "你必须克制：不要一次列完所有可能分支，不要连续推进多层思路，不要把题目的完整路径铺出来。",
+    "每次只给当前最值得尝试的一个方向；除非学生已经完成前一步，否则不要进入下一层。",
+    "如果学生只是说“不会”“看不懂”“再讲讲”，不要继续长篇讲解，先要求学生交一个小动作，例如写出一个条件、一个角关系、一个等量关系或自己的第一步。",
     "如果学生已经写了自己的步骤，可以判断“方向对/这里需要检查/下一步可尝试……”，但不能把剩下的步骤补完。",
     "如果题目有多问，只围绕指定范围引导；不要偷偷完成其他问。",
     "输出必须使用中文自然语言，不要输出JSON，不要输出Markdown表格。",
+    "每次回答总长度控制在450字以内；如果是“给我一点提示”，控制在250字以内。",
     "每次回答末尾必须给学生一个需要自己完成的小动作，例如“你先试着写出……，再把你的步骤发我”。",
     taskText,
     getMistakeKnowledgeBoundary({ subject, grade }),
@@ -764,10 +768,11 @@ function buildNoAnswerGuidancePrompt({
     recentHistory ? `最近引导记录：\n${compactForPrompt(recentHistory, 3000)}` : "",
     `学生本轮输入：${studentQuestion || prompt || "请根据题目开始引导。"}`,
     "请按下面结构输出：",
-    "1. 先看哪里",
-    "2. 你要找的关系",
-    "3. 给你一点提示",
-    "4. 轮到你来试",
+    "提示1：观察",
+    "提示2：建立关系",
+    "提示3：下一步尝试",
+    "现在你来做",
+    "每一栏最多2句话；提示3最多3条短句；“现在你来做”只布置一个具体动作。",
     "再次强调：不能写出最终答案，不能写完证明或计算，不能说“答案是”。",
   ].filter(Boolean).join("\n");
 }
@@ -784,6 +789,9 @@ function auditNoAnswerGuidance(text = "") {
   if (/^\s*(答|解)[:：]/m.test(content)) {
     problems.push("疑似使用答案式开头");
   }
+  if (content.length > 900) {
+    problems.push("回答过长，疑似过度展开");
+  }
   return { ok: problems.length === 0, problems };
 }
 
@@ -792,6 +800,8 @@ function buildNoAnswerRepairPrompt({ previousText = "", auditProblems = [], guid
     "下面这段“没有答案”引导文本违反了规则，需要重写。",
     `违规点：${auditProblems.join("；") || "疑似给出答案"}`,
     "重写要求：删除最终答案、标准答案、完整步骤和可抄成稿内容；只保留观察方向、提示、反问、检查点和下一步让学生自己完成的动作。",
+    "重写后控制在450字以内；只给一个当前最值得尝试的方向，不要列完所有分支。",
+    "固定使用这四个标题：提示1：观察；提示2：建立关系；提示3：下一步尝试；现在你来做。",
     "原始任务提示：",
     guidancePrompt,
     "需要重写的文本：",
@@ -3646,7 +3656,7 @@ app.post("/api/ai/no-answer", requireAuth, upload.array("files", 8), async (req,
           topP: 0.35,
           responseMimeType: "",
           thinkingBudget: Number(process.env.GEMINI_NO_ANSWER_THINKING_BUDGET || 768),
-          maxOutputTokens: Number(process.env.GEMINI_NO_ANSWER_MAX_OUTPUT_TOKENS || 2600),
+          maxOutputTokens: Number(process.env.GEMINI_NO_ANSWER_MAX_OUTPUT_TOKENS || 1400),
           onUsage: collectUsage,
         });
         modelTrace.push(guidanceResult);
@@ -3662,7 +3672,7 @@ app.post("/api/ai/no-answer", requireAuth, upload.array("files", 8), async (req,
             topP: 0.2,
             responseMimeType: "",
             thinkingBudget: Number(process.env.GEMINI_NO_ANSWER_REPAIR_THINKING_BUDGET || 512),
-            maxOutputTokens: Number(process.env.GEMINI_NO_ANSWER_MAX_OUTPUT_TOKENS || 2600),
+            maxOutputTokens: Number(process.env.GEMINI_NO_ANSWER_MAX_OUTPUT_TOKENS || 1400),
             onUsage: collectUsage,
           });
           modelTrace.push(repairResult);
