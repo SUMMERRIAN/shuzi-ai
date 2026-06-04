@@ -5739,8 +5739,6 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, status
             <div>
               <span className="eyebrow">留言版块</span>
               <h2>学习问题与心得交流</h2>
-              <p className="forum-toolbar-note">置顶公告固定在最上方；普通帖子按最新发帖和最新回复自动前移。</p>
-              {status !== "idle" && <p className="forum-status-text">{status === "loading" ? "正在读取社区帖子..." : status === "saving" ? "正在保存..." : "社区数据暂时不可用"}</p>}
             </div>
             <button type="button" className="primary-action forum-new-post-button" onClick={() => openCompose(activeForumTab === "moderator" ? "向版主提问" : "学习问题")} disabled={status === "saving"}>
               <Plus size={17} />
