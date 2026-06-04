@@ -1253,7 +1253,7 @@ p {
 }
 
 .home-hero {
-  grid-template-columns: minmax(0, 1fr) 110px;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
   align-items: center;
   padding: clamp(28px, 3.2vw, 42px);
   background:
@@ -1261,11 +1261,40 @@ p {
     #ffffff;
 }
 
-.home-hero .strategy-status {
-  justify-self: end;
-  width: 110px;
-  min-height: 96px;
-  text-align: center;
+.home-hero h2 {
+  max-width: 880px;
+  margin: 12px 0 10px;
+  color: #0f1a14;
+  font-size: clamp(34px, 3.6vw, 54px);
+  line-height: 1.05;
+  letter-spacing: 0;
+}
+
+.home-hero p {
+  max-width: 920px;
+  margin: 0;
+  color: #344039;
+  font-size: 17px;
+  line-height: 1.8;
+}
+
+.home-hero-note {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border: 1px solid rgba(0, 134, 83, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.home-hero-note strong {
+  color: #008653;
+  font-size: 15px;
+}
+
+.home-hero-note span {
+  color: #344039;
+  line-height: 1.65;
 }
 
 .home-belief {
@@ -1357,7 +1386,7 @@ p {
 }
 
 .home-workflow {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .home-case-grid {
@@ -1391,6 +1420,132 @@ p {
 .home-case-grid article p {
   margin-bottom: 0;
   color: #48534d;
+}
+
+.home-module-panel,
+.home-logic-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.home-module-list {
+  display: grid;
+  gap: 10px;
+}
+
+.home-module-card {
+  border: 1px solid #dfe5da;
+  border-radius: 8px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.home-module-card summary {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 24px;
+  gap: 12px;
+  align-items: center;
+  min-height: 72px;
+  padding: 12px 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.home-module-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.home-module-card summary > span {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 8px;
+  background: #f0f7ea;
+  color: #008653;
+  font-weight: 950;
+}
+
+.home-module-card summary strong {
+  display: block;
+  color: #111820;
+  font-size: 18px;
+}
+
+.home-module-card summary p {
+  margin: 4px 0 0;
+  color: #53625a;
+  line-height: 1.55;
+}
+
+.home-module-card summary svg {
+  color: #008653;
+  transition: transform 0.16s ease;
+}
+
+.home-module-card[open] summary svg,
+.home-module-card:hover summary svg {
+  transform: rotate(180deg);
+}
+
+.home-module-card[open],
+.home-module-card:hover {
+  border-color: #b7dbc6;
+  background: #fbfdf9;
+}
+
+.home-module-detail {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0 16px 16px;
+}
+
+.home-module-detail article {
+  padding: 12px;
+  border: 1px solid #e3e8de;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.home-module-detail em {
+  display: block;
+  margin-bottom: 6px;
+  color: #008653;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.home-module-detail p {
+  margin: 0;
+  color: #344039;
+  line-height: 1.65;
+}
+
+.home-logic-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.home-logic-grid article {
+  padding: 16px;
+  border: 1px solid #dfe5da;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.home-logic-grid strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #111820;
+  font-size: 17px;
+}
+
+.home-logic-grid p {
+  margin: 0;
+  color: #48534d;
+  line-height: 1.7;
 }
 
 .expert-page {
@@ -7192,6 +7347,7 @@ audio {
   .strategy-grid,
   .availability-editor,
   .home-about-grid,
+  .home-hero,
   .mistake-ai-stage,
   .mistake-meta-row,
   .mistake-archive-layout,
@@ -7273,6 +7429,12 @@ audio {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .home-workflow,
+  .home-module-detail,
+  .home-logic-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .analysis-target {
     position: static;
   }
@@ -7302,6 +7464,8 @@ audio {
   .home-workflow,
   .home-case-grid,
   .home-about-grid,
+  .home-module-detail,
+  .home-logic-grid,
   .expert-hero,
   .expert-intro-grid,
   .expert-lead-panel,

@@ -4474,7 +4474,7 @@ function App() {
           </div>
         )}
 
-        {activePage === "home" && <HomePage setActivePage={setActivePage} />}
+        {activePage === "home" && <HomePage />}
 
         {activePage === "questionnaire" && (
           <QuestionnairePage
@@ -4808,59 +4808,131 @@ function App() {
   );
 }
 
-function HomePage({ setActivePage }) {
+function HomePage() {
   const workflow = [
-    ["1", "学习问题分析", "通过学情问卷、学情陈述和学生自评，先把孩子的问题说清楚。"],
-    ["2", "形成学情画像", "把问卷、陈述、AI分析和学生自我评价整合成可理解的画像报告。"],
-    ["3", "生成学习任务", "每个科目形成具体学习任务、资料使用方法和完成标准。"],
-    ["4", "学习计划与训练", "把任务安排进每周计划，并通过错题专项和知识笔记持续训练。"],
+    ["01", "先了解", "用问卷和陈述收集真实学情，不急着给建议。"],
+    ["02", "再判断", "AI整合资料形成学情画像，把问题分清楚。"],
+    ["03", "拆任务", "按科目生成可以执行、检查和保存的学习任务。"],
+    ["04", "排计划", "把任务放进一周时间表，形成每周学习档案。"],
+    ["05", "持续练", "用错题、没有答案、知识图和自由问做长期训练。"],
+  ];
+  const modules = [
+    {
+      title: "学情问卷",
+      summary: "先把学习基础、课堂、作业、错题、复习和环境问题问清楚。",
+      purpose: "建立第一份学生学习档案，让后续AI判断不是凭空猜测。",
+      operation: "按步骤填写核心问题，再展开薄弱科目。保存后会进入个人学情档案。",
+      ai: "后续学情画像、学习任务和学习计划会参考这些问卷资料。",
+    },
+    {
+      title: "学情陈述",
+      summary: "让学生用自己的话说清楚真实困扰。",
+      purpose: "补足问卷表达不了的细节，例如上课听懂但作业卡住、晚上执行困难、错题反复错。",
+      operation: "选择主题和发生场景，写下具体问题；保存后的陈述会作为AI最优先参考的原始资料。",
+      ai: "AI会优先读学生自己的表达，再结合问卷和其他档案。",
+    },
+    {
+      title: "学情画像",
+      summary: "AI把问卷、陈述、反思和讨论整合成整体学习判断。",
+      purpose: "帮助学生和家长看见问题结构：基础、方法、习惯、执行、动力和情绪精力。",
+      operation: "选择已有档案后点击AI分析；页面默认展示最近一次AI画像结果。",
+      ai: "画像负责判断问题，不负责直接安排周计划或讲错题。",
+    },
+    {
+      title: "学习任务",
+      summary: "把学情问题拆成每个科目可以执行的学习任务。",
+      purpose: "避免只说“多刷题、认真复习”，改成明确任务、资料、时间和完成标准。",
+      operation: "选择科目和档案来源，生成任务建议；学生可以补充说明，也可以保存自己设计的任务。",
+      ai: "AI引用资料有优先级：学生原始陈述优先，其次问卷，再参考画像资料。",
+    },
+    {
+      title: "学习计划",
+      summary: "把学习任务安排进一周时间表。",
+      purpose: "让任务真正落到每天的时间、内容和备注里，避免计划停留在口号。",
+      operation: "选择资料来源，生成或手动修改周计划；可以保存学习计划档案和每周反思讨论。",
+      ai: "计划只根据问卷、陈述和已保存学习任务安排，不引用学情画像结果。",
+    },
+    {
+      title: "错题专项",
+      summary: "上传错题、作业或试卷，AI讲解、分析和生成类似题。",
+      purpose: "帮助学生把错题从“改过一遍”变成真正理解、复测和迁移。",
+      operation: "上传图片或文件，选择年级、科目和处理范围；生成后可以继续追问当前题。",
+      ai: "第一次会识别材料并生成报告，后续追问只围绕当前题继续讲，不重新走上传逻辑。",
+    },
+    {
+      title: "没有答案",
+      summary: "AI只引导思考，永远不给最终答案。",
+      purpose: "训练学生自己观察、找关系、提出下一步，而不是直接等答案。",
+      operation: "上传题目或写下想法，选择引导方式；快捷模式只是本轮辅助，发送后自动回到自由交流。",
+      ai: "AI只能给观察方向、分层提示、检查点和小动作，不能给标准答案或完整过程。",
+    },
+    {
+      title: "知识笔记",
+      summary: "把知识点生成可视化知识图。",
+      purpose: "帮助学生把概念、结构、关系和易错点整理成更容易复习的图。",
+      operation: "输入知识点生成知识图；如果不满意，可以在当前图基础上继续提出修改意见。",
+      ai: "首次生成走知识图模板；已有图片后会按学生修改意见迭代当前图。",
+    },
+    {
+      title: "学习日历",
+      summary: "记录学习安排、提醒和重要学习事件。",
+      purpose: "把计划、任务、复习和资料时间点放进日历，方便长期跟踪。",
+      operation: "创建日历事件，添加资料或备注；适合记录复习、考试、任务截止和反思时间。",
+      ai: "日历保持独立，不直接进入学情画像判断。",
+    },
+    {
+      title: "学习资料库",
+      summary: "保存试卷、错题、笔记、资料和学习文件。",
+      purpose: "形成长期可查的个人学习资料空间，而不是资料散落在聊天和文件夹里。",
+      operation: "上传文件、创建文件夹、写备注；资料可以按需要查看和下载。",
+      ai: "资料库主要用于保存和管理，不自动混入学情画像。",
+    },
+    {
+      title: "学习社区",
+      summary: "发布学习问题、经验和讨论。",
+      purpose: "让学生把学习中的困惑和方法交流留在一个地方，形成讨论记录。",
+      operation: "发帖、配图、回复，也可以向版主提问。",
+      ai: "社区内容独立保存，不进入个人画像分析。",
+    },
+    {
+      title: "AI自由问",
+      summary: "处理临时问题、图片、文件、知识点和一般学习交流。",
+      purpose: "给学生一个灵活入口，用来问临时问题或处理不属于固定页面的学习需求。",
+      operation: "输入文字、上传图片或文件，AI会先判断本轮意图再回答。",
+      ai: "自由问保持独立，不参与学情画像和学习计划判断。",
+    },
+  ];
+  const logic = [
+    ["真实资料优先", "先读学生自己写的学情陈述和补充说明，再结合问卷和AI分析。"],
+    ["模块分工清楚", "画像负责判断问题，任务负责拆行动，计划负责安排时间，错题和知识图负责训练。"],
+    ["长期档案沉淀", "问卷、陈述、任务、计划、反思和讨论会逐步形成个人学习档案。"],
+    ["AI不替代学生", "有些页面负责讲清楚，有些页面只引导思考；目的都是让学生越来越能自己学习。"],
   ];
   return (
     <section className="stack home-page">
-      <div className="hero-band compact home-hero">
+      <section className="hero-band compact home-hero">
         <div>
           <span className="eyebrow">树子AI · 个人AI学习教练</span>
-          <div className="home-belief">让AI更懂你，它就可以更好的帮助你！</div>
+          <h2>先了解学生，再帮助学习。</h2>
+          <p>
+            树子AI不是一个随便问答的聊天工具，而是一套个人学习辅助系统。它先收集真实学情，再生成画像、任务和计划，并用错题、没有答案、知识笔记和自由问陪伴学生长期训练。
+          </p>
         </div>
-        <div className="strategy-status">
-          <strong>AI</strong>
-          <span>学习教练</span>
+        <div className="home-hero-note">
+          <strong>给学生</strong>
+          <span>知道自己卡在哪里，下一步该怎么做。</span>
+          <strong>给家长</strong>
+          <span>看见孩子学习问题的结构，而不是只看分数。</span>
         </div>
-      </div>
+      </section>
 
       <section className="panel home-about-panel">
         <div className="panel-heading">
           <div>
-            <span className="eyebrow">什么是树子AI？</span>
-            <h2>一个帮助学生学习成长的AI学习伙伴</h2>
-          </div>
-          <Sparkles size={24} />
-        </div>
-        <div className="home-about-grid">
-          <article className="home-about-main">
-            <strong>核心理念：让AI更了解你的学习情况，从而更精准地帮助你。</strong>
-            <p>
-              树子AI会先了解学生的问卷、陈述、试卷和错题，再帮助分析学习问题、生成学习任务、安排学习计划、整理错题和知识盲点，并陪伴学生长期改进。
-            </p>
-          </article>
-          <article>
-            <strong>学生可以随时提问</strong>
-            <p>学习问题、方法困惑、计划安排、复习方向、作业题目和知识点，都可以在这里继续追问。</p>
-          </article>
-        </div>
-      </section>
-
-      <section className="panel">
-        <div className="panel-heading">
-          <div>
-            <span className="eyebrow">工作流程</span>
-            <h2>从学情分析到个性化训练</h2>
+            <span className="eyebrow">整体流程</span>
+            <h2>从看清问题，到形成能执行的学习闭环</h2>
           </div>
           <Brain size={24} />
-        </div>
-        <div className="home-flow-intro">
-          <h3>先看清孩子的学习问题，再设计真正能执行的学习通路</h3>
-          <p>先通过问卷、陈述和学习材料了解孩子，再生成学情画像，继续生成学习任务、学习计划、错题训练和知识笔记，帮助学生把问题一步步转化成可以执行的行动。</p>
         </div>
         <div className="home-workflow">
           {workflow.map(([index, title, desc]) => (
@@ -4871,13 +4943,69 @@ function HomePage({ setActivePage }) {
             </article>
           ))}
         </div>
-        <div className="ai-action-row">
-          <button type="button" className="primary-action" onClick={() => setActivePage("questionnaire")}>
-            开始学情问卷
-          </button>
-          <button type="button" className="ghost-action" onClick={() => setActivePage("statement")}>
-            进入学情陈述
-          </button>
+      </section>
+
+      <section className="panel home-module-panel">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">页面说明</span>
+            <h2>每个页面分别解决什么问题</h2>
+          </div>
+          <BookOpen size={24} />
+        </div>
+        <div className="home-module-list">
+          {modules.map((item, index) => (
+            <details className="home-module-card" key={item.title} open={index === 0}>
+              <summary>
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <div>
+                  <strong>{item.title}</strong>
+                  <p>{item.summary}</p>
+                </div>
+                <ChevronDown size={18} />
+              </summary>
+              <div className="home-module-detail">
+                <article>
+                  <em>这个页面是什么</em>
+                  <p>{item.summary}</p>
+                </article>
+                <article>
+                  <em>目的</em>
+                  <p>{item.purpose}</p>
+                </article>
+                <article>
+                  <em>怎么操作</em>
+                  <p>{item.operation}</p>
+                </article>
+                <article>
+                  <em>AI如何参与</em>
+                  <p>{item.ai}</p>
+                </article>
+              </div>
+            </details>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel home-logic-panel">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">辅助逻辑</span>
+            <h2>树子AI怎样帮助学生长期改进</h2>
+          </div>
+          <Sparkles size={24} />
+        </div>
+        <div className="home-flow-intro">
+          <h3>不是直接替学生学习，而是把学习问题变成可判断、可执行、可复盘的过程。</h3>
+          <p>系统会把学生的真实表达、问卷资料、AI画像、学习任务、周计划、错题训练和每周档案串起来，形成长期学习辅助闭环。</p>
+        </div>
+        <div className="home-logic-grid">
+          {logic.map(([title, desc]) => (
+            <article key={title}>
+              <strong>{title}</strong>
+              <p>{desc}</p>
+            </article>
+          ))}
         </div>
       </section>
     </section>
