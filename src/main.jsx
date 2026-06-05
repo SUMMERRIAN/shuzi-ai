@@ -3474,8 +3474,6 @@ function App() {
     if (aiStatus === "loading") return;
     clearAiNotice();
     const archiveSnapshot = buildProfileArchiveSnapshot({ answers, records });
-    const prompt = buildAgentPrompt("profile", archiveSnapshot);
-    console.info("学情画像AI提示词", prompt);
     setAiStatus("loading");
     try {
       const data = await apiRequest("/ai/profile", {
@@ -3483,7 +3481,7 @@ function App() {
         body: JSON.stringify({ archiveSnapshot, sourceIds: buildSourceIds("profile") }),
       });
       const profile = data.profile || {};
-      setAiInsight(normalizeProfileInsight(profile, JSON.stringify(prompt)));
+      setAiInsight(normalizeProfileInsight(profile, data.jobId || "AI学情画像"));
       setAiStatus("done");
       await loadProfileArchives();
     } catch (error) {
@@ -3601,7 +3599,6 @@ function App() {
       strategies: strategyWorkspaces,
       plans: { planRows, methodFocusRows, habitFocusRows },
     });
-    console.info("学习计划AI提示词", buildAgentPrompt("plan", archiveSnapshot));
     try {
       const data = await apiRequest("/ai/study-plan", {
         method: "POST",
@@ -4088,17 +4085,6 @@ function App() {
       return;
     }
     setKnowledgeAiStatus("loading");
-    console.info(
-      "知识笔记AI提示词",
-      buildAgentPrompt(
-        "knowledgeNote",
-        buildPageOnlySnapshot({
-          page: "knowledge-note",
-          answers,
-          payload: { topic, useTemplate: knowledgeUseTemplate },
-        })
-      )
-    );
     try {
       clearAiNotice();
       const requestBody = {
@@ -4225,7 +4211,6 @@ function App() {
       strategies: strategyWorkspaces,
       activeSubject: subject,
     });
-    console.info("策略任务AI提示词", buildAgentPrompt("strategy", archiveSnapshot));
     setStrategyAiStatus("AI正在生成建议...");
     try {
       const data = await apiRequest("/ai/strategy", {
@@ -4513,23 +4498,6 @@ function App() {
     clearAiNotice();
     const selectedModel = freeAskModelOptions.find((option) => option.value === freeAskModelChoice) || freeAskModelOptions[0];
     const wantsImage = detectFreeAskImageGenerationIntent(content);
-    console.info(
-      "AI自由问提示词",
-      buildAgentPrompt(
-        "freeAsk",
-        buildPageOnlySnapshot({
-          page: "free-ask",
-          answers,
-          payload: {
-            question: content,
-            wantsImage,
-            provider: selectedModel.provider,
-            mode: selectedModel.mode,
-            fileNames: freeAskFiles.map((file) => file.name),
-          },
-        })
-      )
-    );
     const attachmentText = freeAskFiles.length ? `已上传 ${freeAskFiles.length} 个文件，请AI根据文件回答。` : "";
     const assistantId = `ask-ai-${Date.now()}`;
     const userMessage = {

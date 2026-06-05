@@ -7,7 +7,7 @@
 - 会员状态、容量额度
 - 手动会员开通接口
 - 学情问卷、学情陈述写入学生档案
-- 试卷/错题图片分析、语音转写、相似题生成和知识图生成
+- 试卷/错题图片分析、相似题生成和知识图生成
 
 ## 环境变量
 
@@ -23,7 +23,7 @@ OPENAI_MODEL_TEXT=gpt-5.4-mini
 OPENAI_MODEL_FAST=gpt-5.4-mini
 OPENAI_MODEL_THINKING=gpt-5.4
 OPENAI_MODEL_IMAGE=gpt-image-2
-OPENAI_IMAGE_GENERATION_ENABLED=false
+OPENAI_IMAGE_GENERATION_ENABLED=true
 OPENAI_IMAGE_QUALITY=medium
 OPENAI_IMAGE_SIZE=1024x1024
 OPENAI_TIMEOUT_MS=240000
@@ -52,7 +52,9 @@ AI_COMPLETED_JOB_REUSE_MINUTES=5
 UPLOAD_DIR=/var/www/shuzi-ai/uploads
 ```
 
-AI billing is based on actual provider usage when the API returns token/image usage. The system converts provider USD cost to CNY with USD_TO_CNY, multiplies by AI_BILLING_MARKUP, then converts to learning tokens with TOKENS_PER_CNY. Fixed token amounts are only fallback values when the provider does not return usage. Identical completed background jobs can be reused within AI_COMPLETED_JOB_REUSE_MINUTES to avoid repeated billing. Image generation uses OPENAI_MODEL_IMAGE.
+AI billing is based on actual provider usage when the API returns token/image usage. The system converts provider USD cost to CNY with USD_TO_CNY, multiplies by AI_BILLING_MARKUP, then converts to learning tokens with TOKENS_PER_CNY. Fixed token amounts are only fallback values when the provider does not return usage. Identical completed background jobs can be reused within AI_COMPLETED_JOB_REUSE_MINUTES to avoid repeated billing. Image generation uses OPENAI_MODEL_IMAGE and requires OPENAI_IMAGE_GENERATION_ENABLED=true.
+
+语音陈述转写接口当前已关闭，学情陈述请使用文字填写。
 
 ## 启动
 
