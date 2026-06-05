@@ -2047,6 +2047,10 @@ function App() {
     membershipStartDate: new Date().toISOString().slice(0, 10),
     paidAmount: "",
     tokenAmount: "10000",
+    activeTab: "members",
+    aiBilling: null,
+    aiBillingStatus: "idle",
+    aiBillingRangeDays: 30,
   });
   const [checkout, setCheckout] = useState({
     planId: "",
@@ -3226,6 +3230,32 @@ function App() {
       setAdminPanel((prev) => ({ ...prev, orders: data.orders || [], message: "付款申请已刷新。" }));
     } catch (error) {
       setAdminPanel((prev) => ({ ...prev, message: error.message || "付款申请加载失败。" }));
+    }
+  }
+
+  async function loadAdminAiBilling(token = adminPanel.token.trim(), days = adminPanel.aiBillingRangeDays || 30) {
+    if (!token) {
+      setAdminPanel((prev) => ({ ...prev, message: "请先登录管理员账号。" }));
+      return;
+    }
+    setAdminPanel((prev) => ({ ...prev, aiBillingStatus: "loading", aiBillingRangeDays: days }));
+    try {
+      const data = await apiRequest(`/admin/ai-billing?days=${encodeURIComponent(days)}`, {
+        headers: { "x-admin-token": token },
+      });
+      setAdminPanel((prev) => ({
+        ...prev,
+        aiBilling: data,
+        aiBillingStatus: "done",
+        aiBillingRangeDays: data.days || days,
+        message: "AI成本对账数据已刷新。",
+      }));
+    } catch (error) {
+      setAdminPanel((prev) => ({
+        ...prev,
+        aiBillingStatus: "error",
+        message: error.message || "AI成本对账数据加载失败。",
+      }));
     }
   }
 
@@ -4963,6 +4993,7 @@ function App() {
             loginAdmin={loginAdmin}
             loadUsers={loadAdminUsers}
             loadOrders={loadAdminOrders}
+            loadAiBilling={loadAdminAiBilling}
             confirmOrder={adminConfirmOrder}
             cancelOrder={adminCancelOrder}
             activateMembership={adminActivateMembership}
@@ -6356,12 +6387,211 @@ function RecordList({ title, items, empty }) {
   );
 }
 
+function formatAdminMoney(value, currency = "CNY") {
+  const number = Number(value || 0);
+  if (currency === "USD") return `$${number.toFixed(4)}`;
+  return `¥${number.toFixed(2)}`;
+}
+
+function formatAdminNumber(value) {
+  return Number(value || 0).toLocaleString("zh-CN");
+}
+
+function formatAdminDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function AdminMetricCard({ label, value, hint, tone = "" }) {
+  return (
+    <article className={`admin-metric-card ${tone}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      {hint && <small>{hint}</small>}
+    </article>
+  );
+}
+
+function AdminAiBillingPanel({ state, setState, loadAiBilling }) {
+  const data = state.aiBilling || {};
+  const summary = data.summary || {};
+  const providerItems = ["openai", "gemini", "image", "unknown"].map((key) => data.byProvider?.[key]).filter(Boolean);
+  const records = data.records || [];
+  const features = data.byFeature || [];
+  const dailyRows = data.byDate || [];
+  const rules = data.billingRules || {};
+  const isLoading = state.aiBillingStatus === "loading";
+
+  function refreshWithDays(days = state.aiBillingRangeDays || 30) {
+    const nextDays = Number(days) || 30;
+    setState((prev) => ({ ...prev, aiBillingRangeDays: nextDays }));
+    loadAiBilling(undefined, nextDays);
+  }
+
+  return (
+    <section className="admin-billing-stack">
+      <article className="panel admin-billing-header">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">AI成本对账</span>
+            <h2>核对每次调用、真实成本和用户扣费</h2>
+            <p>这里读取已经写入云端的 AI 任务记录，用来对比 API 实际成本、用户 Token 扣除、fallback 固定扣费和各功能平均成本。</p>
+          </div>
+          <div className="admin-billing-actions">
+            <label>
+              <span>统计范围</span>
+              <select value={state.aiBillingRangeDays || 30} onChange={(event) => refreshWithDays(event.target.value)}>
+                <option value={7}>最近7天</option>
+                <option value={30}>最近30天</option>
+                <option value={90}>最近90天</option>
+              </select>
+            </label>
+            <button type="button" className="ghost-action" onClick={() => refreshWithDays(state.aiBillingRangeDays || 30)} disabled={isLoading}>
+              {isLoading ? "正在刷新" : "刷新对账"}
+            </button>
+          </div>
+        </div>
+        <div className="admin-billing-note">
+          <strong>计费规则</strong>
+          <span>倍率 {rules.markup || "-"} 倍</span>
+          <span>{rules.tokensPerCny || "-"} Token / ¥1</span>
+          <span>汇率 {rules.usdToCny || "-"}</span>
+          <span>最低扣费 {rules.minimumChargeTokens || 0} Token</span>
+        </div>
+      </article>
+
+      <div className="admin-metric-grid">
+        <AdminMetricCard label="API实际成本" value={formatAdminMoney(summary.providerCostCny)} hint={`${formatAdminMoney(summary.providerCostUsd, "USD")} 美元成本`} />
+        <AdminMetricCard label="用户扣除Token" value={formatAdminNumber(summary.billedTokens)} hint="来自 AI 调用扣费记录" />
+        <AdminMetricCard label="理论收入" value={formatAdminMoney(summary.theoreticalRevenueCny)} hint="按 Token 兑换规则估算" />
+        <AdminMetricCard label="毛利估算" value={formatAdminMoney(summary.grossCny)} hint="理论收入 - API成本" tone={Number(summary.grossCny || 0) < 0 ? "is-danger" : "is-good"} />
+        <AdminMetricCard label="AI调用次数" value={formatAdminNumber(summary.calls)} hint={`最近 ${data.days || state.aiBillingRangeDays || 30} 天`} />
+        <AdminMetricCard label="Fallback扣费" value={formatAdminNumber(summary.fallbackCalls)} hint="没有真实usage时按固定Token扣" />
+      </div>
+
+      <article className="panel admin-billing-panel">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">供应商拆分</span>
+            <h2>OpenAI、Gemini、图片生成分别看</h2>
+          </div>
+        </div>
+        <div className="admin-provider-grid">
+          {providerItems.map((item) => (
+            <article className="admin-provider-card" key={item.label}>
+              <div>
+                <span>{item.label}</span>
+                <strong>{formatAdminMoney(item.providerCostCny)}</strong>
+              </div>
+              <p>{formatAdminNumber(item.calls)} 次调用 · {formatAdminNumber(item.billedTokens)} Token</p>
+              <small>平均 {formatAdminMoney(item.avgProviderCostCny)} / 次 · fallback {item.fallbackCalls || 0} 次</small>
+            </article>
+          ))}
+        </div>
+      </article>
+
+      <article className="panel admin-billing-panel">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">功能平均成本</span>
+            <h2>每个功能单独统计</h2>
+          </div>
+        </div>
+        <div className="admin-cost-table">
+          <div className="admin-cost-head">
+            <span>功能</span>
+            <span>次数</span>
+            <span>API成本</span>
+            <span>平均成本</span>
+            <span>扣除Token</span>
+            <span>fallback</span>
+          </div>
+          {features.length === 0 && <p className="muted-text">还没有可统计的 AI 成本记录。</p>}
+          {features.map((item) => (
+            <div className="admin-cost-row" key={item.key}>
+              <strong>{item.label}</strong>
+              <span>{formatAdminNumber(item.calls)}</span>
+              <span>{formatAdminMoney(item.providerCostCny)}</span>
+              <span>{formatAdminMoney(item.avgProviderCostCny)}</span>
+              <span>{formatAdminNumber(item.billedTokens)}</span>
+              <span>{formatAdminNumber(item.fallbackCalls)}</span>
+            </div>
+          ))}
+        </div>
+      </article>
+
+      <div className="admin-billing-two-col">
+        <article className="panel admin-billing-panel">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">每日汇总</span>
+              <h2>每天的成本和扣费</h2>
+            </div>
+          </div>
+          <div className="admin-daily-list">
+            {dailyRows.length === 0 && <p className="muted-text">暂无每日对账数据。</p>}
+            {dailyRows.map((item) => (
+              <div className="admin-daily-row" key={item.date}>
+                <strong>{item.date}</strong>
+                <span>{formatAdminNumber(item.calls)} 次</span>
+                <span>{formatAdminMoney(item.providerCostCny)}</span>
+                <span>{formatAdminNumber(item.billedTokens)} Token</span>
+              </div>
+            ))}
+          </div>
+        </article>
+
+        <article className="panel admin-billing-panel">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">最近调用明细</span>
+              <h2>逐条核对</h2>
+            </div>
+          </div>
+          <div className="admin-record-scroll">
+            {records.length === 0 && <p className="muted-text">暂无调用明细。</p>}
+            {records.map((record) => (
+              <article className="admin-ai-record" key={record.id}>
+                <div>
+                  <strong>{record.featureLabel}</strong>
+                  <span>{record.identifier} {record.studentName ? `· ${record.studentName}` : ""}</span>
+                </div>
+                <div>
+                  <span>{record.providerLabel}</span>
+                  <small>{record.model}</small>
+                </div>
+                <div>
+                  <strong>{formatAdminMoney(record.providerCostCny)}</strong>
+                  <small>{record.usedFallback ? "fallback固定扣费" : `${formatAdminNumber(record.inputTokens)} 入 / ${formatAdminNumber(record.outputTokens)} 出`}</small>
+                </div>
+                <div>
+                  <span>{formatAdminNumber(record.billedTokens)} Token</span>
+                  <small>{formatAdminDateTime(record.completedAt || record.createdAt)}</small>
+                </div>
+              </article>
+            ))}
+          </div>
+        </article>
+      </div>
+    </section>
+  );
+}
+
 function AdminPanelPage({
   state,
   setState,
   loginAdmin,
   loadUsers,
   loadOrders,
+  loadAiBilling,
   confirmOrder,
   cancelOrder,
   activateMembership,
@@ -6371,6 +6601,7 @@ function AdminPanelPage({
 }) {
   const pendingOrders = (state.orders || []).filter((order) => order.status === "pending");
   const recentOrders = (state.orders || []).filter((order) => order.status !== "pending").slice(0, 10);
+  const activeTab = state.activeTab || "members";
 
   function orderAmountText(order) {
     return `¥${Number(order.amount_cny || 0).toFixed(2)}`;
@@ -6411,6 +6642,27 @@ function AdminPanelPage({
         </article>
       )}
       {state.isLoggedIn && (
+        <div className="admin-section-tabs">
+          <button
+            type="button"
+            className={activeTab === "members" ? "is-active" : ""}
+            onClick={() => setState((prev) => ({ ...prev, activeTab: "members" }))}
+          >
+            会员与充值后台
+          </button>
+          <button
+            type="button"
+            className={activeTab === "billing" ? "is-active" : ""}
+            onClick={() => {
+              setState((prev) => ({ ...prev, activeTab: "billing" }));
+              if (!state.aiBilling && state.aiBillingStatus !== "loading") loadAiBilling(undefined, state.aiBillingRangeDays || 30);
+            }}
+          >
+            AI成本对账本
+          </button>
+        </div>
+      )}
+      {state.isLoggedIn && activeTab === "members" && (
         <article className="panel admin-order-panel">
           <div className="panel-heading">
             <div>
@@ -6465,7 +6717,7 @@ function AdminPanelPage({
         </article>
       )}
 
-      {state.isLoggedIn && (
+      {state.isLoggedIn && activeTab === "members" && (
       <article className="panel admin-control-panel">
         <label>
           <span>学生用户名</span>
@@ -6525,7 +6777,7 @@ function AdminPanelPage({
       </article>
       )}
 
-      {state.isLoggedIn && (
+      {state.isLoggedIn && activeTab === "members" && (
       <article className="panel admin-user-table">
         <h2>用户列表</h2>
         <div className="admin-table-head">
@@ -6545,6 +6797,9 @@ function AdminPanelPage({
           </button>
         ))}
       </article>
+      )}
+      {state.isLoggedIn && activeTab === "billing" && (
+        <AdminAiBillingPanel state={state} setState={setState} loadAiBilling={loadAiBilling} />
       )}
     </section>
   );

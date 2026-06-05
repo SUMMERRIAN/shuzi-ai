@@ -1104,6 +1104,112 @@ function publicJob(row) {
   };
 }
 
+const aiBillingFeatureLabels = {
+  profile: "学情画像",
+  strategy: "学习任务",
+  "study-plan": "学习计划",
+  "no-answer": "没有答案",
+  "mistake-workflow": "错题专项",
+  "mistake-follow-up": "错题追问",
+  "mistake-analyze": "错题分析",
+  "mistake-practice": "相似题生成",
+  "knowledge-note": "知识图生成",
+  "knowledge-note-revision": "知识图修改",
+  "free-ask": "AI自由问",
+  transcribe: "语音转写",
+};
+
+const aiBillingProviderLabels = {
+  openai: "OpenAI",
+  gemini: "Gemini",
+  image: "图片生成",
+  unknown: "未识别",
+};
+
+function toFiniteNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function getAiBillingEvents(row) {
+  const usage = parseMaybeJson(row?.usage, {});
+  return Array.isArray(usage?.events) ? usage.events : [];
+}
+
+function getAiBillingProviderKey(row, events = getAiBillingEvents(row)) {
+  if (events.some((event) => event?.kind === "image")) return "image";
+  const providerText = [row?.provider, ...events.map((event) => event?.provider)]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (providerText.includes("gemini")) return "gemini";
+  if (providerText.includes("openai")) return "openai";
+  return "unknown";
+}
+
+function getAiBillingModelText(row, events = getAiBillingEvents(row)) {
+  return [...new Set(events.map((event) => event?.model).filter(Boolean))].join(" / ") || row?.mode || row?.provider || "-";
+}
+
+function getAiBillingTokenStats(events = []) {
+  return events.reduce(
+    (stats, event) => {
+      const usage = event?.usage || {};
+      if (event?.kind === "image") {
+        stats.images += Math.max(1, toFiniteNumber(usage.images, 1));
+        return stats;
+      }
+      const provider = String(event?.provider || "").toLowerCase();
+      if (provider === "gemini") {
+        stats.input += toFiniteNumber(usage.promptTokenCount);
+        stats.output += toFiniteNumber(usage.candidatesTokenCount) + toFiniteNumber(usage.thoughtsTokenCount);
+      } else {
+        stats.input += numberFromPaths(usage, [["input_tokens"], ["prompt_tokens"]]);
+        stats.output += numberFromPaths(usage, [["output_tokens"], ["completion_tokens"]]);
+      }
+      return stats;
+    },
+    { input: 0, output: 0, images: 0 }
+  );
+}
+
+function createAiBillingBucket(label = "") {
+  return {
+    label,
+    calls: 0,
+    providerCostUsd: 0,
+    providerCostCny: 0,
+    billedTokens: 0,
+    theoreticalRevenueCny: 0,
+    grossCny: 0,
+    fallbackCalls: 0,
+  };
+}
+
+function addAiBillingBucketTotals(bucket, item) {
+  bucket.calls += 1;
+  bucket.providerCostUsd += item.providerCostUsd;
+  bucket.providerCostCny += item.providerCostCny;
+  bucket.billedTokens += item.billedTokens;
+  bucket.theoreticalRevenueCny += item.theoreticalRevenueCny;
+  bucket.grossCny += item.grossCny;
+  if (item.usedFallback) bucket.fallbackCalls += 1;
+  return bucket;
+}
+
+function publicAiBillingBucket(bucket) {
+  const calls = Math.max(1, bucket.calls);
+  return {
+    ...bucket,
+    providerCostUsd: Number(bucket.providerCostUsd.toFixed(6)),
+    providerCostCny: Number(bucket.providerCostCny.toFixed(4)),
+    theoreticalRevenueCny: Number(bucket.theoreticalRevenueCny.toFixed(4)),
+    grossCny: Number(bucket.grossCny.toFixed(4)),
+    avgProviderCostCny: Number((bucket.providerCostCny / calls).toFixed(4)),
+    avgBilledTokens: Math.round(bucket.billedTokens / calls),
+  };
+}
+
 async function createAiJob({
   userId,
   studentId,
@@ -5040,6 +5146,119 @@ app.post("/api/admin/lt/recharge", requireAdminToken, async (req, res) => {
     }
   });
   res.json({ account: await buildAccountSnapshot(user.id) });
+});
+
+app.get("/api/admin/ai-billing", requireAdminToken, async (req, res) => {
+  const days = Math.min(90, Math.max(1, Math.floor(toFiniteNumber(req.query.days, 30))));
+  const limit = Math.min(300, Math.max(20, Math.floor(toFiniteNumber(req.query.limit, 120))));
+  const rows = (
+    await query(
+      `SELECT
+        j.id,
+        j.user_id,
+        j.student_id,
+        j.feature,
+        j.status,
+        j.provider,
+        j.mode,
+        j.usage,
+        j.provider_cost_usd,
+        j.provider_cost_cny,
+        j.billable_cny,
+        j.billing_markup,
+        j.billed_tokens,
+        j.token_cost,
+        j.created_at,
+        j.completed_at,
+        u.identifier,
+        u.display_name,
+        s.name AS student_name
+       FROM ai_generation_jobs j
+       LEFT JOIN users u ON u.id = j.user_id
+       LEFT JOIN students s ON s.id = j.student_id
+       WHERE j.created_at >= now() - ($1::text || ' days')::interval
+       ORDER BY j.created_at DESC
+       LIMIT 5000`,
+      [days]
+    )
+  ).rows;
+
+  const tokensPerCny = Math.max(1, Number(tokenBillingRules.tokensPerCny || 100));
+  const summary = createAiBillingBucket("全部AI调用");
+  const byProvider = Object.fromEntries(
+    Object.entries(aiBillingProviderLabels).map(([key, label]) => [key, createAiBillingBucket(label)])
+  );
+  const byFeature = {};
+  const byDate = {};
+
+  const allRecords = rows.map((row) => {
+    const events = getAiBillingEvents(row);
+    const providerKey = getAiBillingProviderKey(row, events);
+    const featureLabel = aiBillingFeatureLabels[row.feature] || row.feature || "未知功能";
+    const providerCostUsd = toFiniteNumber(row.provider_cost_usd);
+    const providerCostCny = toFiniteNumber(row.provider_cost_cny);
+    const billedTokens = Math.max(0, Math.round(toFiniteNumber(row.billed_tokens || row.token_cost)));
+    const theoreticalRevenueCny = billedTokens / tokensPerCny;
+    const grossCny = theoreticalRevenueCny - providerCostCny;
+    const usedFallback = providerCostUsd <= 0 && billedTokens > 0;
+    const tokenStats = getAiBillingTokenStats(events);
+    const createdAt = row.created_at || row.completed_at;
+    const dateKey = createdAt ? new Date(createdAt).toISOString().slice(0, 10) : "unknown";
+    const item = {
+      id: row.id,
+      feature: row.feature,
+      featureLabel,
+      provider: providerKey,
+      providerLabel: aiBillingProviderLabels[providerKey] || aiBillingProviderLabels.unknown,
+      model: getAiBillingModelText(row, events),
+      status: row.status,
+      identifier: row.identifier || "未知用户",
+      studentName: row.student_name || row.display_name || "",
+      inputTokens: tokenStats.input,
+      outputTokens: tokenStats.output,
+      imageCount: tokenStats.images,
+      providerCostUsd: Number(providerCostUsd.toFixed(6)),
+      providerCostCny: Number(providerCostCny.toFixed(4)),
+      billableCny: Number(toFiniteNumber(row.billable_cny).toFixed(4)),
+      billingMarkup: Number(toFiniteNumber(row.billing_markup, tokenBillingRules.markup || 1).toFixed(3)),
+      billedTokens,
+      theoreticalRevenueCny: Number(theoreticalRevenueCny.toFixed(4)),
+      grossCny: Number(grossCny.toFixed(4)),
+      usedFallback,
+      createdAt: row.created_at,
+      completedAt: row.completed_at,
+    };
+
+    addAiBillingBucketTotals(summary, item);
+    addAiBillingBucketTotals(byProvider[providerKey] || byProvider.unknown, item);
+    if (!byFeature[row.feature || "unknown"]) byFeature[row.feature || "unknown"] = createAiBillingBucket(featureLabel);
+    addAiBillingBucketTotals(byFeature[row.feature || "unknown"], item);
+    if (!byDate[dateKey]) byDate[dateKey] = createAiBillingBucket(dateKey);
+    addAiBillingBucketTotals(byDate[dateKey], item);
+
+    return item;
+  });
+
+  res.json({
+    days,
+    limit,
+    generatedAt: new Date().toISOString(),
+    billingRules: {
+      markup: Number(tokenBillingRules.markup || 1),
+      tokensPerCny,
+      usdToCny: Number(tokenBillingRules.usdToCny || 0),
+      minimumChargeTokens: Number(tokenBillingRules.minimumChargeTokens || 0),
+    },
+    summary: publicAiBillingBucket(summary),
+    byProvider: Object.fromEntries(Object.entries(byProvider).map(([key, value]) => [key, publicAiBillingBucket(value)])),
+    byFeature: Object.entries(byFeature)
+      .map(([key, value]) => ({ key, ...publicAiBillingBucket(value) }))
+      .sort((a, b) => b.providerCostCny - a.providerCostCny || b.calls - a.calls),
+    byDate: Object.entries(byDate)
+      .map(([date, value]) => ({ date, ...publicAiBillingBucket(value) }))
+      .sort((a, b) => b.date.localeCompare(a.date)),
+    records: allRecords.slice(0, limit),
+  });
 });
 
 app.get("/api/admin/orders", requireAdminToken, async (req, res) => {

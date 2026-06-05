@@ -2634,6 +2634,225 @@ p {
   text-align: left;
 }
 
+.admin-section-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid #dfe5da;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.admin-section-tabs button {
+  min-height: 48px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: #f7f9f4;
+  color: #1d2520;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.admin-section-tabs button.is-active {
+  border-color: #111820;
+  background: #111820;
+  color: #ffffff;
+}
+
+.admin-billing-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.admin-billing-header {
+  display: grid;
+  gap: 14px;
+}
+
+.admin-billing-actions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.admin-billing-actions label {
+  display: grid;
+  gap: 6px;
+  color: #56625c;
+  font-weight: 800;
+}
+
+.admin-billing-actions select {
+  min-height: 40px;
+  min-width: 128px;
+  padding: 0 12px;
+  border: 1px solid #d9ded6;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.admin-billing-note {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid #dfe9dc;
+  border-radius: 8px;
+  background: #f8fbf6;
+  color: #52605a;
+}
+
+.admin-billing-note strong {
+  color: #008653;
+}
+
+.admin-billing-note span {
+  padding: 4px 8px;
+  border: 1px solid #e3e8df;
+  border-radius: 999px;
+  background: #ffffff;
+  font-size: 12px;
+}
+
+.admin-metric-grid,
+.admin-provider-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-metric-card,
+.admin-provider-card {
+  display: grid;
+  gap: 8px;
+  min-height: 118px;
+  padding: 16px;
+  border: 1px solid #dfe5da;
+  border-radius: 10px;
+  background: rgba(250, 249, 244, 0.96);
+  box-shadow: var(--shadow-card);
+}
+
+.admin-metric-card span,
+.admin-provider-card span,
+.admin-provider-card small,
+.admin-metric-card small {
+  color: #5f6b76;
+}
+
+.admin-metric-card strong,
+.admin-provider-card strong {
+  color: #111820;
+  font-size: clamp(22px, 2.1vw, 30px);
+  font-weight: 780;
+}
+
+.admin-metric-card.is-good strong {
+  color: #008653;
+}
+
+.admin-metric-card.is-danger strong {
+  color: #b42318;
+}
+
+.admin-billing-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-provider-card div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.admin-provider-card p {
+  margin: 0;
+  color: #26332d;
+}
+
+.admin-cost-table {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-cost-head,
+.admin-cost-row {
+  display: grid;
+  grid-template-columns: 1.4fr 0.6fr 0.8fr 0.8fr 0.9fr 0.7fr;
+  gap: 10px;
+  align-items: center;
+  padding: 11px 12px;
+}
+
+.admin-cost-head {
+  color: #56625c;
+  font-weight: 850;
+}
+
+.admin-cost-row {
+  border: 1px solid #e2e8e2;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.admin-cost-row strong {
+  color: #111820;
+}
+
+.admin-billing-two-col {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.75fr) minmax(0, 1.25fr);
+  gap: 14px;
+}
+
+.admin-daily-list,
+.admin-record-scroll {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-record-scroll {
+  max-height: 560px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.admin-daily-row,
+.admin-ai-record {
+  display: grid;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid #e2e8e2;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.admin-daily-row {
+  grid-template-columns: 1fr auto auto auto;
+}
+
+.admin-ai-record {
+  grid-template-columns: minmax(180px, 1.1fr) minmax(140px, 0.8fr) minmax(130px, 0.8fr) minmax(150px, 0.9fr);
+}
+
+.admin-ai-record div {
+  display: grid;
+  gap: 3px;
+}
+
+.admin-ai-record span,
+.admin-ai-record small,
+.admin-daily-row span {
+  color: #5f6b76;
+}
+
 .panel {
   min-width: 0;
   padding: clamp(18px, 2vw, 24px);
@@ -8273,6 +8492,13 @@ select:focus,
   .weekly-focus-grid,
   .discussion-grid,
   .study-section-tabs,
+  .admin-section-tabs,
+  .admin-metric-grid,
+  .admin-provider-grid,
+  .admin-billing-two-col,
+  .admin-cost-row,
+  .admin-daily-row,
+  .admin-ai-record,
   .download-card-grid,
   .plan-grid,
   .code-row,
@@ -8286,6 +8512,19 @@ select:focus,
   .knowledge-input-row,
   .flow-step-body {
     grid-template-columns: 1fr;
+  }
+
+  .admin-cost-head {
+    display: none;
+  }
+
+  .admin-billing-actions {
+    justify-content: stretch;
+  }
+
+  .admin-billing-actions label,
+  .admin-billing-actions button {
+    width: 100%;
   }
 
   .mistake-ai-stage,
