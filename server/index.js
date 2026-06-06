@@ -3036,6 +3036,17 @@ app.delete("/api/forum/posts/:id", requireAuth, async (req, res, next) => {
   }
 });
 
+app.delete("/api/admin/forum/posts/:id", requireAdminToken, async (req, res, next) => {
+  try {
+    const post = (await query("SELECT id FROM forum_posts WHERE id = $1", [req.params.id])).rows[0];
+    if (!post) return res.status(404).json({ error: "POST_NOT_FOUND", message: "帖子不存在。" });
+    await query("DELETE FROM forum_posts WHERE id = $1", [req.params.id]);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/admin/forum/posts/:id/pin", requireAdminToken, async (req, res, next) => {
   try {
     const { pinned = true } = req.body || {};

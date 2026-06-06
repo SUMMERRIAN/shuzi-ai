@@ -768,6 +768,22 @@ button:disabled {
   align-items: center;
 }
 
+.forum-page-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.forum-page-size select {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid #cfd8d1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111820;
+  font-weight: 800;
+}
+
 .ghost-action.is-compact {
   min-height: 32px;
   padding: 0 10px;

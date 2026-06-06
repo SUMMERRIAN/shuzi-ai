@@ -4477,12 +4477,18 @@ function App() {
     }
   }
 
-  async function deleteForumPost(postId) {
+  async function deleteForumPost(postOrId) {
+    const postId = typeof postOrId === "object" ? postOrId?.id : postOrId;
     if (!postId) return;
     if (!window.confirm("确定删除这篇帖子吗？删除后帖子和回复都会从云端移除。")) return;
+    const token = adminPanel.token.trim();
+    const canAdminDelete = Boolean(token && typeof postOrId === "object" && !postOrId?.canDelete);
     try {
       setForumStatus("saving");
-      await apiRequest(`/forum/posts/${postId}`, { method: "DELETE" });
+      await apiRequest(canAdminDelete ? `/admin/forum/posts/${postId}` : `/forum/posts/${postId}`, {
+        method: "DELETE",
+        ...(canAdminDelete ? { headers: { "x-admin-token": token } } : {}),
+      });
       const nextPosts = forumPosts.filter((post) => post.id !== postId);
       setForumPosts(nextPosts);
       if (activeForumPostId === postId) setActiveForumPostId("");
@@ -5832,6 +5838,7 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, status
   const [activeForumTab, setActiveForumTab] = useState("all");
   const [composeOpen, setComposeOpen] = useState(false);
   const [forumPage, setForumPage] = useState(1);
+  const [forumPageSize, setForumPageSize] = useState(25);
   const [expandedForumImage, setExpandedForumImage] = useState(null);
   const isAdminMode = Boolean(adminToken?.trim());
   const forumTabs = [
@@ -5855,14 +5862,13 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, status
   });
   const pinnedPosts = activeForumTab === "all" ? tabFilteredPosts.filter((post) => post.isPinned) : [];
   const listedPosts = activeForumTab === "all" ? tabFilteredPosts.filter((post) => !post.isPinned) : tabFilteredPosts;
-  const forumPageSize = 15;
   const totalForumPages = Math.max(1, Math.ceil(listedPosts.length / forumPageSize));
   const currentForumPage = Math.min(forumPage, totalForumPages);
   const visibleForumPosts = listedPosts.slice((currentForumPage - 1) * forumPageSize, currentForumPage * forumPageSize);
 
   useEffect(() => {
     setForumPage(1);
-  }, [activeForumTab, member.id, posts.length]);
+  }, [activeForumTab, member.id, posts.length, forumPageSize]);
 
   function openCompose(type = draft.type) {
     if (!canInteract) {
@@ -5901,8 +5907,8 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, status
                   {post.isPinned ? "取消置顶" : "置顶"}
                 </button>
               )}
-              {post.canDelete && (
-                <button type="button" className="ghost-action is-compact forum-danger-action" onClick={() => deletePost(post.id)} disabled={status === "saving"}>
+              {(post.canDelete || isAdminMode) && (
+                <button type="button" className="ghost-action is-compact forum-danger-action" onClick={() => deletePost(post)} disabled={status === "saving"}>
                   <Trash2 size={14} />
                   删除
                 </button>
@@ -6080,12 +6086,22 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, status
             )}
 
             {visibleForumPosts.map((post) => renderThread(post))}
-            {listedPosts.length > forumPageSize && (
+            {listedPosts.length > 0 && (
               <div className="forum-pagination">
                 <span>
                   第 {currentForumPage} / {totalForumPages} 页，共 {listedPosts.length} 个帖子
                 </span>
                 <div>
+                  <label className="forum-page-size">
+                    <span>每页</span>
+                    <select value={forumPageSize} onChange={(event) => setForumPageSize(Number(event.target.value))}>
+                      {[25, 50, 100].map((size) => (
+                        <option key={size} value={size}>
+                          {size}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <button className="ghost-action is-compact" type="button" onClick={() => setForumPage((page) => Math.max(1, page - 1))} disabled={currentForumPage <= 1}>
                     上一页
                   </button>
