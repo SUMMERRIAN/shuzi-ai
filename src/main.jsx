@@ -4659,7 +4659,7 @@ function App() {
           </div>
           <div>
             <strong>树子AI</strong>
-            <span>个人AI学习教练</span>
+            <span>AI学习辅助系统</span>
           </div>
         </div>
 
@@ -5181,17 +5181,11 @@ function HomePage() {
     <section className="stack home-page">
       <section className="hero-band compact home-hero">
         <div>
-          <span className="eyebrow">树子AI · 个人AI学习教练</span>
-          <h2>先了解学生，再帮助学习。</h2>
+          <span className="eyebrow">树子AI · AI学习辅助系统</span>
+          <h2>树子AI，您个人的学习辅助系统</h2>
           <p>
-            树子AI不是一个随便问答的聊天工具，而是一套个人学习辅助系统。它先收集真实学情，再生成画像、任务和计划，并用错题、没有答案、知识笔记和自由问陪伴学生长期训练。
+            树子AI不是一个随便问答的聊天工具，而是一套个人学习辅助系统。它可以帮助学生梳理真实学情，进行学习分析，制定学习策略和学习任务；也可以围绕错题开展系统训练，用“没有答案”启发学生思考，用知识笔记帮助整理理解，最后通过学习社区让大家相互交流、彼此帮助。
           </p>
-        </div>
-        <div className="home-hero-note">
-          <strong>给学生</strong>
-          <span>知道自己卡在哪里，下一步该怎么做。</span>
-          <strong>给家长</strong>
-          <span>看见孩子学习问题的结构，而不是只看分数。</span>
         </div>
       </section>
 

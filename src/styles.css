@@ -1316,7 +1316,7 @@ p {
 }
 
 .home-hero {
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   padding: clamp(28px, 3.2vw, 42px);
   background:
@@ -1339,25 +1339,6 @@ p {
   color: #344039;
   font-size: 17px;
   line-height: 1.8;
-}
-
-.home-hero-note {
-  display: grid;
-  gap: 8px;
-  padding: 18px;
-  border: 1px solid rgba(0, 134, 83, 0.18);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.76);
-}
-
-.home-hero-note strong {
-  color: #008653;
-  font-size: 15px;
-}
-
-.home-hero-note span {
-  color: #344039;
-  line-height: 1.65;
 }
 
 .home-belief {
@@ -8074,6 +8055,7 @@ small {
 }
 
 .home-hero {
+  grid-template-columns: minmax(0, 1fr);
   min-height: 230px;
   border-color: #e0e1dc;
   background:
@@ -8089,20 +8071,10 @@ small {
 }
 
 .home-hero p {
+  max-width: 1160px;
   color: var(--ink-soft);
   font-size: clamp(16px, 1.15vw, 18px);
   line-height: 1.85;
-}
-
-.home-hero-note {
-  border-color: var(--line);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.78);
-  box-shadow: 0 14px 32px rgba(17, 24, 32, 0.05);
-}
-
-.home-hero-note strong {
-  color: var(--accent);
 }
 
 .home-workflow article,
