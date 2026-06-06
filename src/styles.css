@@ -6789,6 +6789,21 @@ audio {
   color: #48534d;
 }
 
+.forum-formatted-text {
+  display: grid;
+  gap: 10px;
+  white-space: normal;
+}
+
+.forum-formatted-text p {
+  margin: 0;
+}
+
+.forum-formatted-text strong {
+  color: #111820;
+  font-weight: 900;
+}
+
 .forum-tag {
   display: inline-flex;
   min-height: 28px;
@@ -7161,19 +7176,17 @@ audio {
 }
 
 .forum-post-content {
-  display: -webkit-box;
   margin: 0;
   padding: 0;
+  max-height: 104px;
   overflow: hidden;
   color: #1f2a24;
   font-size: 15px;
   line-height: 1.72;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
 }
 
 .forum-thread-card.is-active .forum-post-content {
-  display: block;
+  max-height: none;
   overflow: visible;
 }
 
@@ -7204,9 +7217,15 @@ audio {
   font-size: 13px;
 }
 
-.reply-card p {
+.reply-card p,
+.forum-reply-content {
   font-size: 14px;
   line-height: 1.65;
+}
+
+.forum-reply-content {
+  gap: 6px;
+  color: #344039;
 }
 
 .forum-more-replies {

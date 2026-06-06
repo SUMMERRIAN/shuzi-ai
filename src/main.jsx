@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   BarChart3,
@@ -377,6 +377,44 @@ function sortForumPosts(posts = []) {
     if (a.isPinned && b.isPinned) return forumPinnedTime(b) - forumPinnedTime(a);
     return forumActivityTime(b) - forumActivityTime(a);
   });
+}
+
+function renderForumInlineText(text, keyPrefix) {
+  const parts = [];
+  const source = String(text || "");
+  const boldPattern = /\*\*(.+?)\*\*/g;
+  let cursor = 0;
+  let match;
+  while ((match = boldPattern.exec(source))) {
+    if (match.index > cursor) parts.push(source.slice(cursor, match.index));
+    parts.push(<strong key={`${keyPrefix}-bold-${match.index}`}>{match[1]}</strong>);
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < source.length) parts.push(source.slice(cursor));
+  return parts;
+}
+
+function ForumFormattedText({ text, className = "" }) {
+  const normalized = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const paragraphs = normalized.split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
+  if (!paragraphs.length) return null;
+  return (
+    <div className={className ? `forum-formatted-text ${className}` : "forum-formatted-text"}>
+      {paragraphs.map((paragraph, paragraphIndex) => {
+        const lines = paragraph.split("\n");
+        return (
+          <p key={`forum-paragraph-${paragraphIndex}`}>
+            {lines.map((line, lineIndex) => (
+              <Fragment key={`forum-line-${paragraphIndex}-${lineIndex}`}>
+                {lineIndex > 0 && <br />}
+                {renderForumInlineText(line, `forum-${paragraphIndex}-${lineIndex}`)}
+              </Fragment>
+            ))}
+          </p>
+        );
+      })}
+    </div>
+  );
 }
 
 const statementGuideQuestions = [
@@ -5867,9 +5905,20 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, status
             </div>
           </div>
 
-          <button type="button" className="forum-post-body-button" onClick={() => setActivePostId(post.id)}>
-            <p className="forum-post-content">{post.content}</p>
-          </button>
+          <div
+            className="forum-post-body-button"
+            role="button"
+            tabIndex={0}
+            onClick={() => setActivePostId(post.id)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                setActivePostId(post.id);
+              }
+            }}
+          >
+            <ForumFormattedText text={post.content} className="forum-post-content" />
+          </div>
 
           {post.images?.length > 0 && (
             <div className="forum-thumbnail-grid is-post">
@@ -5902,7 +5951,7 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, status
                   <strong>{reply.author}</strong>
                   <span>{reply.role === "moderator" ? "版主回复" : "会员留言"} · {reply.time}</span>
                 </div>
-                <p>{reply.content}</p>
+                <ForumFormattedText text={reply.content} className="forum-reply-content" />
               </article>
             ))}
             {!isActive && post.replies.length > repliesToShow.length && (
