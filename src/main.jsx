@@ -1439,8 +1439,24 @@ function createSubjectWorkspace(subject) {
     suggestedTasks: [],
     acceptedStrategy: "",
     studentStrategy: "",
-    tasks: data.tasks.map((task, index) => ({ ...task, id: `${subject}-task-${index}` })),
+    tasks: [createStrategyExampleTask(subject)],
     aiNote: "AI学习任务建议会根据学情画像、学情陈述和当前科目内容生成。",
+  };
+}
+
+function createInitialStrategyWorkspaces() {
+  return Object.fromEntries(strategySubjects.map((subject) => [subject, createSubjectWorkspace(subject)]));
+}
+
+function createStrategyExampleTask(subject = "数学") {
+  return {
+    id: `${subject}-example-task`,
+    title: "案例示范：数学错题复测",
+    problem: "错题改完几天后又不会，说明还没有真正找到卡住原因。",
+    time: "每天 20 分钟",
+    material: "错题本、课堂笔记、课本例题",
+    detail: "先遮住答案独立重做 1 道错题，再对照订正，最后用一句话写出自己卡住的原因。",
+    standard: "能说清错在哪里、正确方法是什么、下次怎么避免。",
   };
 }
 
@@ -1543,9 +1559,17 @@ const hourOptions = Array.from({ length: 19 }, (_, index) => String(index + 5).p
 const minuteOptions = Array.from({ length: 60 }, (_, index) => String(index).padStart(2, "0"));
 
 const defaultPlanRows = [
-  { id: "plan-row-1", cells: { 星期一: { start: "19:30", end: "20:10", task: "数学错题复测", note: "用三遍做题法" } } },
-  { id: "plan-row-2", cells: { 星期一: { start: "20:20", end: "21:00", task: "英语朗读与单词", note: "朗读后听写关键词" } } },
-  { id: "plan-row-3", cells: { 星期一: { start: "21:10", end: "21:25", task: "每日反思", note: "记录√、!、×" } } },
+  {
+    id: "plan-row-1",
+    cells: {
+      星期一: {
+        start: "19:30",
+        end: "20:00",
+        task: "案例示范：数学错题复测",
+        note: "遮住答案重做 1 道题，写出错误原因。",
+      },
+    },
+  },
 ];
 
 function createWeekCells(seed = {}) {
@@ -1553,8 +1577,8 @@ function createWeekCells(seed = {}) {
     weekDays.map((day) => [
       day,
       {
-        start: seed[day]?.start || "19:00",
-        end: seed[day]?.end || "19:30",
+        start: seed[day]?.start || "",
+        end: seed[day]?.end || "",
         task: seed[day]?.task || "",
         note: seed[day]?.note || "",
       },
@@ -1569,7 +1593,7 @@ function normalizePlanRows(rows) {
 function createFocusRows(type, options) {
   return Array.from({ length: 3 }, (_, index) => ({
     id: `${type}-${index + 1}`,
-    enabled: index === 0,
+    enabled: false,
     item: options[index],
     custom: "",
     scores: Object.fromEntries(["星期一", "星期二", "星期三", "星期四", "星期五"].map((day) => [day, ""])),
@@ -2059,12 +2083,8 @@ function App() {
     showQr: false,
     message: "",
   });
-  const [currentStep, setCurrentStep] = useState(() => readDraftValue("questionnaireStep", 0));
-  const [answers, setAnswers] = useState(() => {
-    const saved = readDraftValue("questionnaire", null);
-    if (!saved) return emptyAnswers;
-    return JSON.stringify(saved) === JSON.stringify(defaultAnswers) ? emptyAnswers : saved;
-  });
+  const [currentStep, setCurrentStep] = useState(0);
+  const [answers, setAnswers] = useState(emptyAnswers);
   const [submitted, setSubmitted] = useState(false);
   const [lastSaved, setLastSaved] = useState("尚未保存");
   const [questionnaireArchives, setQuestionnaireArchives] = useState([]);
@@ -2077,44 +2097,30 @@ function App() {
     profileId: "latest",
     strategyId: "latest",
   });
-  const savedStatementDraft = readDraftValue("statement", defaultStatementDraft);
+  const savedStatementDraft = emptyStatementDraft;
   const [statementText, setStatementText] = useState(savedStatementDraft.text);
   const [statementSubject, setStatementSubject] = useState(savedStatementDraft.subject);
   const [statementScene, setStatementScene] = useState(savedStatementDraft.scene);
   const [guidedAnswers, setGuidedAnswers] = useState(savedStatementDraft.guidedAnswers);
   const [statementIssueDetails, setStatementIssueDetails] = useState(savedStatementDraft.issueDetails);
-  const [records, setRecords] = useState([
-    {
-      id: 1,
-      type: "文字陈述",
-      title: "数学会听不会做",
-      content: "错题改完以后过几天又不会，晚上学习效率比较低。",
-      time: "今天 10:20",
-      subject: "数学",
-      scene: "错题",
-      tags: ["会听不会做", "错题复测不足"],
-    },
-  ]);
+  const [records, setRecords] = useState([]);
   const [aiStatus, setAiStatus] = useState("idle");
-  const [aiInsight, setAiInsight] = useState(() => readDraftValue("profile", null));
+  const [aiInsight, setAiInsight] = useState(null);
   const [profileSaveStatus, setProfileSaveStatus] = useState("");
   const [profileSelfArchive, setProfileSelfArchive] = useState(null);
   const [activeSubject, setActiveSubject] = useState("数学");
-  const [strategyWorkspaces, setStrategyWorkspaces] = useState(() =>
-    readDraftValue("strategy", Object.fromEntries(strategySubjects.map((subject) => [subject, createSubjectWorkspace(subject)])))
-  );
+  const [strategyWorkspaces, setStrategyWorkspaces] = useState(() => createInitialStrategyWorkspaces());
   const [strategyAiStatus, setStrategyAiStatus] = useState("");
   const [strategySaveStatus, setStrategySaveStatus] = useState("");
-  const savedPlanDraft = readDraftValue("plan", null);
-  const [planRows, setPlanRows] = useState(() => normalizePlanRows(savedPlanDraft?.planRows || defaultPlanRows));
-  const [planNote, setPlanNote] = useState(savedPlanDraft?.planNote || "本周计划按默认作息生成：早晨7点前15-20分钟、课间最多10分钟轻任务、晚自习一节课、回家后约90分钟；学生可以按真实作息自行修改。");
+  const [planRows, setPlanRows] = useState(() => normalizePlanRows(defaultPlanRows));
+  const [planNote, setPlanNote] = useState("");
   const [planAiStatus, setPlanAiStatus] = useState("idle");
   const [weeklyArchiveStatus, setWeeklyArchiveStatus] = useState("");
   const [weeklyLearningArchives, setWeeklyLearningArchives] = useState([]);
-  const [methodFocusRows, setMethodFocusRows] = useState(() => savedPlanDraft?.methodFocusRows || createFocusRows("method", methodTrainingOptions));
-  const [habitFocusRows, setHabitFocusRows] = useState(() => savedPlanDraft?.habitFocusRows || createFocusRows("habit", habitTrainingOptions));
-  const [dailyReflectionDraft, setDailyReflectionDraft] = useState(() => createDailyReflectionDraft(savedPlanDraft?.dailyReflectionDraft));
-  const [weeklyDiscussionDraft, setWeeklyDiscussionDraft] = useState(() => createWeeklyDiscussionDraft(savedPlanDraft?.weeklyDiscussionDraft));
+  const [methodFocusRows, setMethodFocusRows] = useState(() => createFocusRows("method", methodTrainingOptions));
+  const [habitFocusRows, setHabitFocusRows] = useState(() => createFocusRows("habit", habitTrainingOptions));
+  const [dailyReflectionDraft, setDailyReflectionDraft] = useState(() => createDailyReflectionDraft());
+  const [weeklyDiscussionDraft, setWeeklyDiscussionDraft] = useState(() => createWeeklyDiscussionDraft());
   const dailyReflectionArchive = useMemo(() => collectDailyReflections(dailyReflectionDraft), [dailyReflectionDraft]);
   const weeklyDiscussionArchive = useMemo(() => collectWeeklyDiscussions(weeklyDiscussionDraft), [weeklyDiscussionDraft]);
   const [mistakeDraft, setMistakeDraft] = useState({
@@ -2212,6 +2218,47 @@ function App() {
 
   function clearAiNotice() {
     setAiNotice({ page: "", message: "" });
+  }
+
+  function resetLearningWorkspaceDefaults() {
+    ["questionnaire", "questionnaireStep", "statement", "profile", "strategy", "plan"].forEach(clearDraftValue);
+    setCurrentStep(0);
+    setAnswers(emptyAnswers);
+    setSubmitted(false);
+    setLastSaved("尚未保存");
+    setQuestionnaireArchives([]);
+    setQuestionnairePreview(null);
+    setProfileArchives([]);
+    setStrategyArchives([]);
+    setSourceSelection({
+      questionnaireId: "latest",
+      statementId: "latest",
+      profileId: "latest",
+      strategyId: "latest",
+    });
+    setStatementText(emptyStatementDraft.text);
+    setStatementSubject(emptyStatementDraft.subject);
+    setStatementScene(emptyStatementDraft.scene);
+    setGuidedAnswers(emptyStatementDraft.guidedAnswers);
+    setStatementIssueDetails(emptyStatementDraft.issueDetails);
+    setRecords([]);
+    setAiStatus("idle");
+    setAiInsight(null);
+    setProfileSaveStatus("");
+    setProfileSelfArchive(null);
+    setActiveSubject("数学");
+    setStrategyWorkspaces(createInitialStrategyWorkspaces());
+    setStrategyAiStatus("");
+    setStrategySaveStatus("");
+    setPlanRows(normalizePlanRows(defaultPlanRows));
+    setPlanNote("");
+    setPlanAiStatus("idle");
+    setWeeklyArchiveStatus("");
+    setWeeklyLearningArchives([]);
+    setMethodFocusRows(createFocusRows("method", methodTrainingOptions));
+    setHabitFocusRows(createFocusRows("habit", habitTrainingOptions));
+    setDailyReflectionDraft(createDailyReflectionDraft());
+    setWeeklyDiscussionDraft(createWeeklyDiscussionDraft());
   }
 
   useEffect(() => {
@@ -2443,9 +2490,14 @@ function App() {
       const data = await apiRequest("/archive/learning-profiles");
       const records = data.records || [];
       setProfileArchives(records);
-      if (applyLatest && records[0]) {
-        const latest = mapProfileArchiveToInsight(records[0]);
-        if (latest) setAiInsight(latest);
+      if (applyLatest) {
+        if (records[0]) {
+          const latest = mapProfileArchiveToInsight(records[0]);
+          if (latest) setAiInsight(latest);
+        } else {
+          clearDraftValue("profile");
+          setAiInsight(null);
+        }
       }
     } catch (error) {
       setAccountNotice(error.message || "学情画像档案暂时无法读取。");
@@ -2655,7 +2707,7 @@ function App() {
 
   function clearStrategyDraft() {
     clearDraftValue("strategy");
-    setStrategyWorkspaces(Object.fromEntries(strategySubjects.map((subject) => [subject, createSubjectWorkspace(subject)])));
+    setStrategyWorkspaces(createInitialStrategyWorkspaces());
     setStrategyAiStatus("");
   }
 
@@ -3026,6 +3078,7 @@ function App() {
         }),
       });
       setAuthToken(data.token);
+      resetLearningWorkspaceDefaults();
       setMember(mapAccountToMember(data.account));
       setAccountNotice("");
       setAuthModal((prev) => ({
@@ -3146,6 +3199,7 @@ function App() {
     memberActionBypassRef.current = false;
     setAuthToken("");
     setAccountNotice("");
+    resetLearningWorkspaceDefaults();
     setMember({ isLoggedIn: false, isPaid: false, identifier: "", provider: "用户名", plan: "", ltBalance: 0, storageTotalMb: 50 });
   }
 
@@ -7652,10 +7706,10 @@ function ModernProfilePage({
   const profileEvidence = aiInsight?.evidence?.slice(0, 4) || [];
   const profileReasons = aiInsight?.reasons?.slice(0, 5) || [];
   const profileQuestions = aiInsight?.questions?.slice(0, 4) || [];
-  const profileSectionRows = profileSections.map((section) => {
+  const profileSectionRows = aiInsight ? profileSections.map((section) => {
     const score = resolveProfileSectionScore(section, aiInsight?.scores);
     return { ...section, displayScore: score.value, scoreSource: score.source };
-  });
+  }) : [];
 
   return (
     <section className="stack">
@@ -7753,63 +7807,71 @@ function ModernProfilePage({
           </div>
         </section>
 
-        <div className="profile-accordion">
-          {profileSectionRows.map((section) => (
-            <details className="profile-detail" key={section.title} id={`profile-${section.index}`}>
-              <summary>
-                <div className="profile-summary-main">
-                  <span>{section.index}</span>
+        {aiInsight ? (
+          <div className="profile-accordion">
+            {profileSectionRows.map((section) => (
+              <details className="profile-detail" key={section.title} id={`profile-${section.index}`}>
+                <summary>
+                  <div className="profile-summary-main">
+                    <span>{section.index}</span>
+                    <div>
+                      <strong>{section.title}</strong>
+                      <p>{section.finding}</p>
+                    </div>
+                  </div>
+                  <div className="profile-score">
+                    <b>{section.displayScore.toFixed(1)} / 10</b>
+                    <small>{section.scoreSource}</small>
+                    <i style={{ "--value": `${section.displayScore * 10}%` }} />
+                  </div>
+                </summary>
+                <div className="profile-detail-body">
                   <div>
-                    <strong>{section.title}</strong>
-                    <p>{section.finding}</p>
+                    <h3>测评问题</h3>
+                    <p>{section.question}</p>
+                  </div>
+                  <div>
+                    <h3>{section.title}的解释</h3>
+                    <p>{section.explanation}</p>
+                  </div>
+                  <div>
+                    <h3>判断依据</h3>
+                    <p>{section.evidence}</p>
+                  </div>
+                  <div>
+                    <h3>支持建议</h3>
+                    <p>{section.suggestion}</p>
+                  </div>
+                  <div className="student-self-eval">
+                    <h3>学生自我评估</h3>
+                    <label>
+                      <span>我给自己这一项打分</span>
+                      <input
+                        type="range"
+                        min="1"
+                        max="10"
+                        value={selfAssessment[section.title]?.score || 5}
+                        onChange={(event) => updateSelfAssessment(section.title, "score", Number(event.target.value))}
+                      />
+                      <b>{selfAssessment[section.title]?.score || 5} / 10</b>
+                    </label>
+                    <textarea
+                      value={selfAssessment[section.title]?.note || ""}
+                      onChange={(event) => updateSelfAssessment(section.title, "note", event.target.value)}
+                      placeholder="学生可以写：我觉得这一项准不准？我自己的真实感受是什么？"
+                    />
                   </div>
                 </div>
-                <div className="profile-score">
-                  <b>{section.displayScore.toFixed(1)} / 10</b>
-                  <small>{section.scoreSource}</small>
-                  <i style={{ "--value": `${section.displayScore * 10}%` }} />
-                </div>
-              </summary>
-              <div className="profile-detail-body">
-                <div>
-                  <h3>测评问题</h3>
-                  <p>{section.question}</p>
-                </div>
-                <div>
-                  <h3>{section.title}的解释</h3>
-                  <p>{section.explanation}</p>
-                </div>
-                <div>
-                  <h3>判断依据</h3>
-                  <p>{section.evidence}</p>
-                </div>
-                <div>
-                  <h3>支持建议</h3>
-                  <p>{section.suggestion}</p>
-                </div>
-                <div className="student-self-eval">
-                  <h3>学生自我评估</h3>
-                  <label>
-                    <span>我给自己这一项打分</span>
-                    <input
-                      type="range"
-                      min="1"
-                      max="10"
-                      value={selfAssessment[section.title]?.score || 5}
-                      onChange={(event) => updateSelfAssessment(section.title, "score", Number(event.target.value))}
-                    />
-                    <b>{selfAssessment[section.title]?.score || 5} / 10</b>
-                  </label>
-                  <textarea
-                    value={selfAssessment[section.title]?.note || ""}
-                    onChange={(event) => updateSelfAssessment(section.title, "note", event.target.value)}
-                    placeholder="学生可以写：我觉得这一项准不准？我自己的真实感受是什么？"
-                  />
-                </div>
-              </div>
-            </details>
-          ))}
-        </div>
+              </details>
+            ))}
+          </div>
+        ) : (
+          <article className="profile-empty-card">
+            <span className="eyebrow">细分画像</span>
+            <h3>暂时还没有AI细分画像</h3>
+            <p>完成学情问卷和学情陈述后，点击“AI统一分析画像”，这里才会显示各维度评分、判断依据和学生自我评估。</p>
+          </article>
+        )}
 
         <section className="student-portrait-box">
           <div className="panel-heading-row">
@@ -9878,10 +9940,11 @@ function FreeAskPage({
 }
 
 function PlanCellTimeRange({ start, end, onStartChange, onEndChange }) {
+  const printTime = start || end ? `${start || "--:--"} - ${end || "--:--"}` : "未设置";
   return (
     <div className="plan-cell-time-range">
       <span className="no-print">时间</span>
-      <strong className="print-value plan-print-time">{start} - {end}</strong>
+      <strong className="print-value plan-print-time">{printTime}</strong>
       <div className="no-print">
         <CompactTimePicker value={start} onChange={onStartChange} />
         <em>至</em>
@@ -9892,10 +9955,17 @@ function PlanCellTimeRange({ start, end, onStartChange, onEndChange }) {
 }
 
 function CompactTimePicker({ value, onChange }) {
-  const [hour = "19", minute = "00"] = value.split(":");
+  const [hour = "", minute = ""] = String(value || "").split(":");
+  const updateHour = (nextHour) => {
+    onChange(nextHour ? `${nextHour}:${minute || "00"}` : "");
+  };
+  const updateMinute = (nextMinute) => {
+    onChange(hour ? `${hour}:${nextMinute || "00"}` : "");
+  };
   return (
     <div className="compact-time-picker">
-      <select value={hour} onChange={(event) => onChange(`${event.target.value}:${minute}`)} aria-label="小时">
+      <select value={hour} onChange={(event) => updateHour(event.target.value)} aria-label="小时">
+        <option value="">--</option>
         {hourOptions.map((item) => (
           <option value={item} key={item}>
             {item}
@@ -9903,7 +9973,8 @@ function CompactTimePicker({ value, onChange }) {
         ))}
       </select>
       <b>:</b>
-      <select value={minute} onChange={(event) => onChange(`${hour}:${event.target.value}`)} aria-label="分钟">
+      <select value={minute} onChange={(event) => updateMinute(event.target.value)} aria-label="分钟" disabled={!hour}>
+        <option value="">--</option>
         {minuteOptions.map((item) => (
           <option value={item} key={item}>
             {item}
