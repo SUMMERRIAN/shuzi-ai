@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   ClipboardList,
   Clock3,
   CreditCard,
@@ -2202,7 +2203,7 @@ function App() {
   const [knowledgeUseTemplate, setKnowledgeUseTemplate] = useState(false);
   const [knowledgePromptTemplate, setKnowledgePromptTemplate] = useState(defaultKnowledgePromptTemplate);
   const [forumPosts, setForumPosts] = useState(defaultForumPosts);
-  const [activeForumPostId, setActiveForumPostId] = useState(defaultForumPosts[0].id);
+  const [activeForumPostId, setActiveForumPostId] = useState("");
   const [forumStatus, setForumStatus] = useState("idle");
   const [forumDraft, setForumDraft] = useState({
     type: "学习问题",
@@ -4386,13 +4387,13 @@ function App() {
       const data = await apiRequest("/forum/posts");
       const nextPosts = sortForumPosts(data.posts?.length ? data.posts : defaultForumPosts);
       setForumPosts(nextPosts);
-      setActiveForumPostId((current) => (nextPosts.some((post) => post.id === current) ? current : nextPosts[0]?.id || ""));
+      setActiveForumPostId((current) => (nextPosts.some((post) => post.id === current) ? current : ""));
       setForumStatus("idle");
     } catch (error) {
       setForumStatus("error");
       setAccountNotice(error.message || "学习社区暂时无法读取，已显示示例帖子。");
       setForumPosts(sortForumPosts(defaultForumPosts));
-      setActiveForumPostId(defaultForumPosts[0]?.id || "");
+      setActiveForumPostId("");
     }
   }
 
@@ -4484,7 +4485,7 @@ function App() {
       await apiRequest(`/forum/posts/${postId}`, { method: "DELETE" });
       const nextPosts = forumPosts.filter((post) => post.id !== postId);
       setForumPosts(nextPosts);
-      if (activeForumPostId === postId) setActiveForumPostId(nextPosts[0]?.id || "");
+      if (activeForumPostId === postId) setActiveForumPostId("");
       setForumStatus("idle");
     } catch (error) {
       setForumStatus("error");
@@ -5874,12 +5875,12 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, status
 
   function renderThread(post, options = {}) {
     const isActive = activePostId === post.id;
-    const repliesToShow = isActive ? post.replies : post.replies.slice(-2);
+    const toggleThread = () => setActivePostId(isActive ? "" : post.id);
     return (
       <article key={post.id} className={`${isActive ? "panel forum-thread-card is-active" : "panel forum-thread-card"}${post.isPinned ? " is-pinned" : ""}${options.compact ? " is-compact" : ""}`}>
         <div className="forum-thread-main">
           <div className="forum-thread-head">
-            <button type="button" className="forum-thread-title-button" onClick={() => setActivePostId(post.id)}>
+            <button type="button" className="forum-thread-title-button" onClick={toggleThread}>
               <div className="forum-author-row">
                 <span className="forum-avatar"><UserRound size={16} /></span>
                 <strong>{post.author}</strong>
@@ -5890,6 +5891,10 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, status
               <h2>{post.title}</h2>
             </button>
             <div className="forum-thread-actions">
+              <button type="button" className="ghost-action is-compact" onClick={toggleThread}>
+                {isActive ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                {isActive ? "收起" : "查看详情"}
+              </button>
               {isAdminMode && (
                 <button type="button" className="ghost-action is-compact" onClick={() => togglePin(post)} disabled={status === "saving"}>
                   <Star size={14} />
@@ -5909,11 +5914,11 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, status
             className="forum-post-body-button"
             role="button"
             tabIndex={0}
-            onClick={() => setActivePostId(post.id)}
+            onClick={toggleThread}
             onKeyDown={(event) => {
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
-                setActivePostId(post.id);
+                toggleThread();
               }
             }}
           >
@@ -5943,9 +5948,9 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, status
           </div>
         </div>
 
-        {repliesToShow.length > 0 && (
+        {isActive && post.replies.length > 0 && (
           <div className="reply-list">
-            {repliesToShow.map((reply) => (
+            {post.replies.map((reply) => (
               <article key={reply.id} className={reply.role === "moderator" ? "reply-card is-moderator" : "reply-card"}>
                 <div>
                   <strong>{reply.author}</strong>
@@ -5954,11 +5959,6 @@ function LearningForumPage({ posts, activePostId, setActivePostId, draft, status
                 <ForumFormattedText text={reply.content} className="forum-reply-content" />
               </article>
             ))}
-            {!isActive && post.replies.length > repliesToShow.length && (
-              <button type="button" className="forum-more-replies" onClick={() => setActivePostId(post.id)}>
-                展开全部 {post.replies.length} 条回复
-              </button>
-            )}
           </div>
         )}
 
