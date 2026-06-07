@@ -2220,6 +2220,18 @@ p {
   font-weight: 900;
 }
 
+.required-mark {
+  color: #d04747;
+  font-style: normal;
+}
+
+.field-hint {
+  color: #6f7a72;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.5;
+}
+
 .auth-form input,
 .auth-form select {
   width: 100%;

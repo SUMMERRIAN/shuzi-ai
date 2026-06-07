@@ -6235,35 +6235,36 @@ function MemberModal({
 
             {authForm.mode === "register" && (
               <label>
-                <span>学生姓名或昵称</span>
+                <span>学生姓名或昵称（可选）</span>
                 <input
                   value={authForm.displayName}
                   onChange={(event) => setAuthForm((prev) => ({ ...prev, displayName: event.target.value }))}
-                  placeholder="例如：张同学"
+                  placeholder="例如：杨同学，用于页面显示"
                 />
               </label>
             )}
 
             <label>
-              <span>用户名</span>
+              <span>登录用户名 <b className="required-mark">*</b></span>
               <input
                 value={authForm.username}
                 onChange={(event) => setAuthForm((prev) => ({ ...prev, username: event.target.value }))}
-                placeholder="请设置一个容易记住的用户名"
+                placeholder="至少3个字符，例如：yang001 或 杨同学001"
               />
+              <em className="field-hint">以后登录就用这个用户名；不要只填两个字，例如“姐弟”会无法注册。</em>
             </label>
             <label>
-              <span>密码</span>
+              <span>密码 <b className="required-mark">*</b></span>
               <input
                 type="password"
                 value={authForm.password}
                 onChange={(event) => setAuthForm((prev) => ({ ...prev, password: event.target.value }))}
-                placeholder="至少6位"
+                placeholder="至少6位，请设置自己能记住的密码"
               />
             </label>
             {authForm.mode === "register" && (
               <label>
-                <span>确认密码</span>
+                <span>确认密码 <b className="required-mark">*</b></span>
                 <input
                   type="password"
                   value={authForm.confirmPassword}
