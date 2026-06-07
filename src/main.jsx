@@ -31,6 +31,7 @@ import {
   LockKeyhole,
   LogIn,
   LogOut,
+  Menu,
   Mic,
   MinusCircle,
   Plus,
@@ -44,6 +45,7 @@ import {
   UploadCloud,
   UserRound,
   WandSparkles,
+  X,
 } from "lucide-react";
 import {
   aiTaskPrompts,
@@ -105,6 +107,27 @@ function aiJobStatusLabel(status = "", job = {}) {
   if (status === "completed") return "已完成";
   if (status === "failed") return "已结束";
   return status || "未知";
+}
+
+function MobileUnsupportedNotice() {
+  return (
+    <main className="mobile-device-notice" aria-label="手机端访问提示">
+      <section className="mobile-device-card">
+        <div className="mobile-device-brand">
+          <img src="/assets/shuzi-logo.png" alt="树子AI" />
+          <div>
+            <strong>树子AI</strong>
+            <span>AI学习辅助系统</span>
+          </div>
+        </div>
+        <h1>手机端暂不开放完整操作</h1>
+        <p>
+          学情问卷、AI分析、学习任务、学习计划和错题训练都需要较大的阅读与填写空间。为了保证体验，请使用平板或电脑访问树子AI。
+        </p>
+        <small>感谢您的光临。</small>
+      </section>
+    </main>
+  );
 }
 
 const defaultMemberPlans = [
@@ -2059,6 +2082,7 @@ function normalizeKnowledgePointPairs(points = []) {
 
 function App() {
   const [activePage, setActivePage] = useState("home");
+  const [tabletMenuOpen, setTabletMenuOpen] = useState(false);
   const [member, setMember] = useState({
     isLoggedIn: false,
     isPaid: false,
@@ -2250,6 +2274,11 @@ function App() {
   const memberPlans = billingConfig.memberPlans.length ? billingConfig.memberPlans : defaultMemberPlans;
   const tokenPackages = billingConfig.tokenPackages.length ? billingConfig.tokenPackages : defaultTokenPackages;
   const activeAiJobs = aiJobs.filter((job) => ["queued", "processing"].includes(job.status));
+  const activeNavLabel = visibleSubPages.find((page) => page.id === activePage)?.label || "树子AI";
+
+  useEffect(() => {
+    setTabletMenuOpen(false);
+  }, [activePage]);
 
   function showAiError(error, fallback = "AI服务暂时不可用，请稍后再试。") {
     setAiNotice({ page: activePage, message: error?.message || fallback });
@@ -4696,7 +4725,28 @@ function App() {
   }
 
   return (
-    <div className="app-shell">
+    <>
+    <MobileUnsupportedNotice />
+    <div className={tabletMenuOpen ? "app-shell is-tablet-nav-open" : "app-shell"}>
+      <header className="tablet-topbar">
+        <button type="button" className="tablet-menu-button" onClick={() => setTabletMenuOpen(true)} aria-label="打开功能菜单">
+          <Menu size={22} />
+        </button>
+        <div className="tablet-topbar-brand">
+          <img src="/assets/shuzi-logo.png" alt="树子AI" />
+          <div>
+            <strong>树子AI</strong>
+            <span>AI学习辅助系统</span>
+          </div>
+        </div>
+        <span className="tablet-current-page">{activeNavLabel}</span>
+      </header>
+      <button
+        type="button"
+        className="tablet-sidebar-scrim"
+        onClick={() => setTabletMenuOpen(false)}
+        aria-label="关闭功能菜单"
+      />
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
@@ -5119,6 +5169,7 @@ function App() {
         />
       )}
     </div>
+    </>
   );
 }
 
