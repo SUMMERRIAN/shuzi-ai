@@ -1492,7 +1492,7 @@ async function recordTokenUsage(userId, amount, note, meta = {}) {
       await client.query("SELECT balance FROM learning_token_wallets WHERE user_id = $1 FOR UPDATE", [userId])
     ).rows[0];
     if (Number(wallet?.balance || 0) < tokens) {
-      throw createHttpError(402, "INSUFFICIENT_TOKENS", "Token余额不足，请充值后再使用AI功能。");
+      throw createHttpError(402, "INSUFFICIENT_TOKENS", "积分余额不足，请充值后再使用AI功能。");
     }
     await client.query("UPDATE learning_token_wallets SET balance = balance - $2, updated_at = now() WHERE user_id = $1", [userId, tokens]);
     await client.query(
@@ -1509,7 +1509,7 @@ async function assertTokenBalance(userId, amount) {
     await query("SELECT balance FROM learning_token_wallets WHERE user_id = $1", [userId])
   ).rows[0];
   if (Number(wallet?.balance || 0) < tokens) {
-    throw createHttpError(402, "INSUFFICIENT_TOKENS", "Token余额不足，请充值后再使用AI功能。");
+    throw createHttpError(402, "INSUFFICIENT_TOKENS", "积分余额不足，请充值后再使用AI功能。");
   }
 }
 
@@ -2231,7 +2231,7 @@ app.post("/api/lt/orders", requireAuth, async (req, res) => {
     return res.status(400).json({ error: "LT_MIN_AMOUNT", message: "自定义充值金额最低为50元。" });
   }
   const pack = packageId === "custom"
-    ? { id: "custom", title: `Token自定义充值 ¥${amountCny}`, priceCny: amountCny, learningTokens: Math.round(amountCny * tokenBillingRules.tokensPerCny) }
+    ? { id: "custom", title: `积分自定义充值 ¥${amountCny}`, priceCny: amountCny, learningTokens: Math.round(amountCny * tokenBillingRules.tokensPerCny) }
     : ltPackages[packageId];
   if (!pack || Number(pack.priceCny) <= 0) return res.status(400).json({ error: "INVALID_LT_PACKAGE" });
   const order = (
@@ -2242,7 +2242,7 @@ app.post("/api/lt/orders", requireAuth, async (req, res) => {
       [req.user.id, pack.id, pack.title, pack.priceCny, JSON.stringify({ learningTokens: pack.learningTokens })]
     )
   ).rows[0];
-  res.json({ order, message: "已生成LT充值申请。当前版本需要管理员后台手动确认。" });
+  res.json({ order, message: "已生成积分充值申请。当前版本需要管理员后台手动确认。" });
 });
 
 app.get("/api/account/center", requireAuth, async (req, res) => {
@@ -5152,7 +5152,7 @@ app.post("/api/admin/lt/recharge", requireAdminToken, async (req, res) => {
       await client.query(
         `INSERT INTO payment_orders (user_id, order_type, package_id, title, amount_cny, status, provider, meta, paid_at)
          VALUES ($1, 'lt_recharge', $2, $3, $4, 'paid', 'manual_admin', $5, now())`,
-        [user.id, pack?.id || "custom-token", `Token充值 ${tokens}`, Number(paidAmountCny), JSON.stringify({ tokens, note })]
+        [user.id, pack?.id || "custom-token", `积分充值 ${tokens}`, Number(paidAmountCny), JSON.stringify({ tokens, note })]
       );
     }
   });
@@ -5200,6 +5200,7 @@ app.get("/api/admin/ai-billing", requireAdminToken, async (req, res) => {
     Object.entries(aiBillingProviderLabels).map(([key, label]) => [key, createAiBillingBucket(label)])
   );
   const byFeature = {};
+  const byModel = {};
   const byDate = {};
 
   const allRecords = rows.map((row) => {
@@ -5244,6 +5245,9 @@ app.get("/api/admin/ai-billing", requireAdminToken, async (req, res) => {
     addAiBillingBucketTotals(byProvider[providerKey] || byProvider.unknown, item);
     if (!byFeature[row.feature || "unknown"]) byFeature[row.feature || "unknown"] = createAiBillingBucket(featureLabel);
     addAiBillingBucketTotals(byFeature[row.feature || "unknown"], item);
+    const modelKey = `${providerKey}:${item.model || "unknown"}`;
+    if (!byModel[modelKey]) byModel[modelKey] = createAiBillingBucket(`${item.providerLabel} · ${item.model || "未知模型"}`);
+    addAiBillingBucketTotals(byModel[modelKey], item);
     if (!byDate[dateKey]) byDate[dateKey] = createAiBillingBucket(dateKey);
     addAiBillingBucketTotals(byDate[dateKey], item);
 
@@ -5263,6 +5267,9 @@ app.get("/api/admin/ai-billing", requireAdminToken, async (req, res) => {
     summary: publicAiBillingBucket(summary),
     byProvider: Object.fromEntries(Object.entries(byProvider).map(([key, value]) => [key, publicAiBillingBucket(value)])),
     byFeature: Object.entries(byFeature)
+      .map(([key, value]) => ({ key, ...publicAiBillingBucket(value) }))
+      .sort((a, b) => b.providerCostCny - a.providerCostCny || b.calls - a.calls),
+    byModel: Object.entries(byModel)
       .map(([key, value]) => ({ key, ...publicAiBillingBucket(value) }))
       .sort((a, b) => b.providerCostCny - a.providerCostCny || b.calls - a.calls),
     byDate: Object.entries(byDate)
@@ -5348,7 +5355,7 @@ app.post("/api/admin/orders/:id/confirm", requireAdminToken, async (req, res) =>
     } else if (order.order_type === "lt_recharge") {
       const pack = ltPackages[order.package_id];
       const tokens = Math.max(1, Math.round(Number(meta.learningTokens || pack?.learningTokens || 0)));
-      if (!tokens) throw createHttpError(400, "INVALID_TOKEN_ORDER", "Token充值数量无效。");
+      if (!tokens) throw createHttpError(400, "INVALID_TOKEN_ORDER", "积分充值数量无效。");
       await client.query(
         `INSERT INTO learning_token_wallets (user_id, balance, reserved)
          VALUES ($1, 0, 0)
@@ -5362,7 +5369,7 @@ app.post("/api/admin/orders/:id/confirm", requireAdminToken, async (req, res) =>
         [
           order.user_id,
           tokens,
-          note || "管理员确认Token充值",
+          note || "管理员确认积分充值",
           JSON.stringify({ orderId: id, packageId: order.package_id, paidAmountCny: Number(order.amount_cny) }),
         ]
       );

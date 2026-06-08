@@ -176,9 +176,15 @@ function orderStatusLabel(status) {
 
 function orderTypeLabel(type) {
   if (type === "membership") return "会员开通";
-  if (type === "lt_recharge") return "Token充值";
+  if (type === "lt_recharge") return "积分充值";
   if (type === "storage_expansion") return "存储扩容";
   return "付款申请";
+}
+
+function displayPointText(value = "") {
+  return String(value || "")
+    .replace(/Token充值/g, "积分充值")
+    .replace(/\bToken\b/g, "积分");
 }
 
 const draftStoragePrefix = "shuzi_ai02_draft";
@@ -3187,7 +3193,7 @@ function App() {
 
   async function requestTokenOrder(packageId = "token-100", customAmount = "") {
     if (!member.isLoggedIn) {
-      setAuthModal((prev) => ({ ...prev, message: "请先注册或登录，再提交Token充值申请。" }));
+      setAuthModal((prev) => ({ ...prev, message: "请先注册或登录，再提交积分充值申请。" }));
       return;
     }
     if (packageId === "custom" && Number(customAmount || 0) < 50) {
@@ -3199,10 +3205,10 @@ function App() {
         method: "POST",
         body: JSON.stringify({ packageId, customAmount }),
       });
-      setAccountNotice(data.message || "已提交Token充值申请。");
+      setAccountNotice(data.message || "已提交积分充值申请。");
       setAuthModal((prev) => ({ ...prev, message: "充值申请已提交。请扫码付款后等待管理员确认入账。" }));
     } catch (error) {
-      setAuthModal((prev) => ({ ...prev, message: error.message || "Token充值申请提交失败。" }));
+      setAuthModal((prev) => ({ ...prev, message: error.message || "积分充值申请提交失败。" }));
     }
   }
 
@@ -3216,8 +3222,8 @@ function App() {
     });
     setAuthModal({
       open: true,
-      actionName: "会员开通与Token充值",
-      message: "先选择需要的会员方案或Token额度，确认金额后再扫码付款。",
+      actionName: "会员开通与积分充值",
+      message: "先选择需要的会员方案或积分额度，确认金额后再扫码付款。",
     });
   }
 
@@ -3234,7 +3240,7 @@ function App() {
       return;
     }
     if (!selectedPlan && !selectedToken && customAmount <= 0) {
-      setCheckout((prev) => ({ ...prev, message: "请先选择会员方案或Token充值额度。" }));
+      setCheckout((prev) => ({ ...prev, message: "请先选择会员方案或积分充值额度。" }));
       return;
     }
     try {
@@ -3253,7 +3259,7 @@ function App() {
           }),
         });
       }
-      const message = "已提交付款确认申请。请扫描管理员微信二维码，告知管理员支付情况；管理员确认后会员及Token额度会更新。";
+      const message = "已提交付款确认申请。请扫描管理员微信二维码，告知管理员支付情况；管理员确认后会员及积分额度会更新。";
       setCheckout((prev) => ({ ...prev, message }));
       setAuthModal((prev) => ({ ...prev, message }));
       setAccountNotice(message);
@@ -3449,8 +3455,8 @@ function App() {
           note: "管理员手动充值",
         }),
       });
-      setAdminPanel((prev) => ({ ...prev, message: "Token已入账。" }));
-      refreshAdminData(adminPanel.token.trim(), "Token已入账。");
+      setAdminPanel((prev) => ({ ...prev, message: "积分已入账。" }));
+      refreshAdminData(adminPanel.token.trim(), "积分已入账。");
     } catch (error) {
       setAdminPanel((prev) => ({ ...prev, message: error.message || "充值失败。" }));
     }
@@ -6196,9 +6202,9 @@ function MemberModal({
   const tokenPrice = selectedToken?.priceCny || customAmount || 0;
   const totalAmount = Number((Number(selectedPlan?.priceCny || 0) + tokenPrice).toFixed(2));
   const selectedTokenText = selectedToken
-    ? `${selectedToken.tokens.toLocaleString("zh-CN")} Token`
+    ? `${selectedToken.tokens.toLocaleString("zh-CN")} 积分`
     : customAmount > 0
-      ? `自定义 ¥${customAmount} / ${Math.round(customAmount * 100).toLocaleString("zh-CN")} Token`
+      ? `自定义 ¥${customAmount} / ${Math.round(customAmount * 100).toLocaleString("zh-CN")} 积分`
       : "未选择";
   return (
     <div className="member-modal-backdrop" role="dialog" aria-modal="true" aria-label="会员登录与开通">
@@ -6294,7 +6300,7 @@ function MemberModal({
               <div className="checkout-heading">
                 <div>
                   <span className="eyebrow">第一步</span>
-                  <h3>选择会员方案和Token额度</h3>
+                  <h3>选择会员方案和积分额度</h3>
                 </div>
                 <strong>合计：¥{totalAmount || 0}</strong>
               </div>
@@ -6318,7 +6324,7 @@ function MemberModal({
 
               <section className="token-order-panel">
                 <div>
-                  <span className="eyebrow">Token充值</span>
+                  <span className="eyebrow">积分充值</span>
                   <h3>用于AI分析、错题训练和知识图生成</h3>
                 </div>
                 <div className="token-package-grid">
@@ -6338,7 +6344,7 @@ function MemberModal({
                       }
                     >
                       <strong>{pack.label}</strong>
-                      <span>{pack.tokens.toLocaleString("zh-CN")} Token</span>
+                      <span>{pack.tokens.toLocaleString("zh-CN")} 积分</span>
                     </button>
                   ))}
                 </div>
@@ -6360,7 +6366,7 @@ function MemberModal({
 
               <div className="checkout-summary">
                 <span>会员：{selectedPlan?.name || (paid ? "已开通会员" : "未选择")}</span>
-                <span>Token：{selectedTokenText}</span>
+                <span>积分：{selectedTokenText}</span>
                 <strong>应付金额：¥{totalAmount || 0}</strong>
                 <button
                   type="button"
@@ -6399,7 +6405,7 @@ function MemberModal({
                 <div>
                   <span className="eyebrow">第二步</span>
                   <h3>扫码付款，付款后等待管理员确认</h3>
-                  <p>付款后点击下方按钮，并扫描右侧管理员二维码，告知管理员支付情况；管理员确认后会员及Token额度会更新。</p>
+                  <p>付款后点击下方按钮，并扫描右侧管理员二维码，告知管理员支付情况；管理员确认后会员及积分额度会更新。</p>
                 </div>
                 <div className="payment-qr-grid">
                   <article>
@@ -6430,7 +6436,7 @@ function MemberModal({
                 <span className="eyebrow">付款信息</span>
                 <h3>本次选择</h3>
                 <p>会员：{selectedPlan?.name || (paid ? "已开通会员" : "未选择")}</p>
-                <p>Token：{selectedTokenText}</p>
+                <p>积分：{selectedTokenText}</p>
                 <strong>合计：¥{totalAmount || 0}</strong>
                 {checkout.message && <p className="account-notice">{checkout.message}</p>}
               </section>
@@ -6454,7 +6460,7 @@ function MemberCenterPage({ member, state, setState, refresh, updateProfile, upd
       <div className="hero-band compact">
         <div>
           <span className="eyebrow">会员中心</span>
-          <h2>管理个人资料、下载记录和Token使用记录</h2>
+          <h2>管理个人资料、下载记录和积分使用记录</h2>
           <p>这里保存学生账号信息、会员状态、资料下载记录和AI功能使用记录，方便后续回看和继续使用。</p>
         </div>
         <button type="button" className="primary-action" onClick={openPayment}>
@@ -6504,7 +6510,7 @@ function MemberCenterPage({ member, state, setState, refresh, updateProfile, upd
             {member.membershipExpiresAt && (
               <span>{member.isPaid ? `到期时间：${new Date(member.membershipExpiresAt).toLocaleDateString("zh-CN")}（剩余${Math.max(member.daysRemaining || 0, 0)}天）` : `会员已到期：${new Date(member.membershipExpiresAt).toLocaleDateString("zh-CN")}`}</span>
             )}
-            <span>Token余额：{member.ltBalance || 0}</span>
+            <span>积分余额：{member.ltBalance || 0}</span>
             <span>存储空间：{member.storageTotalMb || 50}MB</span>
           </div>
         </article>
@@ -6517,15 +6523,15 @@ function MemberCenterPage({ member, state, setState, refresh, updateProfile, upd
           meta: item.payload?.filename || "下载记录",
           time: item.created_at,
         }))} />
-        <RecordList title="Token使用记录" empty="还没有Token记录。" items={tokenRecords.map((item) => ({
+        <RecordList title="积分使用记录" empty="还没有积分记录。" items={tokenRecords.map((item) => ({
           id: item.id,
-          title: item.note || item.type,
-          meta: `${item.amount > 0 ? "+" : ""}${item.amount} Token`,
+          title: displayPointText(item.note || item.type),
+          meta: `${item.amount > 0 ? "+" : ""}${item.amount} 积分`,
           time: item.created_at,
         }))} />
         <RecordList title="会员与充值申请" empty="还没有申请记录。" items={orders.map((item) => ({
           id: item.id,
-          title: item.title,
+          title: displayPointText(item.title),
           meta: `${orderStatusLabel(item.status)} · ${orderTypeLabel(item.order_type)} · ¥${Number(item.amount_cny || 0).toFixed(2)}${item.paid_at ? ` · 确认：${new Date(item.paid_at).toLocaleString("zh-CN")}` : ""}${item.meta?.adminNote ? ` · 备注：${item.meta.adminNote}` : ""}`,
           time: item.created_at,
         }))} />
@@ -6591,6 +6597,7 @@ function AdminAiBillingPanel({ state, setState, loadAiBilling }) {
   const providerItems = ["openai", "gemini", "image", "unknown"].map((key) => data.byProvider?.[key]).filter(Boolean);
   const records = data.records || [];
   const features = data.byFeature || [];
+  const models = data.byModel || [];
   const dailyRows = data.byDate || [];
   const rules = data.billingRules || {};
   const isLoading = state.aiBillingStatus === "loading";
@@ -6608,7 +6615,7 @@ function AdminAiBillingPanel({ state, setState, loadAiBilling }) {
           <div>
             <span className="eyebrow">AI成本对账</span>
             <h2>核对每次调用、真实成本和用户扣费</h2>
-            <p>这里读取已经写入云端的 AI 任务记录，用来对比 API 实际成本、用户 Token 扣除、fallback 固定扣费和各功能平均成本。</p>
+            <p>这里读取已经写入云端的 AI 任务记录，用来对比真实 API token、API 实际成本、用户积分扣除、fallback 固定扣费和各功能平均成本。</p>
           </div>
           <div className="admin-billing-actions">
             <label>
@@ -6627,19 +6634,19 @@ function AdminAiBillingPanel({ state, setState, loadAiBilling }) {
         <div className="admin-billing-note">
           <strong>计费规则</strong>
           <span>倍率 {rules.markup || "-"} 倍</span>
-          <span>{rules.tokensPerCny || "-"} Token / ¥1</span>
+          <span>{rules.tokensPerCny || "-"} 积分 / ¥1</span>
           <span>汇率 {rules.usdToCny || "-"}</span>
-          <span>最低扣费 {rules.minimumChargeTokens || 0} Token</span>
+          <span>最低扣费 {rules.minimumChargeTokens || 0} 积分</span>
         </div>
       </article>
 
       <div className="admin-metric-grid">
         <AdminMetricCard label="API实际成本" value={formatAdminMoney(summary.providerCostCny)} hint={`${formatAdminMoney(summary.providerCostUsd, "USD")} 美元成本`} />
-        <AdminMetricCard label="用户扣除Token" value={formatAdminNumber(summary.billedTokens)} hint="来自 AI 调用扣费记录" />
-        <AdminMetricCard label="理论收入" value={formatAdminMoney(summary.theoreticalRevenueCny)} hint="按 Token 兑换规则估算" />
+        <AdminMetricCard label="用户扣除积分" value={formatAdminNumber(summary.billedTokens)} hint="来自 AI 调用扣费记录" />
+        <AdminMetricCard label="理论收入" value={formatAdminMoney(summary.theoreticalRevenueCny)} hint="按积分兑换规则估算" />
         <AdminMetricCard label="毛利估算" value={formatAdminMoney(summary.grossCny)} hint="理论收入 - API成本" tone={Number(summary.grossCny || 0) < 0 ? "is-danger" : "is-good"} />
         <AdminMetricCard label="AI调用次数" value={formatAdminNumber(summary.calls)} hint={`最近 ${data.days || state.aiBillingRangeDays || 30} 天`} />
-        <AdminMetricCard label="Fallback扣费" value={formatAdminNumber(summary.fallbackCalls)} hint="没有真实usage时按固定Token扣" />
+        <AdminMetricCard label="Fallback扣费" value={formatAdminNumber(summary.fallbackCalls)} hint="没有真实usage时按固定积分扣" />
       </div>
 
       <article className="panel admin-billing-panel">
@@ -6656,9 +6663,39 @@ function AdminAiBillingPanel({ state, setState, loadAiBilling }) {
                 <span>{item.label}</span>
                 <strong>{formatAdminMoney(item.providerCostCny)}</strong>
               </div>
-              <p>{formatAdminNumber(item.calls)} 次调用 · {formatAdminNumber(item.billedTokens)} Token</p>
+              <p>{formatAdminNumber(item.calls)} 次调用 · {formatAdminNumber(item.billedTokens)} 积分</p>
               <small>平均 {formatAdminMoney(item.avgProviderCostCny)} / 次 · fallback {item.fallbackCalls || 0} 次</small>
             </article>
+          ))}
+        </div>
+      </article>
+
+      <article className="panel admin-billing-panel">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">模型成本</span>
+            <h2>按模型统计真实成本和积分扣除</h2>
+          </div>
+        </div>
+        <div className="admin-cost-table">
+          <div className="admin-cost-head">
+            <span>模型</span>
+            <span>次数</span>
+            <span>API成本</span>
+            <span>平均成本</span>
+            <span>扣除积分</span>
+            <span>fallback</span>
+          </div>
+          {models.length === 0 && <p className="muted-text">还没有可统计的模型成本记录。</p>}
+          {models.map((item) => (
+            <div className="admin-cost-row" key={item.key}>
+              <strong>{item.label}</strong>
+              <span>{formatAdminNumber(item.calls)}</span>
+              <span>{formatAdminMoney(item.providerCostCny)}</span>
+              <span>{formatAdminMoney(item.avgProviderCostCny)}</span>
+              <span>{formatAdminNumber(item.billedTokens)}</span>
+              <span>{formatAdminNumber(item.fallbackCalls)}</span>
+            </div>
           ))}
         </div>
       </article>
@@ -6676,7 +6713,7 @@ function AdminAiBillingPanel({ state, setState, loadAiBilling }) {
             <span>次数</span>
             <span>API成本</span>
             <span>平均成本</span>
-            <span>扣除Token</span>
+            <span>扣除积分</span>
             <span>fallback</span>
           </div>
           {features.length === 0 && <p className="muted-text">还没有可统计的 AI 成本记录。</p>}
@@ -6708,7 +6745,7 @@ function AdminAiBillingPanel({ state, setState, loadAiBilling }) {
                 <strong>{item.date}</strong>
                 <span>{formatAdminNumber(item.calls)} 次</span>
                 <span>{formatAdminMoney(item.providerCostCny)}</span>
-                <span>{formatAdminNumber(item.billedTokens)} Token</span>
+                <span>{formatAdminNumber(item.billedTokens)} 积分</span>
               </div>
             ))}
           </div>
@@ -6735,10 +6772,10 @@ function AdminAiBillingPanel({ state, setState, loadAiBilling }) {
                 </div>
                 <div>
                   <strong>{formatAdminMoney(record.providerCostCny)}</strong>
-                  <small>{record.usedFallback ? "fallback固定扣费" : `${formatAdminNumber(record.inputTokens)} 入 / ${formatAdminNumber(record.outputTokens)} 出`}</small>
+                  <small>{record.usedFallback ? "fallback固定扣费" : `API token：${formatAdminNumber(record.inputTokens)} 入 / ${formatAdminNumber(record.outputTokens)} 出`}</small>
                 </div>
                 <div>
-                  <span>{formatAdminNumber(record.billedTokens)} Token</span>
+                  <span>{formatAdminNumber(record.billedTokens)} 积分</span>
                   <small>{formatAdminDateTime(record.completedAt || record.createdAt)}</small>
                 </div>
               </article>
@@ -6775,7 +6812,7 @@ function AdminPanelPage({
   function orderDetailText(order) {
     const meta = order.meta || {};
     if (order.order_type === "lt_recharge") {
-      return `${Number(meta.learningTokens || 0).toLocaleString("zh-CN")} Token`;
+      return `${Number(meta.learningTokens || 0).toLocaleString("zh-CN")} 积分`;
     }
     if (order.order_type === "membership") {
       return `${meta.durationDays || ""}天会员`;
@@ -6850,7 +6887,7 @@ function AdminPanelPage({
               <article className="admin-order-card" key={order.id}>
                 <div>
                   <span className="status-pill pending">{orderStatusLabel(order.status)}</span>
-                  <h3>{order.title}</h3>
+                  <h3>{displayPointText(order.title)}</h3>
                   <p>{order.identifier} · {order.student_name || order.display_name || "未填写姓名"}</p>
                 </div>
                 <div className="admin-order-meta">
@@ -6871,7 +6908,7 @@ function AdminPanelPage({
               {recentOrders.map((order) => (
                 <div className="admin-recent-row" key={order.id}>
                   <span className={`status-pill ${order.status}`}>{orderStatusLabel(order.status)}</span>
-                  <strong>{order.title}</strong>
+                  <strong>{displayPointText(order.title)}</strong>
                   <span>{order.identifier}</span>
                   <span>{orderAmountText(order)}</span>
                   <small>{order.paid_at ? new Date(order.paid_at).toLocaleString("zh-CN") : new Date(order.updated_at || order.created_at).toLocaleString("zh-CN")}</small>
@@ -6907,11 +6944,11 @@ function AdminPanelPage({
           <input type="number" value={state.paidAmount} onChange={(event) => setState((prev) => ({ ...prev, paidAmount: event.target.value }))} placeholder="例如：100" />
         </label>
         <label>
-          <span>增加Token</span>
+          <span>增加积分</span>
           <input type="number" value={state.tokenAmount} onChange={(event) => setState((prev) => ({ ...prev, tokenAmount: event.target.value }))} />
         </label>
         <label>
-          <span>常用Token包</span>
+          <span>常用积分包</span>
           <select
             value=""
             onChange={(event) => {
@@ -6928,7 +6965,7 @@ function AdminPanelPage({
             <option value="">选择后自动填入</option>
             {tokenPackages.map((pack) => (
               <option key={pack.id} value={pack.id}>
-                {pack.label || pack.title} · {(pack.tokens || pack.learningTokens || 0).toLocaleString("zh-CN")} Token
+                {pack.label || pack.title} · {(pack.tokens || pack.learningTokens || 0).toLocaleString("zh-CN")} 积分
               </option>
             ))}
           </select>
@@ -6936,7 +6973,7 @@ function AdminPanelPage({
         <div className="admin-actions">
           <button type="button" className="ghost-action" onClick={loadUsers}>刷新用户</button>
           <button type="button" className="primary-action" onClick={activateMembership}>开通会员</button>
-          <button type="button" className="primary-action" onClick={rechargeToken}>增加Token</button>
+          <button type="button" className="primary-action" onClick={rechargeToken}>增加积分</button>
         </div>
         {state.message && <p className="account-notice">{state.message}</p>}
       </article>
@@ -6949,7 +6986,7 @@ function AdminPanelPage({
           <span>用户名</span>
           <span>姓名</span>
           <span>会员</span>
-          <span>Token</span>
+          <span>积分</span>
           <span>到期时间</span>
         </div>
         {state.users.map((user) => (

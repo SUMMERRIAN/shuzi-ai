@@ -37,9 +37,9 @@ export const membershipPlans = {
 };
 
 export const ltPackages = {
-  "token-100": { id: "token-100", title: "Token充值 ¥100", priceCny: 100, learningTokens: 10000 },
-  "token-300": { id: "token-300", title: "Token充值 ¥300", priceCny: 300, learningTokens: 30000 },
-  "token-500": { id: "token-500", title: "Token充值 ¥500", priceCny: 500, learningTokens: 50000 },
+  "token-100": { id: "token-100", title: "积分充值 ¥100", priceCny: 100, learningTokens: 10000 },
+  "token-300": { id: "token-300", title: "积分充值 ¥300", priceCny: 300, learningTokens: 30000 },
+  "token-500": { id: "token-500", title: "积分充值 ¥500", priceCny: 500, learningTokens: 50000 },
 };
 
 function numberFromEnv(name, fallback) {
