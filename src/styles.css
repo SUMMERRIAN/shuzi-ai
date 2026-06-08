@@ -2563,6 +2563,11 @@ p {
   color: #5f6b76;
 }
 
+.danger-text {
+  color: #b42318;
+  font-weight: 650;
+}
+
 .admin-control-panel {
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
 }

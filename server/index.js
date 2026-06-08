@@ -1031,26 +1031,67 @@ function estimateProviderCostUsd(usageEvents = []) {
   }, 0);
 }
 
+function getUsagePricingWarnings(usageEvents = []) {
+  const warnings = [];
+  for (const event of usageEvents) {
+    if (!event) continue;
+    if (event.kind === "image") {
+      const modelPrices = tokenBillingRules.imagePricingUsd?.[event.model] || tokenBillingRules.imagePricingUsd?.[imageModel];
+      if (!modelPrices) warnings.push(`image:${event.model || imageModel || "unknown"}`);
+      continue;
+    }
+    if (!getTextPricing(event.model)) warnings.push(`text:${event.model || "unknown"}`);
+  }
+  return [...new Set(warnings)];
+}
+
 async function recordAiUsageBilling(userId, { jobId = "", note = "AI usage", usageEvents = [], fallbackTokenCost = 0, meta = {} } = {}) {
   const providerCostUsd = estimateProviderCostUsd(usageEvents);
   const providerCostCny = providerCostUsd * Number(tokenBillingRules.usdToCny || 0);
   const billableCny = providerCostCny * Number(tokenBillingRules.markup || 1);
-  let billedTokens =
+  let requestedTokens =
     providerCostUsd > 0
       ? Math.ceil(billableCny * Number(tokenBillingRules.tokensPerCny || 1))
       : Math.ceil(Number(fallbackTokenCost || 0));
-  if (billedTokens > 0) billedTokens = Math.max(billedTokens, Number(tokenBillingRules.minimumChargeTokens || 1));
+  if (requestedTokens > 0) requestedTokens = Math.max(requestedTokens, Number(tokenBillingRules.minimumChargeTokens || 1));
+  const reservedAmount = jobId
+    ? Number((await query("SELECT token_cost FROM ai_generation_jobs WHERE id = $1", [jobId])).rows[0]?.token_cost || 0)
+    : 0;
+  const pricingWarnings = getUsagePricingWarnings(usageEvents);
+  let settlement = {
+    requestedTokens,
+    chargedTokens: 0,
+    reservedTokens: reservedAmount,
+    insufficientAtSettlement: false,
+  };
+  if (requestedTokens > 0) {
+    settlement = await chargeTokenUsage(userId, requestedTokens, note, {}, {
+      reservedAmount,
+      allowPartial: true,
+    });
+  } else if (reservedAmount > 0) {
+    await releaseTokenReservation(userId, reservedAmount);
+    settlement.reservedReleased = reservedAmount;
+  }
   const billing = {
     usageEvents,
     providerCostUsd: Number(providerCostUsd.toFixed(6)),
     providerCostCny: Number(providerCostCny.toFixed(4)),
     billableCny: Number(billableCny.toFixed(4)),
     billingMarkup: Number(tokenBillingRules.markup || 1),
-    billedTokens,
+    billedTokens: settlement.chargedTokens,
+    requestedTokens,
+    reservedTokens: reservedAmount,
+    insufficientAtSettlement: Boolean(settlement.insufficientAtSettlement),
     usedFallback: providerCostUsd <= 0,
+    pricingWarnings,
   };
-  if (billedTokens > 0) {
-    await recordTokenUsage(userId, billedTokens, note, { ...meta, billing });
+  if (settlement.chargedTokens > 0) {
+    await query(
+      `INSERT INTO learning_token_transactions (user_id, amount, type, source, note, meta)
+       VALUES ($1, $2, 'consume', 'ai_action', $3, $4)`,
+      [userId, -settlement.chargedTokens, note, JSON.stringify({ ...meta, billing })]
+    );
   }
   if (jobId) {
     await query(
@@ -1066,7 +1107,7 @@ async function recordAiUsageBilling(userId, { jobId = "", note = "AI usage", usa
        WHERE id = $1`,
       [
         jobId,
-        JSON.stringify({ events: usageEvents }),
+        JSON.stringify({ events: usageEvents, billing }),
         billing.providerCostUsd,
         billing.providerCostCny,
         billing.billableCny,
@@ -1136,6 +1177,17 @@ function getAiBillingEvents(row) {
   return Array.isArray(usage?.events) ? usage.events : [];
 }
 
+function getAiBillingUsageMeta(row) {
+  const usage = parseMaybeJson(row?.usage, {});
+  const billing = usage?.billing && typeof usage.billing === "object" ? usage.billing : {};
+  return {
+    pricingWarnings: Array.isArray(billing.pricingWarnings) ? billing.pricingWarnings : [],
+    requestedTokens: toFiniteNumber(billing.requestedTokens),
+    chargedTokens: toFiniteNumber(billing.billedTokens),
+    insufficientAtSettlement: Boolean(billing.insufficientAtSettlement),
+  };
+}
+
 function getAiBillingProviderKey(row, events = getAiBillingEvents(row)) {
   if (events.some((event) => event?.kind === "image")) return "image";
   const providerText = [row?.provider, ...events.map((event) => event?.provider)]
@@ -1183,6 +1235,8 @@ function createAiBillingBucket(label = "") {
     theoreticalRevenueCny: 0,
     grossCny: 0,
     fallbackCalls: 0,
+    pricingWarningCalls: 0,
+    partialChargeCalls: 0,
   };
 }
 
@@ -1194,6 +1248,8 @@ function addAiBillingBucketTotals(bucket, item) {
   bucket.theoreticalRevenueCny += item.theoreticalRevenueCny;
   bucket.grossCny += item.grossCny;
   if (item.usedFallback) bucket.fallbackCalls += 1;
+  if (item.pricingWarnings?.length) bucket.pricingWarningCalls += 1;
+  if (item.insufficientAtSettlement) bucket.partialChargeCalls += 1;
   return bucket;
 }
 
@@ -1267,14 +1323,17 @@ async function createAiJob({
     ).rows[0];
     if (completedJob) return { job: completedJob, reused: true };
   }
-  const job = (
-    await query(
-      `INSERT INTO ai_generation_jobs (user_id, student_id, feature, status, input, provider, mode, token_cost, request_hash)
-       VALUES ($1, $2, $3, 'queued', $4, $5, $6, $7, $8)
-       RETURNING *`,
-      [userId, studentId, feature, JSON.stringify(input), provider, mode, tokenCost, finalRequestHash]
-    )
-  ).rows[0];
+  const job = await withTransaction(async (client) => {
+    await reserveTokenUsage(client, userId, tokenCost);
+    return (
+      await client.query(
+        `INSERT INTO ai_generation_jobs (user_id, student_id, feature, status, input, provider, mode, token_cost, request_hash)
+         VALUES ($1, $2, $3, 'queued', $4, $5, $6, $7, $8)
+         RETURNING *`,
+        [userId, studentId, feature, JSON.stringify(input), provider, mode, tokenCost, finalRequestHash]
+      )
+    ).rows[0];
+  });
   return { job, reused: false };
 }
 
@@ -1296,6 +1355,9 @@ function startAiJob(jobId, executor) {
       );
     } catch (error) {
       console.error("AI async job failed", jobId, error);
+      await releaseJobReservation(jobId).catch((releaseError) => {
+        console.warn("Failed to release AI job reservation", jobId, releaseError.message);
+      });
       await query(
         `UPDATE ai_generation_jobs
          SET status = 'failed', error = $2, updated_at = now(), completed_at = now()
@@ -1348,6 +1410,7 @@ function normalizeIdentifier(identifier = "") {
 }
 
 const freeStorageMb = Number(membershipPlans.free?.storageMb || 50);
+const maxAdminRechargeTokens = 500000;
 
 function createHttpError(status, code, message) {
   const error = new Error(message);
@@ -1479,32 +1542,131 @@ function getMembershipWindow(startDate, durationDays) {
   return { startedAt: startedAt.toISOString(), expiresAt: expiresAt.toISOString(), days };
 }
 
-async function recordTokenUsage(userId, amount, note, meta = {}) {
-  const tokens = Math.max(1, Math.ceil(Number(amount || 1)));
-  await withTransaction(async (client) => {
+async function getMembershipWindowForUser(client, userId, startDate, durationDays) {
+  const rawStart = String(startDate || "").trim();
+  if (rawStart) return getMembershipWindow(rawStart, durationDays);
+  const active = (
     await client.query(
-      `INSERT INTO learning_token_wallets (user_id, balance, reserved)
-       VALUES ($1, 0, 0)
-       ON CONFLICT (user_id) DO NOTHING`,
+      `SELECT expires_at
+       FROM student_memberships
+       WHERE user_id = $1
+         AND status = 'active'
+         AND expires_at IS NOT NULL
+         AND expires_at > now()
+       ORDER BY expires_at DESC
+       LIMIT 1`,
       [userId]
-    );
+    )
+  ).rows[0];
+  const now = new Date();
+  const activeExpiresAt = active?.expires_at ? new Date(active.expires_at) : null;
+  const startedAt = activeExpiresAt && activeExpiresAt.getTime() > now.getTime() ? activeExpiresAt : now;
+  const days = Math.max(1, Number(durationDays || 31));
+  const expiresAt = new Date(startedAt.getTime() + days * 24 * 60 * 60 * 1000);
+  return { startedAt: startedAt.toISOString(), expiresAt: expiresAt.toISOString(), days };
+}
+
+function normalizePositiveTokens(amount, fallback = 1) {
+  return Math.max(1, Math.ceil(Number(amount || fallback)));
+}
+
+async function ensureWalletRow(client, userId) {
+  await client.query(
+    `INSERT INTO learning_token_wallets (user_id, balance, reserved)
+     VALUES ($1, 0, 0)
+     ON CONFLICT (user_id) DO NOTHING`,
+    [userId]
+  );
+}
+
+async function reserveTokenUsage(client, userId, amount) {
+  const tokens = Math.max(0, Math.ceil(Number(amount || 0)));
+  if (!tokens) return { reservedTokens: 0 };
+  await ensureWalletRow(client, userId);
+  const wallet = (
+    await client.query("SELECT balance, reserved FROM learning_token_wallets WHERE user_id = $1 FOR UPDATE", [userId])
+  ).rows[0];
+  const available = Number(wallet?.balance || 0) - Number(wallet?.reserved || 0);
+  if (available < tokens) {
+    throw createHttpError(402, "INSUFFICIENT_TOKENS", "积分余额不足，请充值后再使用AI功能。");
+  }
+  await client.query("UPDATE learning_token_wallets SET reserved = reserved + $2, updated_at = now() WHERE user_id = $1", [
+    userId,
+    tokens,
+  ]);
+  return { reservedTokens: tokens };
+}
+
+async function releaseTokenReservation(userId, amount) {
+  const tokens = Math.max(0, Math.ceil(Number(amount || 0)));
+  if (!tokens) return { releasedTokens: 0 };
+  return withTransaction(async (client) => {
+    await ensureWalletRow(client, userId);
     const wallet = (
-      await client.query("SELECT balance FROM learning_token_wallets WHERE user_id = $1 FOR UPDATE", [userId])
+      await client.query("SELECT reserved FROM learning_token_wallets WHERE user_id = $1 FOR UPDATE", [userId])
     ).rows[0];
-    if (Number(wallet?.balance || 0) < tokens) {
-      throw createHttpError(402, "INSUFFICIENT_TOKENS", "积分余额不足，请充值后再使用AI功能。");
+    const releasedTokens = Math.min(tokens, Number(wallet?.reserved || 0));
+    if (releasedTokens > 0) {
+      await client.query(
+        "UPDATE learning_token_wallets SET reserved = GREATEST(reserved - $2, 0), updated_at = now() WHERE user_id = $1",
+        [userId, releasedTokens]
+      );
     }
-    await client.query("UPDATE learning_token_wallets SET balance = balance - $2, updated_at = now() WHERE user_id = $1", [userId, tokens]);
-    await client.query(
-      `INSERT INTO learning_token_transactions (user_id, amount, type, source, note, meta)
-       VALUES ($1, $2, 'consume', 'ai_action', $3, $4)`,
-      [userId, -tokens, note, JSON.stringify(meta)]
-    );
+    return { releasedTokens };
   });
 }
 
+async function chargeTokenUsage(userId, amount, _note = "", _meta = {}, { reservedAmount = 0, allowPartial = false } = {}) {
+  const requestedTokens = normalizePositiveTokens(amount);
+  return withTransaction(async (client) => {
+    await ensureWalletRow(client, userId);
+    const wallet = (
+      await client.query("SELECT balance, reserved FROM learning_token_wallets WHERE user_id = $1 FOR UPDATE", [userId])
+    ).rows[0];
+    const balance = Number(wallet?.balance || 0);
+    const reserved = Number(wallet?.reserved || 0);
+    const reservedReleased = Math.min(Math.max(0, Math.ceil(Number(reservedAmount || 0))), reserved);
+    const remainingReserved = Math.max(0, reserved - reservedReleased);
+    const availableAfterRelease = Math.max(0, balance - remainingReserved);
+    if (!allowPartial && availableAfterRelease < requestedTokens) {
+      throw createHttpError(402, "INSUFFICIENT_TOKENS", "积分余额不足，请充值后再使用AI功能。");
+    }
+    const chargedTokens = allowPartial ? Math.min(requestedTokens, availableAfterRelease) : requestedTokens;
+    await client.query(
+      `UPDATE learning_token_wallets
+       SET balance = balance - $2,
+           reserved = $3,
+           updated_at = now()
+       WHERE user_id = $1`,
+      [userId, chargedTokens, remainingReserved]
+    );
+    return {
+      requestedTokens,
+      chargedTokens,
+      reservedTokens: reservedAmount,
+      reservedReleased,
+      insufficientAtSettlement: chargedTokens < requestedTokens,
+    };
+  });
+}
+
+async function recordTokenUsage(userId, amount, note, meta = {}) {
+  const settlement = await chargeTokenUsage(userId, amount, note, meta);
+  await query(
+    `INSERT INTO learning_token_transactions (user_id, amount, type, source, note, meta)
+     VALUES ($1, $2, 'consume', 'ai_action', $3, $4)`,
+    [userId, -settlement.chargedTokens, note, JSON.stringify(meta)]
+  );
+}
+
+async function releaseJobReservation(jobId) {
+  const job = (await query("SELECT user_id, token_cost FROM ai_generation_jobs WHERE id = $1", [jobId])).rows[0];
+  if (!job) return { releasedTokens: 0 };
+  return releaseTokenReservation(job.user_id, Number(job.token_cost || 0));
+}
+
 async function assertTokenBalance(userId, amount) {
-  const tokens = Math.max(1, Math.ceil(Number(amount || 1)));
+  const tokens = normalizePositiveTokens(amount);
   const wallet = (
     await query("SELECT balance FROM learning_token_wallets WHERE user_id = $1", [userId])
   ).rows[0];
@@ -2206,10 +2368,34 @@ app.post("/api/admin/login", async (req, res) => {
   res.json({ adminToken });
 });
 
+async function findPendingPaymentOrder(userId, orderType, packageId, amountCny) {
+  return (
+    await query(
+      `SELECT *
+       FROM payment_orders
+       WHERE user_id = $1
+         AND order_type = $2
+         AND package_id = $3
+         AND status = 'pending'
+         AND amount_cny = $4
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [userId, orderType, packageId, Number(amountCny)]
+    )
+  ).rows[0];
+}
+
 app.post("/api/membership/orders", requireAuth, async (req, res) => {
   const { planId = "monthly" } = req.body || {};
   const plan = membershipPlans[planId];
   if (!plan || plan.id === "free") return res.status(400).json({ error: "INVALID_PLAN" });
+  const existingOrder = await findPendingPaymentOrder(req.user.id, "membership", plan.id, plan.priceCny);
+  if (existingOrder) {
+    return res.json({
+      order: existingOrder,
+      message: "已经有一条待确认的会员开通申请，请不要重复提交。付款后等待管理员确认即可。",
+    });
+  }
   const order = (
     await query(
       `INSERT INTO payment_orders (user_id, order_type, package_id, title, amount_cny, provider, meta)
@@ -2234,6 +2420,13 @@ app.post("/api/lt/orders", requireAuth, async (req, res) => {
     ? { id: "custom", title: `积分自定义充值 ¥${amountCny}`, priceCny: amountCny, learningTokens: Math.round(amountCny * tokenBillingRules.tokensPerCny) }
     : ltPackages[packageId];
   if (!pack || Number(pack.priceCny) <= 0) return res.status(400).json({ error: "INVALID_LT_PACKAGE" });
+  const existingOrder = await findPendingPaymentOrder(req.user.id, "lt_recharge", pack.id, pack.priceCny);
+  if (existingOrder) {
+    return res.json({
+      order: existingOrder,
+      message: "已经有一条同金额的积分充值申请，请不要重复提交。付款后等待管理员确认即可。",
+    });
+  }
   const order = (
     await query(
       `INSERT INTO payment_orders (user_id, order_type, package_id, title, amount_cny, provider, meta)
@@ -4486,6 +4679,7 @@ app.post("/api/ai/jobs/:jobId/cancel", requireAuth, async (req, res, next) => {
         [job.id, req.user.id, JSON.stringify({ message: "AI任务已取消。", detail: "cancelled_by_user" })]
       )
     ).rows[0];
+    await releaseJobReservation(job.id);
     res.json(publicJob(updated));
   } catch (error) {
     next(error);
@@ -5098,30 +5292,37 @@ app.post("/api/admin/memberships/activate", requireAdminToken, async (req, res) 
   const { identifier, planId = "monthly", durationDays, paidAmountCny = 0, startDate } = req.body || {};
   const plan = membershipPlans[planId];
   if (!plan || plan.id === "free") return res.status(400).json({ error: "INVALID_PLAN" });
+  const paidAmount = Number(paidAmountCny || 0);
+  if (!Number.isFinite(paidAmount) || paidAmount < 0) {
+    return res.status(400).json({ error: "INVALID_PAID_AMOUNT", message: "实收金额不能为负数。" });
+  }
   const user = (await query("SELECT * FROM users WHERE identifier = $1", [normalizeIdentifier(identifier)])).rows[0];
   if (!user) return res.status(404).json({ error: "USER_NOT_FOUND" });
-  const { startedAt, expiresAt, days } = getMembershipWindow(startDate, durationDays || plan.durationDays || 31);
-  const membership = (
-    await query(
+  const membership = await withTransaction(async (client) => {
+    const { startedAt, expiresAt, days } = await getMembershipWindowForUser(client, user.id, startDate, durationDays || plan.durationDays || 31);
+    const row = (
+      await client.query(
       `INSERT INTO student_memberships (user_id, plan_id, plan_name, status, started_at, expires_at)
        VALUES ($1, $2, $3, 'active', $4, $5)
        RETURNING *`,
-      [user.id, plan.id, plan.name, startedAt, expiresAt]
-    )
-  ).rows[0];
-  await query(
-    `INSERT INTO storage_quotas (user_id, base_mb, expansion_mb, used_bytes)
-     VALUES ($1, $2, 0, 0)
-     ON CONFLICT (user_id) DO UPDATE SET base_mb = EXCLUDED.base_mb, updated_at = now()`,
-    [user.id, plan.storageMb]
-  );
-  if (Number(paidAmountCny) > 0) {
-    await query(
-      `INSERT INTO payment_orders (user_id, order_type, package_id, title, amount_cny, status, provider, meta, paid_at)
-       VALUES ($1, 'membership', $2, $3, $4, 'paid', 'manual_admin', $5, now())`,
-      [user.id, plan.id, plan.name, Number(paidAmountCny), JSON.stringify({ adminConfirmed: true, startedAt, expiresAt, durationDays: days })]
+        [user.id, plan.id, plan.name, startedAt, expiresAt]
+      )
+    ).rows[0];
+    await client.query(
+      `INSERT INTO storage_quotas (user_id, base_mb, expansion_mb, used_bytes)
+       VALUES ($1, $2, 0, 0)
+       ON CONFLICT (user_id) DO UPDATE SET base_mb = EXCLUDED.base_mb, updated_at = now()`,
+      [user.id, plan.storageMb]
     );
-  }
+    if (paidAmount > 0) {
+      await client.query(
+        `INSERT INTO payment_orders (user_id, order_type, package_id, title, amount_cny, status, provider, meta, paid_at)
+         VALUES ($1, 'membership', $2, $3, $4, 'paid', 'manual_admin', $5, now())`,
+        [user.id, plan.id, plan.name, paidAmount, JSON.stringify({ adminConfirmed: true, startedAt, expiresAt, durationDays: days })]
+      );
+    }
+    return row;
+  });
   res.json({ membership, account: await buildAccountSnapshot(user.id) });
 });
 
@@ -5130,8 +5331,15 @@ app.post("/api/admin/lt/recharge", requireAdminToken, async (req, res) => {
   const user = (await query("SELECT * FROM users WHERE identifier = $1", [normalizeIdentifier(identifier)])).rows[0];
   if (!user) return res.status(404).json({ error: "USER_NOT_FOUND" });
   const pack = packageId ? ltPackages[packageId] : null;
-  const tokens = Number(amount || pack?.learningTokens || 0);
-  if (!tokens) return res.status(400).json({ error: "INVALID_AMOUNT" });
+  const rawTokens = Number(amount || pack?.learningTokens || 0);
+  const tokens = Math.floor(rawTokens);
+  if (!Number.isFinite(rawTokens) || rawTokens !== tokens || tokens <= 0 || tokens > maxAdminRechargeTokens) {
+    return res.status(400).json({ error: "INVALID_AMOUNT", message: `积分数量必须是 1-${maxAdminRechargeTokens} 之间的整数。` });
+  }
+  const paidAmount = Number(paidAmountCny || 0);
+  if (!Number.isFinite(paidAmount) || paidAmount < 0) {
+    return res.status(400).json({ error: "INVALID_PAID_AMOUNT", message: "实收金额不能为负数。" });
+  }
   await withTransaction(async (client) => {
     await client.query(
       `INSERT INTO learning_token_wallets (user_id, balance, reserved)
@@ -5146,13 +5354,13 @@ app.post("/api/admin/lt/recharge", requireAdminToken, async (req, res) => {
     await client.query(
       `INSERT INTO learning_token_transactions (user_id, amount, type, source, note, meta)
        VALUES ($1, $2, 'recharge', 'manual_admin', $3, $4)`,
-      [user.id, tokens, note, JSON.stringify({ packageId: pack?.id || null, paidAmountCny: Number(paidAmountCny) || null })]
+      [user.id, tokens, note, JSON.stringify({ packageId: pack?.id || null, paidAmountCny: paidAmount || null })]
     );
-    if (Number(paidAmountCny) > 0) {
+    if (paidAmount > 0) {
       await client.query(
         `INSERT INTO payment_orders (user_id, order_type, package_id, title, amount_cny, status, provider, meta, paid_at)
          VALUES ($1, 'lt_recharge', $2, $3, $4, 'paid', 'manual_admin', $5, now())`,
-        [user.id, pack?.id || "custom-token", `积分充值 ${tokens}`, Number(paidAmountCny), JSON.stringify({ tokens, note })]
+        [user.id, pack?.id || "custom-token", `积分充值 ${tokens}`, paidAmount, JSON.stringify({ tokens, note })]
       );
     }
   });
@@ -5205,6 +5413,7 @@ app.get("/api/admin/ai-billing", requireAdminToken, async (req, res) => {
 
   const allRecords = rows.map((row) => {
     const events = getAiBillingEvents(row);
+    const usageMeta = getAiBillingUsageMeta(row);
     const providerKey = getAiBillingProviderKey(row, events);
     const featureLabel = aiBillingFeatureLabels[row.feature] || row.feature || "未知功能";
     const providerCostUsd = toFiniteNumber(row.provider_cost_usd);
@@ -5234,6 +5443,10 @@ app.get("/api/admin/ai-billing", requireAdminToken, async (req, res) => {
       billableCny: Number(toFiniteNumber(row.billable_cny).toFixed(4)),
       billingMarkup: Number(toFiniteNumber(row.billing_markup, tokenBillingRules.markup || 1).toFixed(3)),
       billedTokens,
+      requestedTokens: usageMeta.requestedTokens || billedTokens,
+      chargedTokens: usageMeta.chargedTokens || billedTokens,
+      insufficientAtSettlement: usageMeta.insufficientAtSettlement,
+      pricingWarnings: usageMeta.pricingWarnings,
       theoreticalRevenueCny: Number(theoreticalRevenueCny.toFixed(4)),
       grossCny: Number(grossCny.toFixed(4)),
       usedFallback,
@@ -5325,7 +5538,12 @@ app.post("/api/admin/orders/:id/confirm", requireAdminToken, async (req, res) =>
     if (order.order_type === "membership") {
       const plan = membershipPlans[order.package_id];
       if (!plan || plan.id === "free") throw createHttpError(400, "INVALID_PLAN", "会员套餐不存在。");
-      const { startedAt, expiresAt, days } = getMembershipWindow(startDate || meta.startedAt, meta.durationDays || plan.durationDays || 31);
+      const { startedAt, expiresAt, days } = await getMembershipWindowForUser(
+        client,
+        order.user_id,
+        startDate || meta.startedAt,
+        meta.durationDays || plan.durationDays || 31
+      );
       await client.query(
         `INSERT INTO student_memberships (user_id, plan_id, plan_name, status, started_at, expires_at)
          VALUES ($1, $2, $3, 'active', $4, $5)`,
@@ -5354,8 +5572,11 @@ app.post("/api/admin/orders/:id/confirm", requireAdminToken, async (req, res) =>
       );
     } else if (order.order_type === "lt_recharge") {
       const pack = ltPackages[order.package_id];
-      const tokens = Math.max(1, Math.round(Number(meta.learningTokens || pack?.learningTokens || 0)));
-      if (!tokens) throw createHttpError(400, "INVALID_TOKEN_ORDER", "积分充值数量无效。");
+      const rawTokens = Number(meta.learningTokens || pack?.learningTokens || 0);
+      const tokens = Math.floor(rawTokens);
+      if (!Number.isFinite(rawTokens) || rawTokens !== tokens || tokens <= 0 || tokens > maxAdminRechargeTokens) {
+        throw createHttpError(400, "INVALID_TOKEN_ORDER", "积分充值数量无效。");
+      }
       await client.query(
         `INSERT INTO learning_token_wallets (user_id, balance, reserved)
          VALUES ($1, 0, 0)

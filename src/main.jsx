@@ -2151,6 +2151,7 @@ function App() {
     customTokenAmount: "",
     showQr: false,
     message: "",
+    submitting: false,
   });
   const [currentStep, setCurrentStep] = useState(0);
   const [answers, setAnswers] = useState(emptyAnswers);
@@ -3219,6 +3220,7 @@ function App() {
       customTokenAmount: "",
       showQr: false,
       message: "",
+      submitting: false,
     });
     setAuthModal({
       open: true,
@@ -3228,6 +3230,7 @@ function App() {
   }
 
   async function submitCheckoutPaid() {
+    if (checkout.submitting) return;
     if (!member.isLoggedIn) {
       setCheckout((prev) => ({ ...prev, message: "请先注册或登录，再提交付款确认。" }));
       return;
@@ -3243,6 +3246,7 @@ function App() {
       setCheckout((prev) => ({ ...prev, message: "请先选择会员方案或积分充值额度。" }));
       return;
     }
+    setCheckout((prev) => ({ ...prev, submitting: true, message: "" }));
     try {
       if (selectedPlan) {
         await apiRequest("/membership/orders", {
@@ -3260,11 +3264,11 @@ function App() {
         });
       }
       const message = "已提交付款确认申请。请扫描管理员微信二维码，告知管理员支付情况；管理员确认后会员及积分额度会更新。";
-      setCheckout((prev) => ({ ...prev, message }));
+      setCheckout((prev) => ({ ...prev, message, submitting: false }));
       setAuthModal((prev) => ({ ...prev, message }));
       setAccountNotice(message);
     } catch (error) {
-      setCheckout((prev) => ({ ...prev, message: error.message || "付款确认提交失败。" }));
+      setCheckout((prev) => ({ ...prev, submitting: false, message: error.message || "付款确认提交失败。" }));
     }
   }
 
@@ -6417,8 +6421,8 @@ function MemberModal({
                     <strong>微信支付</strong>
                   </article>
                 </div>
-                <button type="button" className="primary-action full-width" onClick={submitCheckoutPaid}>
-                  我已付款，提交确认申请
+                <button type="button" className="primary-action full-width" onClick={submitCheckoutPaid} disabled={checkout.submitting}>
+                  {checkout.submitting ? "正在提交..." : "我已付款，提交确认申请"}
                 </button>
                 <p className="payment-reminder">提交后会生成待确认记录，管理员确认后才会显示为已入账。</p>
               </section>
@@ -6777,6 +6781,8 @@ function AdminAiBillingPanel({ state, setState, loadAiBilling }) {
                 <div>
                   <span>{formatAdminNumber(record.billedTokens)} 积分</span>
                   <small>{formatAdminDateTime(record.completedAt || record.createdAt)}</small>
+                  {record.insufficientAtSettlement && <small className="danger-text">未全额扣费：应扣 {formatAdminNumber(record.requestedTokens)} 积分</small>}
+                  {record.pricingWarnings?.length > 0 && <small className="danger-text">价格表缺失：{record.pricingWarnings.join("、")}</small>}
                 </div>
               </article>
             ))}
