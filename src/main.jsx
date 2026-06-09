@@ -3224,7 +3224,7 @@ function App() {
     });
     setAuthModal({
       open: true,
-      actionName: "会员开通与积分充值",
+      actionName: member.isPaid ? "会员续费与积分充值" : "会员开通与积分充值",
       message: "先选择需要的会员方案或积分额度，确认金额后再扫码付款。",
     });
   }
@@ -3235,7 +3235,7 @@ function App() {
       setCheckout((prev) => ({ ...prev, message: "请先注册或登录，再提交付款确认。" }));
       return;
     }
-    const selectedPlan = member.isPaid ? null : memberPlans.find((item) => item.id === checkout.planId);
+    const selectedPlan = memberPlans.find((item) => item.id === checkout.planId);
     const selectedToken = tokenPackages.find((item) => item.id === checkout.tokenPackageId);
     const customAmount = Number(checkout.customTokenAmount || 0);
     if (customAmount > 0 && customAmount < 50) {
@@ -6199,7 +6199,7 @@ function MemberModal({
 }) {
   const loggedIn = member.isLoggedIn;
   const paid = member.isPaid;
-  const selectedPlan = paid ? null : memberPlans.find((item) => item.id === checkout.planId);
+  const selectedPlan = memberPlans.find((item) => item.id === checkout.planId);
   const selectedToken = tokenPackages.find((item) => item.id === checkout.tokenPackageId);
   const customAmount = Math.max(0, Number(checkout.customTokenAmount || 0));
   const customAmountInvalid = customAmount > 0 && customAmount < 50;
@@ -6216,7 +6216,7 @@ function MemberModal({
         <div className="member-modal-head">
           <div>
             <span className="eyebrow">会员系统</span>
-            <h2>{paid ? "会员与充值" : loggedIn ? "开通会员后继续使用" : "注册或登录后继续"}</h2>
+            <h2>{paid ? "会员续费与积分充值" : loggedIn ? "开通会员后继续使用" : "注册或登录后继续"}</h2>
             <p>{authModal.message}</p>
           </div>
           <button type="button" className="modal-close" onClick={closeAuthModal} aria-label="关闭会员弹窗">
@@ -6304,27 +6304,25 @@ function MemberModal({
               <div className="checkout-heading">
                 <div>
                   <span className="eyebrow">第一步</span>
-                  <h3>选择会员方案和积分额度</h3>
+                  <h3>{paid ? "选择续费方案和积分额度" : "选择会员方案和积分额度"}</h3>
                 </div>
                 <strong>合计：¥{totalAmount || 0}</strong>
               </div>
 
-              {!paid && (
-                <div className="plan-grid selectable-grid">
-                  {memberPlans.map((plan) => (
-                    <button
-                      key={plan.id}
-                      type="button"
-                      className={checkout.planId === plan.id ? "plan-card selectable-card is-selected" : "plan-card selectable-card"}
-                      onClick={() => setCheckout((prev) => ({ ...prev, planId: prev.planId === plan.id ? "" : plan.id, showQr: false, message: "" }))}
-                    >
-                      <strong>{plan.name}</strong>
-                      <b>{plan.price}</b>
-                      <p>{plan.description}</p>
-                    </button>
-                  ))}
-                </div>
-              )}
+              <div className="plan-grid selectable-grid">
+                {memberPlans.map((plan) => (
+                  <button
+                    key={plan.id}
+                    type="button"
+                    className={checkout.planId === plan.id ? "plan-card selectable-card is-selected" : "plan-card selectable-card"}
+                    onClick={() => setCheckout((prev) => ({ ...prev, planId: prev.planId === plan.id ? "" : plan.id, showQr: false, message: "" }))}
+                  >
+                    <strong>{paid ? `${plan.name}续费` : plan.name}</strong>
+                    <b>{plan.price}</b>
+                    <p>{paid ? "确认后会在当前会员到期时间后继续顺延，不会覆盖剩余天数。" : plan.description}</p>
+                  </button>
+                ))}
+              </div>
 
               <section className="token-order-panel">
                 <div>
@@ -6369,7 +6367,7 @@ function MemberModal({
               </section>
 
               <div className="checkout-summary">
-                <span>会员：{selectedPlan?.name || (paid ? "已开通会员" : "未选择")}</span>
+                <span>会员：{selectedPlan?.name ? (paid ? `${selectedPlan.name}续费` : selectedPlan.name) : "未选择"}</span>
                 <span>积分：{selectedTokenText}</span>
                 <strong>应付金额：¥{totalAmount || 0}</strong>
                 <button
@@ -6439,7 +6437,7 @@ function MemberModal({
               <section className="checkout-confirm-panel">
                 <span className="eyebrow">付款信息</span>
                 <h3>本次选择</h3>
-                <p>会员：{selectedPlan?.name || (paid ? "已开通会员" : "未选择")}</p>
+                <p>会员：{selectedPlan?.name ? (paid ? `${selectedPlan.name}续费` : selectedPlan.name) : "未选择"}</p>
                 <p>积分：{selectedTokenText}</p>
                 <strong>合计：¥{totalAmount || 0}</strong>
                 {checkout.message && <p className="account-notice">{checkout.message}</p>}
