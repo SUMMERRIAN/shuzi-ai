@@ -2137,7 +2137,7 @@ function App() {
     orderNote: "",
     identifier: "",
     planId: "monthly",
-    membershipStartDate: new Date().toISOString().slice(0, 10),
+    membershipStartDate: "",
     paidAmount: "",
     tokenAmount: "10000",
     activeTab: "members",
@@ -3436,7 +3436,7 @@ function App() {
         body: JSON.stringify({
           identifier: adminPanel.identifier,
           planId: adminPanel.planId,
-          startDate: adminPanel.membershipStartDate,
+          startDate: adminPanel.membershipStartDate || "",
           paidAmountCny: Number(adminPanel.paidAmount || 0),
         }),
       });
@@ -3473,7 +3473,6 @@ function App() {
         headers: { "x-admin-token": adminPanel.token.trim() },
         body: JSON.stringify({
           note: adminPanel.orderNote,
-          startDate: adminPanel.membershipStartDate,
         }),
       });
       setAdminPanel((prev) => ({ ...prev, orderNote: "", message: "付款申请已确认入账。" }));
@@ -6940,8 +6939,9 @@ function AdminPanelPage({
           </select>
         </label>
         <label>
-          <span>会员开始日期</span>
+          <span>会员开始日期（可选）</span>
           <input type="date" value={state.membershipStartDate} onChange={(event) => setState((prev) => ({ ...prev, membershipStartDate: event.target.value }))} />
+          <em className="field-hint">正常续费请留空，系统会从当前到期日继续顺延；只有特殊补录时才手动指定日期。</em>
         </label>
         <label>
           <span>实际收款金额</span>

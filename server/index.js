@@ -5524,7 +5524,7 @@ app.get("/api/admin/orders", requireAdminToken, async (req, res) => {
 });
 
 app.post("/api/admin/orders/:id/confirm", requireAdminToken, async (req, res) => {
-  const { note = "", startDate = "" } = req.body || {};
+  const { note = "" } = req.body || {};
   const { id } = req.params;
   const result = await withTransaction(async (client) => {
     const order = (await client.query("SELECT * FROM payment_orders WHERE id = $1 FOR UPDATE", [id])).rows[0];
@@ -5541,7 +5541,7 @@ app.post("/api/admin/orders/:id/confirm", requireAdminToken, async (req, res) =>
       const { startedAt, expiresAt, days } = await getMembershipWindowForUser(
         client,
         order.user_id,
-        startDate || meta.startedAt,
+        "",
         meta.durationDays || plan.durationDays || 31
       );
       await client.query(
