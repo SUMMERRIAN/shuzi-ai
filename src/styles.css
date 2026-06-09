@@ -2569,7 +2569,31 @@ p {
 }
 
 .admin-control-panel {
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  grid-template-columns: minmax(180px, 1.1fr) minmax(160px, 0.9fr) minmax(170px, 0.9fr) minmax(160px, 0.9fr) minmax(160px, 0.9fr) minmax(180px, 1fr);
+  align-items: end;
+  padding: 20px;
+  background: #fbfaf6;
+}
+
+.admin-control-panel label {
+  min-width: 0;
+}
+
+.admin-control-panel label span {
+  min-height: 18px;
+  color: #3f4b44;
+  font-size: 13px;
+}
+
+.admin-control-panel input,
+.admin-control-panel select {
+  width: 100%;
+  font-weight: 750;
+}
+
+.admin-control-panel input::placeholder {
+  color: #7a827b;
+  font-weight: 650;
 }
 
 .admin-order-panel {
@@ -2696,6 +2720,14 @@ p {
   grid-column: 1 / -1;
   gap: 10px;
   flex-wrap: wrap;
+  align-items: center;
+  padding-top: 2px;
+}
+
+.admin-actions .primary-action,
+.admin-actions .ghost-action {
+  min-height: 42px;
+  padding-inline: 16px;
 }
 
 .admin-table-head,

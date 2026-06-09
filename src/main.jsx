@@ -6939,9 +6939,8 @@ function AdminPanelPage({
           </select>
         </label>
         <label>
-          <span>会员开始日期（可选）</span>
+          <span>指定开始日期（通常留空）</span>
           <input type="date" value={state.membershipStartDate} onChange={(event) => setState((prev) => ({ ...prev, membershipStartDate: event.target.value }))} />
-          <em className="field-hint">正常续费请留空，系统会从当前到期日继续顺延；只有特殊补录时才手动指定日期。</em>
         </label>
         <label>
           <span>实际收款金额</span>
@@ -6976,7 +6975,7 @@ function AdminPanelPage({
         </label>
         <div className="admin-actions">
           <button type="button" className="ghost-action" onClick={loadUsers}>刷新用户</button>
-          <button type="button" className="primary-action" onClick={activateMembership}>开通会员</button>
+          <button type="button" className="primary-action" onClick={activateMembership}>开通/续费会员</button>
           <button type="button" className="primary-action" onClick={rechargeToken}>增加积分</button>
         </div>
         {state.message && <p className="account-notice">{state.message}</p>}
