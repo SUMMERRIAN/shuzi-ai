@@ -4789,7 +4789,7 @@ function App() {
           {accountNotice && <p className="account-notice">{accountNotice}</p>}
         </div>
         <div className="sidebar-account-actions">
-          <button className={member.isPaid ? "member-pill is-active" : "member-pill"} onClick={loadMemberCenter}>
+          <button className="member-pill" onClick={loadMemberCenter}>
             {member.isPaid ? <Crown size={17} /> : <LockKeyhole size={17} />}
             {member.isLoggedIn ? "会员中心" : "登录 / 注册"}
           </button>
@@ -6319,7 +6319,7 @@ function MemberModal({
                   >
                     <strong>{paid ? `${plan.name}续费` : plan.name}</strong>
                     <b>{plan.price}</b>
-                    <p>{paid ? "确认后会在当前会员到期时间后继续顺延，不会覆盖剩余天数。" : plan.description}</p>
+                    {!paid && <p>{plan.description}</p>}
                   </button>
                 ))}
               </div>
