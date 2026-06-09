@@ -2144,6 +2144,7 @@ function App() {
     aiBilling: null,
     aiBillingStatus: "idle",
     aiBillingRangeDays: 30,
+    processingAction: "",
   });
   const [checkout, setCheckout] = useState({
     planId: "",
@@ -3448,21 +3449,33 @@ function App() {
   }
 
   async function adminRechargeToken() {
+    const identifier = adminPanel.identifier.trim();
+    const amount = Number(adminPanel.tokenAmount);
+    if (!identifier) {
+      setAdminPanel((prev) => ({ ...prev, message: "请先填写学生用户名。" }));
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0 || !Number.isInteger(amount)) {
+      setAdminPanel((prev) => ({ ...prev, message: "增加积分必须是正整数。" }));
+      return;
+    }
+    if (!window.confirm(`确认给 ${identifier} 增加 ${amount.toLocaleString("zh-CN")} 积分吗？`)) return;
+    setAdminPanel((prev) => ({ ...prev, processingAction: "recharge", message: "正在处理积分充值，请稍候..." }));
     try {
       await apiRequest("/admin/lt/recharge", {
         method: "POST",
         headers: { "x-admin-token": adminPanel.token.trim() },
         body: JSON.stringify({
-          identifier: adminPanel.identifier,
-          amount: Number(adminPanel.tokenAmount),
+          identifier,
+          amount,
           paidAmountCny: Number(adminPanel.paidAmount || 0),
           note: "管理员手动充值",
         }),
       });
-      setAdminPanel((prev) => ({ ...prev, message: "积分已入账。" }));
-      refreshAdminData(adminPanel.token.trim(), "积分已入账。");
+      await refreshAdminData(adminPanel.token.trim(), `已为 ${identifier} 增加 ${amount.toLocaleString("zh-CN")} 积分，当前余额请查看用户列表。`);
+      setAdminPanel((prev) => ({ ...prev, tokenAmount: "", processingAction: "" }));
     } catch (error) {
-      setAdminPanel((prev) => ({ ...prev, message: error.message || "充值失败。" }));
+      setAdminPanel((prev) => ({ ...prev, processingAction: "", message: error.message || "充值失败。" }));
     }
   }
 
@@ -5157,7 +5170,6 @@ function App() {
             activateMembership={adminActivateMembership}
             rechargeToken={adminRechargeToken}
             plans={memberPlans}
-            tokenPackages={tokenPackages}
           />
         )}
       </main>
@@ -6802,7 +6814,6 @@ function AdminPanelPage({
   activateMembership,
   rechargeToken,
   plans,
-  tokenPackages,
 }) {
   const pendingOrders = (state.orders || []).filter((order) => order.status === "pending");
   const recentOrders = (state.orders || []).filter((order) => order.status !== "pending").slice(0, 10);
@@ -6885,7 +6896,7 @@ function AdminPanelPage({
             />
           </label>
           <div className="admin-order-list">
-            {pendingOrders.length === 0 && <p className="muted-text">暂时没有待确认申请。</p>}
+            {pendingOrders.length === 0 && <p className="muted-text">没有待确认申请。若学生已提交充值或续费，先点击“刷新申请”；仍然没有时，请勿用手动充值代替未找到的订单。</p>}
             {pendingOrders.map((order) => (
               <article className="admin-order-card" key={order.id}>
                 <div>
@@ -6950,33 +6961,12 @@ function AdminPanelPage({
           <span>增加积分</span>
           <input type="number" value={state.tokenAmount} onChange={(event) => setState((prev) => ({ ...prev, tokenAmount: event.target.value }))} />
         </label>
-        <label>
-          <span>常用积分包</span>
-          <select
-            value=""
-            onChange={(event) => {
-              const pack = tokenPackages.find((item) => item.id === event.target.value);
-              if (pack) {
-                setState((prev) => ({
-                  ...prev,
-                  tokenAmount: String(pack.tokens || pack.learningTokens || 0),
-                  paidAmount: String(pack.priceCny || ""),
-                }));
-              }
-            }}
-          >
-            <option value="">选择后自动填入</option>
-            {tokenPackages.map((pack) => (
-              <option key={pack.id} value={pack.id}>
-                {pack.label || pack.title} · {(pack.tokens || pack.learningTokens || 0).toLocaleString("zh-CN")} 积分
-              </option>
-            ))}
-          </select>
-        </label>
         <div className="admin-actions">
-          <button type="button" className="ghost-action" onClick={loadUsers}>刷新用户</button>
-          <button type="button" className="primary-action" onClick={activateMembership}>开通/续费会员</button>
-          <button type="button" className="primary-action" onClick={rechargeToken}>增加积分</button>
+          <button type="button" className="ghost-action" onClick={loadUsers} disabled={state.processingAction === "recharge"}>刷新用户</button>
+          <button type="button" className="primary-action" onClick={activateMembership} disabled={state.processingAction === "recharge"}>开通/续费会员</button>
+          <button type="button" className="primary-action" onClick={rechargeToken} disabled={state.processingAction === "recharge"}>
+            {state.processingAction === "recharge" ? "正在增加..." : "增加积分"}
+          </button>
         </div>
         {state.message && <p className="account-notice">{state.message}</p>}
       </article>
