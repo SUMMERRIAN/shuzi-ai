@@ -42,6 +42,14 @@ export function getGeminiText(data) {
     .trim();
 }
 
+export function getGeminiImageBase64(data) {
+  return (data?.candidates || [])
+    .flatMap((candidate) => candidate?.content?.parts || [])
+    .map((part) => part.inlineData || part.inline_data)
+    .filter(Boolean)
+    .find((inlineData) => String(inlineData.mimeType || inlineData.mime_type || "").startsWith("image/"))?.data || "";
+}
+
 function normalizeThinkingBudget(value) {
   const budget = Number(value);
   return Number.isFinite(budget) ? Math.trunc(budget) : undefined;
@@ -136,4 +144,84 @@ export async function generateGeminiText({
     throw error;
   }
   return text;
+}
+
+export async function generateGeminiImage({
+  model,
+  prompt,
+  temperature = 0.35,
+  onUsage = null,
+}) {
+  ensureGeminiKey();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), geminiTimeoutMs);
+  let response;
+  try {
+    response = await fetch(`${geminiEndpoint}/${encodeURIComponent(model)}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature,
+          candidateCount: 1,
+          responseModalities: ["TEXT", "IMAGE"],
+        },
+      }),
+    });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      const timeoutError = new Error(`Gemini生图超过${Math.round(geminiTimeoutMs / 1000)}秒仍未返回，请稍后重试或简化图片要求。`);
+      timeoutError.status = 504;
+      timeoutError.code = "GEMINI_IMAGE_TIMEOUT";
+      timeoutError.provider = "gemini";
+      timeoutError.model = model;
+      throw timeoutError;
+    }
+    error.provider = "gemini";
+    error.model = model;
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const rawText = await response.text();
+  let data = {};
+  try {
+    data = rawText ? JSON.parse(rawText) : {};
+  } catch {
+    data = { rawText };
+  }
+  if (!response.ok) {
+    const error = new Error(data?.error?.message || "Gemini image generation failed.");
+    error.status = response.status;
+    error.code = data?.error?.status || "GEMINI_IMAGE_REQUEST_FAILED";
+    error.detail = data?.error || data;
+    error.provider = "gemini";
+    error.model = model;
+    throw error;
+  }
+  if (typeof onUsage === "function") {
+    await onUsage({
+      provider: "gemini",
+      model,
+      kind: "image",
+      usage: data?.usageMetadata || { images: 1 },
+    });
+  }
+  const imageBase64 = getGeminiImageBase64(data);
+  if (!imageBase64) {
+    const error = new Error("Gemini没有返回有效图片，请稍后重试或检查图片模型权限。");
+    error.status = 502;
+    error.code = "GEMINI_IMAGE_EMPTY_RESPONSE";
+    error.detail = data;
+    error.provider = "gemini";
+    error.model = model;
+    throw error;
+  }
+  return {
+    imageBase64,
+    text: getGeminiText(data),
+  };
 }

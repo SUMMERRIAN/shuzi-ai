@@ -223,10 +223,12 @@ function escapeHtml(value = "") {
 }
 
 const freeAskModelOptions = [
-  { value: "openai-fast", provider: "openai", mode: "fast", label: "OpenAI · 快速", title: "OpenAI", tone: "快速", hint: "日常问答、总结表达" },
-  { value: "openai-thinking", provider: "openai", mode: "thinking", label: "OpenAI · 思考", title: "OpenAI", tone: "思考", hint: "复杂问题、长文本推理" },
-  { value: "gemini-fast", provider: "gemini", mode: "fast", label: "Gemini · 快速", title: "Gemini", tone: "快速", hint: "图片理解、轻量提问" },
-  { value: "gemini-thinking", provider: "gemini", mode: "thinking", label: "Gemini · 思考", title: "Gemini", tone: "思考", hint: "图片题目、深度分析" },
+  { value: "auto", provider: "openai", mode: "fast", taskMode: "auto", title: "自动推荐", tone: "默认", hint: "日常问答自动快速回答，写明作图时自动生成图片" },
+  { value: "openai-fast", provider: "openai", mode: "fast", taskMode: "chat", title: "快速回答", tone: "OpenAI", hint: "日常问题、总结表达、轻量讨论" },
+  { value: "openai-thinking", provider: "openai", mode: "thinking", taskMode: "chat", title: "深度思考", tone: "OpenAI", hint: "复杂问题、长文本推理、策略分析" },
+  { value: "gemini-understanding", provider: "gemini", mode: "thinking", taskMode: "image_understanding", title: "图片理解", tone: "Gemini", hint: "上传图片、截图、题目或资料时优先使用" },
+  { value: "openai-image", provider: "openai", mode: "fast", taskMode: "image_generation", imageProvider: "openai", title: "生成图片", tone: "OpenAI", hint: "稳定生成知识图、示意图和学习海报" },
+  { value: "gemini-image", provider: "gemini", mode: "thinking", taskMode: "image_generation", imageProvider: "gemini", title: "生成图片", tone: "Gemini", hint: "使用 Nano Banana Pro 风格的高质量作图" },
 ];
 
 function detectFreeAskImageGenerationIntent(content = "") {
@@ -2247,7 +2249,7 @@ function App() {
   const [freeAskInput, setFreeAskInput] = useState("");
   const [freeAskFiles, setFreeAskFiles] = useState([]);
   const [freeAskStatus, setFreeAskStatus] = useState("idle");
-  const [freeAskModelChoice, setFreeAskModelChoice] = useState("openai-fast");
+  const [freeAskModelChoice, setFreeAskModelChoice] = useState("auto");
   const [freeAskMessages, setFreeAskMessages] = useState([]);
   const [freeAskConversations, setFreeAskConversations] = useState([]);
   const [activeFreeAskConversationId, setActiveFreeAskConversationId] = useState("");
@@ -4677,7 +4679,7 @@ function App() {
     setFreeAskStatus("loading");
     clearAiNotice();
     const selectedModel = freeAskModelOptions.find((option) => option.value === freeAskModelChoice) || freeAskModelOptions[0];
-    const wantsImage = detectFreeAskImageGenerationIntent(content);
+    const wantsImage = selectedModel.taskMode === "image_generation" || detectFreeAskImageGenerationIntent(content);
     const attachmentText = freeAskFiles.length ? `已上传 ${freeAskFiles.length} 个文件，请AI根据文件回答。` : "";
     const assistantId = `ask-ai-${Date.now()}`;
     const userMessage = {
@@ -4702,6 +4704,8 @@ function App() {
       formData.append("wantsImage", wantsImage ? "true" : "false");
       formData.append("provider", selectedModel.provider);
       formData.append("mode", selectedModel.mode);
+      formData.append("taskMode", selectedModel.taskMode || "auto");
+      formData.append("imageProvider", selectedModel.imageProvider || selectedModel.provider);
       if (activeFreeAskConversationId) formData.append("conversationId", activeFreeAskConversationId);
       freeAskFiles.forEach((file) => {
         if (file.rawFile) formData.append("files", file.rawFile);
@@ -9872,7 +9876,7 @@ function FreeAskPage({
     assistant: "\u6811\u5b50AI",
     upload: "\u4e0a\u4f20\u6587\u4ef6\u6216\u56fe\u7247",
     placeholder: "\u8f93\u5165\u95ee\u9898\uff0c\u4e5f\u53ef\u4ee5\u4e0a\u4f20\u56fe\u7247\u6216\u6587\u4ef6",
-    modelLabel: "\u9009\u62e9AI\u6a21\u578b",
+    modelLabel: "\u9009\u62e9\u4efb\u52a1\u6a21\u5f0f",
     send: "\u53d1\u9001\u95ee\u9898",
     remove: "\u79fb\u9664",
     downloadImage: "\u4e0b\u8f7d\u56fe\u7247",

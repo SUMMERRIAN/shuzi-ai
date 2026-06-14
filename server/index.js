@@ -14,7 +14,7 @@ import { query, withTransaction } from "./db.js";
 import { requireAdminToken, requireAuth, signToken } from "./auth.js";
 import { ltPackages, membershipPlans, storageExpansionPackages, tokenBillingRules } from "./plans.js";
 import { upload, toStoredFile } from "./uploads.js";
-import { ensureGeminiKey, generateGeminiText } from "./geminiClient.js";
+import { ensureGeminiKey, generateGeminiImage, generateGeminiText } from "./geminiClient.js";
 import { ensureOpenAIKey, getGeneratedImageBase64, getResponseText, openai, parseJsonText, readFileAsDataUrl } from "./openaiClient.js";
 
 const app = express();
@@ -29,6 +29,7 @@ const openaiThinkingModel = process.env.OPENAI_MODEL_THINKING || process.env.OPE
 const geminiFastModel = process.env.GEMINI_MODEL_FAST || "gemini-3.5-flash";
 const geminiThinkingModel = process.env.GEMINI_MODEL_THINKING || "gemini-3.5-flash";
 const imageModel = process.env.OPENAI_MODEL_IMAGE || "gpt-image-2";
+const geminiImageModel = process.env.GEMINI_MODEL_IMAGE || "gemini-3-pro-image";
 const imageGenerationEnabled = process.env.OPENAI_IMAGE_GENERATION_ENABLED === "true";
 const imageQuality = process.env.OPENAI_IMAGE_QUALITY || "medium";
 const imageSize = process.env.OPENAI_IMAGE_SIZE || "1024x1024";
@@ -968,9 +969,9 @@ function createOpenAIUsageEvent(response, model, kind = "text") {
   };
 }
 
-function createImageUsageEvent({ model = imageModel, quality = imageQuality, size = imageSize } = {}) {
+function createImageUsageEvent({ provider = "openai", model = imageModel, quality = imageQuality, size = imageSize } = {}) {
   return {
-    provider: "openai",
+    provider,
     model,
     kind: "image",
     usage: { images: 1, quality, size },
@@ -5003,11 +5004,13 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
   try {
     await assertPaidMember(req.user.id);
     const student = await getPrimaryStudent(req.user);
-    const { question = "", wantsImage = "false", provider = "openai", mode = "fast", conversationId = "" } = req.body || {};
+    const { question = "", wantsImage = "false", provider = "openai", mode = "fast", taskMode = "auto", imageProvider = "", conversationId = "" } = req.body || {};
     const files = req.files || [];
     const aiProvider = normalizeAiProvider(provider);
     const aiMode = normalizeAiMode(mode);
-    const shouldGenerateImage = wantsImage === "true";
+    const normalizedTaskMode = ["chat", "image_understanding", "image_generation"].includes(String(taskMode)) ? String(taskMode) : "auto";
+    const normalizedImageProvider = normalizeAiProvider(imageProvider || provider);
+    const shouldGenerateImage = wantsImage === "true" || normalizedTaskMode === "image_generation";
     const freeAskIntent = detectFreeAskIntent({ question, files, wantsImage: shouldGenerateImage });
     const useQuestionWorkflow = freeAskIntent === "question_explanation";
     const tokenCost = shouldGenerateImage ? 35 : useQuestionWorkflow || aiMode === "thinking" ? 8 : 5;
@@ -5030,7 +5033,7 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
       role: "user",
       content: question || (files.length ? `已上传 ${files.length} 个文件，请根据附件回答。` : ""),
       attachments: attachmentMeta,
-      meta: { provider: aiProvider, mode: aiMode, wantsImage: shouldGenerateImage, intent: freeAskIntent, useQuestionWorkflow },
+      meta: { provider: aiProvider, mode: aiMode, taskMode: normalizedTaskMode, imageProvider: normalizedImageProvider, wantsImage: shouldGenerateImage, intent: freeAskIntent, useQuestionWorkflow },
     });
     if ((!conversation.title || conversation.title === "新的对话") && makeFreeAskTitle(question, files) !== "新的对话") {
       await query("UPDATE free_ask_conversations SET title = $2, updated_at = now() WHERE id = $1", [
@@ -5056,6 +5059,8 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
           wantsImage: shouldGenerateImage,
           provider: aiProvider,
           mode: aiMode,
+          taskMode: normalizedTaskMode,
+          imageProvider: normalizedImageProvider,
           fileCount: files.length,
           intent: freeAskIntent,
           useQuestionWorkflow,
@@ -5066,6 +5071,8 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
           wantsImage: shouldGenerateImage,
           provider: aiProvider,
           mode: aiMode,
+          taskMode: normalizedTaskMode,
+          imageProvider: normalizedImageProvider,
           intent: freeAskIntent,
           useQuestionWorkflow,
           files: makeFileDedupeMeta(files),
@@ -5124,7 +5131,6 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
             answer = getResponseText(completed);
           }
           if (shouldGenerateImage) {
-            ensureOpenAIKey();
             const imageQualityForRequest = resolveImageQuality(question);
             const imagePrompt = [
               "Create a simple professional Chinese educational infographic image.",
@@ -5132,9 +5138,22 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
               "Topic or request: " + (question || "knowledge explanation"),
               answer ? "Text answer context: " + answer.slice(0, 800) : "",
             ].filter(Boolean).join("\n");
-            imageBase64 = (await generateOpenAIImageBackground(imagePrompt, setExternalResponseId, imageQualityForRequest)) || "";
-            if (imageBase64) usageEvents.push(createImageUsageEvent({ quality: imageQualityForRequest }));
+            if (normalizedImageProvider === "gemini") {
+              ensureGeminiKey();
+              const geminiImageResult = await generateGeminiImage({
+                model: geminiImageModel,
+                prompt: imagePrompt,
+                temperature: 0.35,
+              });
+              imageBase64 = geminiImageResult.imageBase64 || "";
+              if (imageBase64) usageEvents.push(createImageUsageEvent({ provider: "gemini", model: geminiImageModel, quality: imageQualityForRequest }));
+            } else {
+              ensureOpenAIKey();
+              imageBase64 = (await generateOpenAIImageBackground(imagePrompt, setExternalResponseId, imageQualityForRequest)) || "";
+              if (imageBase64) usageEvents.push(createImageUsageEvent({ provider: "openai", model: imageModel, quality: imageQualityForRequest }));
+            }
           }
+          const outputImageModel = imageBase64 ? (normalizedImageProvider === "gemini" ? geminiImageModel : imageModel) : null;
           answer = normalizeStudentMathText(answer || "AI has read your question, but did not generate a valid answer. Please try asking in another way.");
           const assistantMessage = await insertFreeAskMessage({
             conversationId: conversation.id,
@@ -5146,13 +5165,14 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
               provider: responseProvider,
               mode: responseMode,
               model,
-              imageModel: imageBase64 ? imageModel : null,
+              imageProvider: imageBase64 ? normalizedImageProvider : null,
+              imageModel: outputImageModel,
               hasImage: Boolean(imageBase64),
               ...responseMeta,
             },
           });
           await pruneFreeAskConversationMemory(conversation.id);
-          const eventPayload = { question, answer, provider: responseProvider, mode: responseMode, model, imageModel: imageBase64 ? imageModel : null, hasImage: Boolean(imageBase64) };
+          const eventPayload = { question, answer, provider: responseProvider, mode: responseMode, model, imageProvider: imageBase64 ? normalizedImageProvider : null, imageModel: outputImageModel, hasImage: Boolean(imageBase64) };
           if (files.length) {
             await withTransaction(async (client) => {
               const fileRows = await saveUploadedFiles(client, req.user, student, "free_ask", files);
@@ -5177,7 +5197,8 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
               provider: responseProvider,
               mode: responseMode,
               model,
-              imageModel: imageBase64 ? imageModel : null,
+              imageProvider: imageBase64 ? normalizedImageProvider : null,
+              imageModel: outputImageModel,
               hasImage: Boolean(imageBase64),
             },
           });
@@ -5188,7 +5209,8 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
             mode: responseMode,
             model,
             imageBase64,
-            imageModel: imageBase64 ? imageModel : null,
+            imageProvider: imageBase64 ? normalizedImageProvider : null,
+            imageModel: outputImageModel,
             conversation: latest?.conversation || toPublicFreeAskConversation(conversation),
             userMessage: toPublicFreeAskMessage(userMessage),
             assistantMessage: toPublicFreeAskMessage(assistantMessage),

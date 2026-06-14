@@ -70,6 +70,13 @@ export const tokenBillingRules = {
       "1024x1024": { low: 0.011, medium: 0.042, high: 0.167 },
       default: { low: 0.011, medium: 0.042, high: 0.167 },
     },
+    "gemini-3-pro-image": {
+      default: {
+        low: numberFromEnv("GEMINI_IMAGE_COST_USD_LOW", 0),
+        medium: numberFromEnv("GEMINI_IMAGE_COST_USD_MEDIUM", 0),
+        high: numberFromEnv("GEMINI_IMAGE_COST_USD_HIGH", 0),
+      },
+    },
   },
 };
 
