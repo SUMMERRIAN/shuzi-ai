@@ -71,12 +71,14 @@ export async function generateGeminiText({
   responseMimeType = "",
   thinkingBudget = defaultGeminiThinkingBudget,
   maxOutputTokens = geminiMaxOutputTokens,
+  timeoutMs = geminiTimeoutMs,
   onUsage = null,
 }) {
   ensureGeminiKey();
   const parts = [{ text: prompt }, ...files.map(toGeminiPart).filter(Boolean)];
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), geminiTimeoutMs);
+  const effectiveTimeoutMs = Math.max(15000, Number(timeoutMs || geminiTimeoutMs));
+  const timeout = setTimeout(() => controller.abort(), effectiveTimeoutMs);
   const normalizedThinkingBudget = normalizeThinkingBudget(thinkingBudget);
   const normalizedTopP = Number(topP);
   const normalizedMaxOutputTokens = Math.max(1024, Number(maxOutputTokens || geminiMaxOutputTokens));
@@ -102,12 +104,12 @@ export async function generateGeminiText({
     });
   } catch (error) {
     if (error.name === "AbortError") {
-      const timeoutError = new Error(`Gemini请求超过${Math.round(geminiTimeoutMs / 1000)}秒仍未返回，请稍后重试或减少上传材料。`);
+      const timeoutError = new Error(`Gemini请求超过${Math.round(effectiveTimeoutMs / 1000)}秒仍未返回，请稍后重试或减少上传材料。`);
       timeoutError.status = 504;
       timeoutError.code = "GEMINI_TIMEOUT";
       timeoutError.provider = "gemini";
       timeoutError.model = model;
-      timeoutError.detail = `GEMINI_TIMEOUT_MS=${geminiTimeoutMs}`;
+      timeoutError.detail = `GEMINI_TIMEOUT_MS=${effectiveTimeoutMs}`;
       throw timeoutError;
     }
     error.provider = "gemini";

@@ -1875,6 +1875,7 @@ const freeAskMaterialLimits = {
   maxImageBytes: Number(process.env.FREE_ASK_MAX_IMAGE_MB || 8) * 1024 * 1024,
   maxDocumentChars: Number(process.env.FREE_ASK_MAX_DOCUMENT_CHARS || 32000),
   maxCharsPerDocument: Number(process.env.FREE_ASK_MAX_CHARS_PER_DOCUMENT || 12000),
+  geminiTimeoutMs: Math.min(95000, Math.max(15000, Number(process.env.FREE_ASK_GEMINI_TIMEOUT_MS || 85000))),
 };
 
 function isImageUpload(file) {
@@ -5110,6 +5111,8 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
               prompt: promptText,
               files: materialContext.safeImageFiles,
               temperature: aiMode === "thinking" ? 0.2 : 0.35,
+              timeoutMs: files.length ? freeAskMaterialLimits.geminiTimeoutMs : undefined,
+              maxOutputTokens: files.length ? 3072 : undefined,
               onUsage: collectUsage,
             });
           } else {
@@ -5238,6 +5241,8 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
         prompt: promptText,
         files: materialContext.safeImageFiles,
         temperature: aiMode === "thinking" ? 0.2 : 0.35,
+        timeoutMs: files.length ? freeAskMaterialLimits.geminiTimeoutMs : undefined,
+        maxOutputTokens: files.length ? 3072 : undefined,
         onUsage: collectUsage,
       });
     } else {

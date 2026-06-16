@@ -226,7 +226,7 @@ const freeAskModelOptions = [
   { value: "auto", provider: "openai", mode: "fast", taskMode: "auto", title: "自动推荐", tone: "默认", hint: "日常问答自动快速回答，写明作图时自动生成图片" },
   { value: "openai-fast", provider: "openai", mode: "fast", taskMode: "chat", title: "快速回答", tone: "OpenAI", hint: "日常问题、总结表达、轻量讨论" },
   { value: "openai-thinking", provider: "openai", mode: "thinking", taskMode: "chat", title: "深度思考", tone: "OpenAI", hint: "复杂问题、长文本推理、策略分析" },
-  { value: "gemini-understanding", provider: "gemini", mode: "thinking", taskMode: "image_understanding", title: "图片理解", tone: "Gemini", hint: "上传图片、截图、题目或资料时优先使用" },
+  { value: "gemini-understanding", provider: "gemini", mode: "fast", taskMode: "image_understanding", title: "图片理解", tone: "Gemini", hint: "上传图片、截图、题目或资料时优先使用" },
   { value: "openai-image", provider: "openai", mode: "fast", taskMode: "image_generation", imageProvider: "openai", title: "生成图片", tone: "OpenAI", hint: "稳定生成知识图、示意图和学习海报" },
   { value: "gemini-image", provider: "gemini", mode: "thinking", taskMode: "image_generation", imageProvider: "gemini", title: "生成图片", tone: "Gemini", hint: "使用 Nano Banana Pro 风格的高质量作图" },
 ];

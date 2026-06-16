@@ -29,14 +29,28 @@ function buildAiJobError(job) {
 async function waitForAiJob(jobId, options = {}) {
   const attempts = options.aiJobAttempts || 120;
   const intervalMs = options.aiJobIntervalMs || 5000;
+  const transientStatuses = new Set([502, 503, 504, 524]);
+  let transientErrors = 0;
+  let lastTransientError = null;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const job = await apiRequest(`/ai/jobs/${jobId}`, { skipAiJobPoll: true });
-    if (job.status === "completed") return job.result || {};
-    if (job.status === "failed") throw buildAiJobError(job);
-    if (job.status === "cancelled") throw new Error("AI任务已取消。");
+    try {
+      const job = await apiRequest(`/ai/jobs/${jobId}`, { skipAiJobPoll: true });
+      transientErrors = 0;
+      lastTransientError = null;
+      if (job.status === "completed") return job.result || {};
+      if (job.status === "failed") throw buildAiJobError(job);
+      if (job.status === "cancelled") throw new Error("AI任务已取消。");
+    } catch (error) {
+      if (!transientStatuses.has(error.status)) throw error;
+      transientErrors += 1;
+      lastTransientError = error;
+      if (transientErrors >= 6) {
+        throw new Error(error.message || "AI任务轮询暂时不可用，请稍后刷新页面查看结果。");
+      }
+    }
     await sleep(intervalMs);
   }
-  throw new Error("AI任务仍在后台处理中，请稍后刷新页面查看结果。");
+  throw new Error(lastTransientError?.message || "AI任务仍在后台处理中，请稍后刷新页面查看结果。");
 }
 
 export async function apiRequest(path, options = {}) {
@@ -78,6 +92,11 @@ export async function apiRequest(path, options = {}) {
     let message = data.message || data.error || `请求失败（HTTP ${response.status}）`;
     if (response.status === 429) {
       message = "AI当前请求过多，请稍等10-30秒后再试。";
+    } else if ([502, 503, 504, 524].includes(response.status)) {
+      message =
+        response.status === 524
+          ? "AI请求等待时间过长，任务可能仍在后台处理中，请稍后刷新页面查看结果，或减少文件数量后重试。"
+          : `AI服务暂时不可用（HTTP ${response.status}），请稍后再试。`;
     } else if (response.status === 403 && /verified|verify|organization/i.test(detail)) {
       message = "当前OpenAI组织还没有完成模型权限验证，请完成验证或切换到可用模型。";
     } else if (/country|region|territory/i.test(detail)) {
