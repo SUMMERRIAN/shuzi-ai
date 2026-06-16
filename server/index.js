@@ -5091,7 +5091,12 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
     const normalizedTaskMode = ["chat", "image_understanding", "image_generation"].includes(String(taskMode)) ? String(taskMode) : "auto";
     const normalizedImageProvider = normalizeAiProvider(imageProvider || provider);
     const shouldGenerateImage = wantsImage === "true" || normalizedTaskMode === "image_generation";
-    const freeAskIntent = detectFreeAskIntent({ question, files, wantsImage: shouldGenerateImage });
+    const freeAskIntent =
+      normalizedTaskMode === "image_generation"
+        ? "image_generation"
+        : normalizedTaskMode === "image_understanding"
+          ? "image_understanding"
+          : detectFreeAskIntent({ question, files, wantsImage: shouldGenerateImage });
     const useQuestionWorkflow = freeAskIntent === "question_explanation";
     const tokenCost = shouldGenerateImage ? 35 : useQuestionWorkflow || aiMode === "thinking" ? 8 : 5;
     await assertTokenBalance(req.user.id, tokenCost);
