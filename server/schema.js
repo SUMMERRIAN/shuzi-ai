@@ -10,6 +10,7 @@ export async function ensureSchema() {
       identifier TEXT NOT NULL UNIQUE,
       provider TEXT NOT NULL DEFAULT 'unknown',
       display_name TEXT,
+      referrer TEXT NOT NULL DEFAULT '无',
       password_hash TEXT,
       role TEXT NOT NULL DEFAULT 'student' CHECK (role IN ('student', 'parent', 'teacher', 'admin')),
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -328,6 +329,7 @@ export async function ensureSchema() {
   await query(`ALTER TABLE ai_generation_jobs ADD COLUMN IF NOT EXISTS billable_cny NUMERIC(12,4) NOT NULL DEFAULT 0`);
   await query(`ALTER TABLE ai_generation_jobs ADD COLUMN IF NOT EXISTS billing_markup NUMERIC(8,3) NOT NULL DEFAULT 3.5`);
   await query(`ALTER TABLE ai_generation_jobs ADD COLUMN IF NOT EXISTS billed_tokens INTEGER NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS referrer TEXT NOT NULL DEFAULT '无'`);
   await query(`CREATE INDEX IF NOT EXISTS idx_ai_generation_jobs_user_feature_hash
     ON ai_generation_jobs(user_id, feature, request_hash, created_at DESC)
     WHERE request_hash IS NOT NULL`);

@@ -2117,6 +2117,7 @@ function App() {
     mode: "register",
     username: "",
     displayName: "",
+    referrer: "",
     password: "",
     confirmPassword: "",
   });
@@ -3142,6 +3143,10 @@ function App() {
       setAuthModal((prev) => ({ ...prev, message: "密码至少需要6位。" }));
       return;
     }
+    if (authForm.mode === "register" && !authForm.referrer.trim()) {
+      setAuthModal((prev) => ({ ...prev, message: "请填写推荐人；如果没有，请填写“无”。" }));
+      return;
+    }
     if (authForm.mode === "register" && password !== authForm.confirmPassword) {
       setAuthModal((prev) => ({ ...prev, message: "两次输入的密码不一致。" }));
       return;
@@ -3153,6 +3158,7 @@ function App() {
           username,
           password,
           displayName: authForm.displayName.trim(),
+          referrer: authForm.referrer.trim(),
         }),
       });
       setAuthToken(data.token);
@@ -6268,6 +6274,17 @@ function MemberModal({
                 />
               </label>
             )}
+            {authForm.mode === "register" && (
+              <label>
+                <span>推荐人 <b className="required-mark">*</b></span>
+                <input
+                  value={authForm.referrer}
+                  onChange={(event) => setAuthForm((prev) => ({ ...prev, referrer: event.target.value }))}
+                  placeholder="请填写是谁推荐您来的；如果没有，请填写“无”"
+                />
+                <em className="field-hint">用于确认推荐来源，方便后续服务和推荐记录核对。</em>
+              </label>
+            )}
 
             <label>
               <span>登录用户名 <b className="required-mark">*</b></span>
@@ -6982,6 +6999,7 @@ function AdminPanelPage({
         <div className="admin-table-head">
           <span>用户名</span>
           <span>姓名</span>
+          <span>推荐人</span>
           <span>会员</span>
           <span>积分</span>
           <span>到期时间</span>
@@ -6990,6 +7008,7 @@ function AdminPanelPage({
           <button key={user.id} type="button" className="admin-table-row" onClick={() => setState((prev) => ({ ...prev, identifier: user.identifier }))}>
             <span>{user.identifier}</span>
             <span>{user.student_name || user.display_name || "-"}</span>
+            <span>{user.referrer || "无"}</span>
             <span>{user.membership_status || "free"} · {user.plan_name || "免费用户"}</span>
             <span>{user.balance || 0}</span>
             <span>{user.expires_at ? new Date(user.expires_at).toLocaleDateString("zh-CN") : "-"}</span>

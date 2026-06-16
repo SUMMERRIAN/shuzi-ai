@@ -1443,6 +1443,7 @@ function toPublicUser(row) {
     identifier: row.identifier,
     provider: row.provider,
     displayName: row.display_name,
+    referrer: row.referrer || "无",
     role: row.role,
   };
 }
@@ -2298,13 +2299,17 @@ app.get("/api/health", async (req, res) => {
 });
 
 app.post("/api/auth/register", async (req, res) => {
-  const { username, password, displayName = "" } = req.body || {};
+  const { username, password, displayName = "", referrer = "" } = req.body || {};
   const normalized = normalizeIdentifier(username);
+  const normalizedReferrer = String(referrer).trim();
   if (!normalized || normalized.length < 3) {
     return res.status(400).json({ error: "USERNAME_REQUIRED", message: "用户名至少需要3个字符。" });
   }
   if (!password || String(password).length < 6) {
     return res.status(400).json({ error: "PASSWORD_REQUIRED", message: "密码至少需要6位。" });
+  }
+  if (!normalizedReferrer) {
+    return res.status(400).json({ error: "REFERRER_REQUIRED", message: "请填写推荐人；如果没有，请填写“无”。" });
   }
 
   const result = await withTransaction(async (client) => {
@@ -2318,10 +2323,10 @@ app.post("/api/auth/register", async (req, res) => {
     const passwordHash = await bcrypt.hash(String(password), 12);
     const user = (
       await client.query(
-        `INSERT INTO users (channel, identifier, provider, display_name, password_hash)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO users (channel, identifier, provider, display_name, referrer, password_hash)
+         VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING *`,
-        ["username", normalized, "用户名密码", displayName || normalized, passwordHash]
+        ["username", normalized, "用户名密码", displayName || normalized, normalizedReferrer, passwordHash]
       )
     ).rows[0];
     const student = await getOrCreateStudent(client, user, displayName);
@@ -5655,6 +5660,7 @@ app.get("/api/admin/users", requireAdminToken, async (req, res) => {
         u.id,
         u.identifier,
         u.display_name,
+        u.referrer,
         u.created_at,
         s.name AS student_name,
         m.plan_name,
