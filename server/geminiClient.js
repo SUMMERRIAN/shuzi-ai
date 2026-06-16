@@ -1,6 +1,7 @@
 import fs from "node:fs";
 
 const geminiEndpoint = "https://generativelanguage.googleapis.com/v1beta/models";
+const geminiImageEndpoint = `https://generativelanguage.googleapis.com/${process.env.GEMINI_IMAGE_API_VERSION || "v1"}/models`;
 const geminiTimeoutMs = Math.max(15000, Number(process.env.GEMINI_TIMEOUT_MS || 120000));
 const geminiMaxOutputTokens = Math.max(1024, Number(process.env.GEMINI_MAX_OUTPUT_TOKENS || 16384));
 const defaultGeminiThinkingBudget =
@@ -48,6 +49,12 @@ export function getGeminiImageBase64(data) {
     .map((part) => part.inlineData || part.inline_data)
     .filter(Boolean)
     .find((inlineData) => String(inlineData.mimeType || inlineData.mime_type || "").startsWith("image/"))?.data || "";
+}
+
+function getGeminiFinishReasons(data) {
+  return (data?.candidates || [])
+    .map((candidate) => candidate?.finishReason || candidate?.finish_reason || "")
+    .filter(Boolean);
 }
 
 function normalizeThinkingBudget(value) {
@@ -153,69 +160,92 @@ export async function generateGeminiImage({
   onUsage = null,
 }) {
   ensureGeminiKey();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), geminiTimeoutMs);
-  let response;
-  try {
-    response = await fetch(`${geminiEndpoint}/${encodeURIComponent(model)}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
+  async function requestImage(body, attemptLabel) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), geminiTimeoutMs);
+    let response;
+    try {
+      response = await fetch(`${geminiImageEndpoint}/${encodeURIComponent(model)}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify(body),
+      });
+    } catch (error) {
+      if (error.name === "AbortError") {
+        const timeoutError = new Error(`Gemini生图超过${Math.round(geminiTimeoutMs / 1000)}秒仍未返回，请稍后重试或简化图片要求。`);
+        timeoutError.status = 504;
+        timeoutError.code = "GEMINI_IMAGE_TIMEOUT";
+        timeoutError.provider = "gemini";
+        timeoutError.model = model;
+        throw timeoutError;
+      }
+      error.provider = "gemini";
+      error.model = model;
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    const rawText = await response.text();
+    let data = {};
+    try {
+      data = rawText ? JSON.parse(rawText) : {};
+    } catch {
+      data = { rawText };
+    }
+    if (!response.ok) {
+      const error = new Error(data?.error?.message || "Gemini image generation failed.");
+      error.status = response.status;
+      error.code = data?.error?.status || "GEMINI_IMAGE_REQUEST_FAILED";
+      error.detail = data?.error || data;
+      error.provider = "gemini";
+      error.model = model;
+      error.attempt = attemptLabel;
+      throw error;
+    }
+    return data;
+  }
+
+  const baseBody = {
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+  };
+  let data = await requestImage(baseBody, "default");
+  let imageBase64 = getGeminiImageBase64(data);
+  if (!imageBase64) {
+    const imageOnlyPrompt = [
+      prompt,
+      "请直接生成一张图片作为最终输出。不要只用文字回答；如果需要文字，请把文字放进图片里。",
+    ].join("\n");
+    data = await requestImage(
+      {
+        contents: [{ role: "user", parts: [{ text: imageOnlyPrompt }] }],
         generationConfig: {
           temperature,
           candidateCount: 1,
-          responseModalities: ["TEXT", "IMAGE"],
+          responseModalities: ["Image"],
         },
-      }),
-    });
-  } catch (error) {
-    if (error.name === "AbortError") {
-      const timeoutError = new Error(`Gemini生图超过${Math.round(geminiTimeoutMs / 1000)}秒仍未返回，请稍后重试或简化图片要求。`);
-      timeoutError.status = 504;
-      timeoutError.code = "GEMINI_IMAGE_TIMEOUT";
-      timeoutError.provider = "gemini";
-      timeoutError.model = model;
-      throw timeoutError;
-    }
-    error.provider = "gemini";
-    error.model = model;
-    throw error;
-  } finally {
-    clearTimeout(timeout);
+      },
+      "image-only-retry"
+    );
+    imageBase64 = getGeminiImageBase64(data);
   }
 
-  const rawText = await response.text();
-  let data = {};
-  try {
-    data = rawText ? JSON.parse(rawText) : {};
-  } catch {
-    data = { rawText };
-  }
-  if (!response.ok) {
-    const error = new Error(data?.error?.message || "Gemini image generation failed.");
-    error.status = response.status;
-    error.code = data?.error?.status || "GEMINI_IMAGE_REQUEST_FAILED";
-    error.detail = data?.error || data;
-    error.provider = "gemini";
-    error.model = model;
-    throw error;
-  }
   if (typeof onUsage === "function") {
     await onUsage({
       provider: "gemini",
       model,
       kind: "image",
-      usage: data?.usageMetadata || { images: 1 },
+      usage: data?.usageMetadata || { images: imageBase64 ? 1 : 0 },
     });
   }
-  const imageBase64 = getGeminiImageBase64(data);
   if (!imageBase64) {
-    const error = new Error("Gemini没有返回有效图片，请稍后重试或检查图片模型权限。");
+    const text = getGeminiText(data);
+    const finishReasons = getGeminiFinishReasons(data);
+    const error = new Error(text ? `Gemini这次只返回了文字，没有返回图片：${text.slice(0, 120)}` : "Gemini没有返回有效图片，请稍后重试或检查图片模型权限。");
     error.status = 502;
     error.code = "GEMINI_IMAGE_EMPTY_RESPONSE";
-    error.detail = data;
+    error.detail = { ...data, finishReasons };
     error.provider = "gemini";
     error.model = model;
     throw error;

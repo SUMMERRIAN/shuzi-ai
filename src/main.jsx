@@ -4743,7 +4743,7 @@ function App() {
           message.id === assistantId
             ? {
                 ...message,
-                content: "AI暂时没有完成回答，请稍后再试，或减少文件数量后重新提问。",
+                content: error.message || "AI暂时没有完成回答，请稍后再试，或减少文件数量后重新提问。",
                 imageBase64: "",
                 note: null,
               }
