@@ -4697,7 +4697,7 @@ function App() {
     const assistantMessage = {
       id: assistantId,
       role: "assistant",
-      content: "AI正在阅读你的问题...",
+      content: freeAskFiles.length ? "AI正在识别图片和附件内容，再根据你的问题回答..." : "AI正在阅读你的问题...",
       note: null,
       imageBase64: "",
     };

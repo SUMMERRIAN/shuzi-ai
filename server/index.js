@@ -2159,6 +2159,80 @@ function buildFreeAskCleanAnswer({ question, materialContext, conversationContex
   ].filter(Boolean).join("\n\n");
 }
 
+function buildFreeAskImageRecognitionPrompt({ question, materialContext }) {
+  return [
+    "你是树子AI的图片理解助手。本阶段只做图片识别和信息整理，不回答用户问题，不讲题，不延伸建议。",
+    "请根据图片内容输出中文摘要，保持客观、简洁、可供下一阶段回答使用。",
+    "如果图片是学习资料、笔记、知识图或截图，请整理：主要标题、可见文字、结构层级、图表/公式/符号、用户可能关注的重点。",
+    "如果图片是普通照片或界面截图，请说明画面主体、关键文字、可见操作或风险点。",
+    "看不清、缺失、被遮挡的地方必须明确写“看不清”或“无法确认”，不要编造。",
+    "不要输出 JSON，不要输出英文内部字段名。",
+    "用户问题：" + (question || "请理解这张图片。"),
+    "附件信息：" + materialContext.fileSummary,
+    materialContext.materialText ? "附件可读内容：\n" + materialContext.materialText : "",
+  ].filter(Boolean).join("\n\n");
+}
+
+function buildFreeAskAnswerFromImageSummary({ question, imageSummary, materialContext, conversationContext }) {
+  return [
+    freeAskSystemPrompt,
+    conversationContext ? `可参考的历史上下文：\n${conversationContext}` : "",
+    "本轮任务是图片理解。下面已经有第一阶段从图片中识别出的内容摘要。请只基于用户问题、图片摘要和可读附件内容回答，不要假装重新看到了图片。",
+    "除非用户明确要求讲题、解题、作业或试卷分析，不要套用题目讲解模板。",
+    "回答要直接、分段清楚；看不清或无法确认的内容要说明限制。",
+    "用户本轮问题：" + (question || "请根据图片回答。"),
+    "图片识别摘要：\n" + imageSummary,
+    materialContext.materialText ? "附件可读内容：\n" + materialContext.materialText : "",
+  ].filter(Boolean).join("\n\n");
+}
+
+async function generateFreeAskImageUnderstanding({ question, materialContext, conversationContext, aiMode = "fast", onUsage = null }) {
+  const recognitionModel = process.env.GEMINI_MODEL_FREE_ASK_IMAGE_RECOGNITION || geminiFastModel;
+  const answerModel = getGeminiModel(aiMode);
+  const recognitionResult = await generateMistakeGeminiTextWithRetry({
+    model: recognitionModel,
+    stage: "free-ask-image-recognition",
+    prompt: buildFreeAskImageRecognitionPrompt({ question, materialContext }),
+    files: materialContext.safeImageFiles,
+    temperature: 0,
+    topP: 0.1,
+    thinkingBudget: Number(process.env.GEMINI_FREE_ASK_IMAGE_RECOGNITION_THINKING_BUDGET || 256),
+    maxOutputTokens: Number(process.env.GEMINI_FREE_ASK_IMAGE_RECOGNITION_MAX_OUTPUT_TOKENS || 1536),
+    timeoutMs: freeAskMaterialLimits.geminiTimeoutMs,
+    onUsage,
+  });
+  const answerResult = await generateMistakeGeminiTextWithRetry({
+    model: answerModel,
+    stage: "free-ask-image-answer",
+    prompt: buildFreeAskAnswerFromImageSummary({
+      question,
+      imageSummary: recognitionResult.text,
+      materialContext,
+      conversationContext,
+    }),
+    files: [],
+    temperature: aiMode === "thinking" ? 0.2 : 0.35,
+    topP: 0.8,
+    thinkingBudget: Number(process.env.GEMINI_FREE_ASK_IMAGE_ANSWER_THINKING_BUDGET || 512),
+    maxOutputTokens: Number(process.env.GEMINI_FREE_ASK_IMAGE_ANSWER_MAX_OUTPUT_TOKENS || 3072),
+    timeoutMs: freeAskMaterialLimits.geminiTimeoutMs,
+    onUsage,
+  });
+  return {
+    answer: normalizeStudentMathText(answerResult.text),
+    provider: "gemini",
+    mode: aiMode,
+    model: `${recognitionResult.stage}:${recognitionResult.model} | ${answerResult.stage}:${answerResult.model}`,
+    meta: {
+      imageUnderstandingWorkflow: "two-stage",
+      imageRecognitionModel: recognitionResult.model,
+      imageAnswerModel: answerResult.model,
+      imageRecognitionUsedFallback: Boolean(recognitionResult.usedFallback),
+      imageAnswerUsedFallback: Boolean(answerResult.usedFallback),
+    },
+  };
+}
+
 async function generateFreeAskQuestionExplanation({ question, files, student, materialContext, onUsage = null }) {
   const subject = inferFreeAskSubject(question, files);
   const grade = student?.grade || "";
@@ -5103,6 +5177,19 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
             responseProvider = result.provider;
             responseMode = result.mode;
             responseMeta = result.meta;
+          } else if (aiProvider === "gemini" && freeAskIntent === "image_understanding") {
+            const result = await generateFreeAskImageUnderstanding({
+              question,
+              materialContext,
+              conversationContext,
+              aiMode,
+              onUsage: collectUsage,
+            });
+            answer = result.answer;
+            model = result.model;
+            responseProvider = result.provider;
+            responseMode = result.mode;
+            responseMeta = result.meta;
           } else if (aiProvider === "gemini") {
             ensureGeminiKey();
             model = getGeminiModel(aiMode);
@@ -5234,17 +5321,29 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
     const usageEvents = [];
     const collectUsage = (event) => usageEvents.push(event);
     if (aiProvider === "gemini") {
-      ensureGeminiKey();
-      model = getGeminiModel(aiMode);
-      answer = await generateGeminiText({
-        model,
-        prompt: promptText,
-        files: materialContext.safeImageFiles,
-        temperature: aiMode === "thinking" ? 0.2 : 0.35,
-        timeoutMs: files.length ? freeAskMaterialLimits.geminiTimeoutMs : undefined,
-        maxOutputTokens: files.length ? 3072 : undefined,
-        onUsage: collectUsage,
-      });
+      if (freeAskIntent === "image_understanding") {
+        const result = await generateFreeAskImageUnderstanding({
+          question,
+          materialContext,
+          conversationContext,
+          aiMode,
+          onUsage: collectUsage,
+        });
+        answer = result.answer;
+        model = result.model;
+      } else {
+        ensureGeminiKey();
+        model = getGeminiModel(aiMode);
+        answer = await generateGeminiText({
+          model,
+          prompt: promptText,
+          files: materialContext.safeImageFiles,
+          temperature: aiMode === "thinking" ? 0.2 : 0.35,
+          timeoutMs: files.length ? freeAskMaterialLimits.geminiTimeoutMs : undefined,
+          maxOutputTokens: files.length ? 3072 : undefined,
+          onUsage: collectUsage,
+        });
+      }
     } else {
       ensureOpenAIKey();
       model = getOpenAITextModel(aiMode);
