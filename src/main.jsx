@@ -5460,7 +5460,9 @@ function PhETLabPage() {
   const stageRef = useRef(null);
   const directoryResultsRef = useRef(null);
   const directoryPositionRef = useRef({ pageTop: 0, resultsTop: 0 });
+  const fullscreenControlsTimerRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fullscreenControlsVisible, setFullscreenControlsVisible] = useState(true);
   const [pageMode, setPageMode] = useState("directory");
   const [simulationLoadState, setSimulationLoadState] = useState("idle");
   const [searchText, setSearchText] = useState("");
@@ -5513,20 +5515,51 @@ function PhETLabPage() {
   useEffect(() => {
     function handleFullscreenChange() {
       const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement;
-      setIsFullscreen(fullscreenElement === stageRef.current);
+      const stageIsFullscreen = fullscreenElement === stageRef.current;
+      setIsFullscreen(stageIsFullscreen);
+      if (stageIsFullscreen) showFullscreenControls();
+      else {
+        clearFullscreenControlsTimer();
+        setFullscreenControlsVisible(true);
+      }
     }
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
     return () => {
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
       document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
+      clearFullscreenControlsTimer();
     };
   }, []);
+
+  function clearFullscreenControlsTimer() {
+    if (fullscreenControlsTimerRef.current) {
+      window.clearTimeout(fullscreenControlsTimerRef.current);
+      fullscreenControlsTimerRef.current = null;
+    }
+  }
+
+  function showFullscreenControls(autoHide = true) {
+    clearFullscreenControlsTimer();
+    setFullscreenControlsVisible(true);
+    if (autoHide) {
+      fullscreenControlsTimerRef.current = window.setTimeout(() => {
+        setFullscreenControlsVisible(false);
+        fullscreenControlsTimerRef.current = null;
+      }, 3000);
+    }
+  }
+
+  function keepFullscreenControlsVisible() {
+    clearFullscreenControlsTimer();
+    setFullscreenControlsVisible(true);
+  }
 
   async function openFullscreen() {
     const requestFullscreen = stageRef.current?.requestFullscreen || stageRef.current?.webkitRequestFullscreen;
     try {
       if (requestFullscreen) {
+        showFullscreenControls();
         await requestFullscreen.call(stageRef.current);
         return;
       }
@@ -5536,6 +5569,7 @@ function PhETLabPage() {
   }
 
   async function closeFullscreen() {
+    clearFullscreenControlsTimer();
     const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement;
     const exitFullscreen = document.exitFullscreen || document.webkitExitFullscreen;
     if (fullscreenElement && exitFullscreen) {
@@ -5800,7 +5834,11 @@ function PhETLabPage() {
 
           {simulationLoadState === "ready" ? (
             <div ref={stageRef} className="experiment-stage">
-              <div className="experiment-fullscreen-controls">
+              <div
+                className={`experiment-fullscreen-controls ${fullscreenControlsVisible ? "is-visible" : ""}`}
+                onPointerEnter={keepFullscreenControlsVisible}
+                onPointerLeave={() => showFullscreenControls()}
+              >
                 <button type="button" onClick={returnToDirectory}>
                   <ChevronLeft size={17} />
                   返回实验目录
@@ -5810,6 +5848,19 @@ function PhETLabPage() {
                   退出全屏
                 </button>
               </div>
+              <div
+                className="experiment-fullscreen-hotspot"
+                aria-hidden="true"
+                onPointerEnter={() => showFullscreenControls()}
+              />
+              <button
+                type="button"
+                className="experiment-fullscreen-reveal"
+                aria-label="显示全屏操作"
+                onClick={() => showFullscreenControls()}
+              >
+                <Menu size={18} />
+              </button>
               <iframe
                 src={simulationUrl}
                 title={`PhET ${activeSimulation.title}互动模拟`}

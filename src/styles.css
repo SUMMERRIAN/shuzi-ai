@@ -476,6 +476,11 @@
   display: none;
 }
 
+.experiment-fullscreen-hotspot,
+.experiment-fullscreen-reveal {
+  display: none;
+}
+
 .experiment-stage:fullscreen .experiment-fullscreen-controls,
 .experiment-stage:-webkit-full-screen .experiment-fullscreen-controls {
   position: absolute;
@@ -485,6 +490,19 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.experiment-stage:fullscreen .experiment-fullscreen-controls.is-visible,
+.experiment-stage:-webkit-full-screen .experiment-fullscreen-controls.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
 }
 
 .experiment-stage:fullscreen .experiment-fullscreen-controls button,
@@ -504,6 +522,17 @@
   font-weight: 700;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
   cursor: pointer;
+}
+
+.experiment-stage:fullscreen .experiment-fullscreen-hotspot,
+.experiment-stage:-webkit-full-screen .experiment-fullscreen-hotspot {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  right: 0;
+  display: block;
+  width: min(180px, 24vw);
+  height: 14px;
 }
 
 .experiment-attribution {
@@ -574,6 +603,39 @@
 
   .experiment-stage {
     height: clamp(520px, 68vh, 680px);
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .experiment-stage:fullscreen .experiment-fullscreen-reveal,
+  .experiment-stage:-webkit-full-screen .experiment-fullscreen-reveal {
+    position: absolute;
+    z-index: 4;
+    top: max(10px, env(safe-area-inset-top));
+    right: max(10px, env(safe-area-inset-right));
+    display: inline-flex;
+    width: 40px;
+    height: 40px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    border-radius: 8px;
+    background: rgba(17, 24, 32, 0.55);
+    color: #fff;
+    opacity: 0.72;
+    cursor: pointer;
+    transition: opacity 160ms ease;
+  }
+
+  .experiment-stage:fullscreen .experiment-fullscreen-controls.is-visible ~ .experiment-fullscreen-reveal,
+  .experiment-stage:-webkit-full-screen .experiment-fullscreen-controls.is-visible ~ .experiment-fullscreen-reveal {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .experiment-stage:fullscreen .experiment-fullscreen-hotspot,
+  .experiment-stage:-webkit-full-screen .experiment-fullscreen-hotspot {
+    display: none;
   }
 }
 
