@@ -1,3 +1,5 @@
+import { phetPhase3Simulations } from "./phetPhase3Catalog.js";
+
 export const phetSubjectGroups = [
   {
     id: "physics",
@@ -828,4 +830,5 @@ export const phetSimulations = [
     batch: "phase2",
     available: true,
   },
+  ...phetPhase3Simulations,
 ];
