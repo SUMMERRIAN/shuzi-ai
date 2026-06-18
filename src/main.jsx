@@ -64,6 +64,7 @@ import {
 import { apiRequest, getAuthToken, mapAccountToMember, setAuthToken } from "./apiClient.js";
 import { expertArticles } from "./expertArticles.js";
 import { storagePlans } from "./membershipConfig.js";
+import { phetSchoolStages, phetSimulations, phetSubjectGroups } from "./phetCatalog.js";
 import "./styles.css";
 
 const featureFlags = {
@@ -5457,7 +5458,49 @@ function HomePage() {
 function PhETLabPage() {
   const stageRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const simulationUrl = "/simulations/phet/waves-intro.html?locale=zh_CN";
+  const [searchText, setSearchText] = useState("");
+  const [selectedTopics, setSelectedTopics] = useState([]);
+  const [selectedStages, setSelectedStages] = useState([]);
+  const [filtersOpen, setFiltersOpen] = useState(() => !window.matchMedia("(max-width: 1180px)").matches);
+  const [expandedSubjects, setExpandedSubjects] = useState(() =>
+    new Set(window.matchMedia("(max-width: 1180px)").matches ? ["physics"] : phetSubjectGroups.map((group) => group.id)),
+  );
+  const [activeSimulationId, setActiveSimulationId] = useState(phetSimulations.find((simulation) => simulation.available)?.id || "");
+  const activeSimulation = phetSimulations.find((simulation) => simulation.id === activeSimulationId) || phetSimulations[0];
+  const simulationUrl = activeSimulation?.localUrl || "";
+
+  const topicCounts = useMemo(() => {
+    const counts = {};
+    phetSimulations.forEach((simulation) => {
+      counts[simulation.subject] = (counts[simulation.subject] || 0) + 1;
+      simulation.topics.forEach((topic) => {
+        counts[topic] = (counts[topic] || 0) + 1;
+      });
+    });
+    return counts;
+  }, []);
+
+  const filteredSimulations = useMemo(() => {
+    const keyword = searchText.trim().toLocaleLowerCase("zh-CN");
+    return phetSimulations.filter((simulation) => {
+      const matchesSearch =
+        !keyword ||
+        simulation.title.toLocaleLowerCase("zh-CN").includes(keyword) ||
+        simulation.description.toLocaleLowerCase("zh-CN").includes(keyword);
+      const matchesTopic =
+        selectedTopics.length === 0 ||
+        selectedTopics.includes(simulation.subject) ||
+        simulation.topics.some((topic) => selectedTopics.includes(topic));
+      const matchesStage =
+        selectedStages.length === 0 || simulation.stages.some((stage) => selectedStages.includes(stage));
+      return matchesSearch && matchesTopic && matchesStage;
+    });
+  }, [searchText, selectedStages, selectedTopics]);
+
+  useEffect(() => {
+    const scrollTimer = window.setTimeout(() => window.scrollTo({ top: 0, behavior: "instant" }), 260);
+    return () => window.clearTimeout(scrollTimer);
+  }, []);
 
   useEffect(() => {
     function handleFullscreenChange() {
@@ -5483,51 +5526,218 @@ function PhETLabPage() {
     if (document.fullscreenElement) await document.exitFullscreen();
   }
 
+  function toggleListValue(value, setter) {
+    setter((current) => (current.includes(value) ? current.filter((item) => item !== value) : [...current, value]));
+  }
+
+  function toggleSubject(group) {
+    const values = [group.id, ...group.topics.map((topic) => topic.id)];
+    setSelectedTopics((current) => {
+      const shouldRemove = values.some((value) => current.includes(value));
+      return shouldRemove ? current.filter((value) => !values.includes(value)) : [...current, group.id];
+    });
+  }
+
+  function toggleSubjectExpanded(subjectId) {
+    setExpandedSubjects((current) => {
+      const next = new Set(current);
+      if (next.has(subjectId)) next.delete(subjectId);
+      else next.add(subjectId);
+      return next;
+    });
+  }
+
+  function clearFilters() {
+    setSearchText("");
+    setSelectedTopics([]);
+    setSelectedStages([]);
+  }
+
   return (
     <section className="stack experiment-lab-page">
       <header className="experiment-lab-header">
         <div>
           <span className="eyebrow">互动实验</span>
           <h1>PhET实验室</h1>
-          <p>通过可操作的科学模拟观察现象、调整变量并验证自己的判断。所有实验免费开放，无需登录，不扣积分。</p>
         </div>
         <div className="experiment-header-mark" aria-hidden="true">
           <FlaskConical size={30} />
         </div>
       </header>
 
-      <section className="experiment-toolbar" aria-label="实验信息和操作">
-        <div>
-          <strong>波的入门</strong>
-          <span>水波、声波与光波 · 频率、振幅和波速</span>
-        </div>
-        <div className="experiment-actions">
-          <a className="ghost-action" href="https://phet.colorado.edu/zh_CN/simulations/waves-intro" target="_blank" rel="noreferrer">
-            <ExternalLink size={17} />
-            原始项目
-          </a>
-          <button type="button" className="primary-action" onClick={isFullscreen ? closeFullscreen : openFullscreen}>
-            <Maximize2 size={17} />
-            {isFullscreen ? "退出全屏" : "全屏实验"}
-          </button>
+      <section className="experiment-directory" aria-label="PhET实验目录">
+        <button
+          type="button"
+          className="experiment-filter-toggle"
+          onClick={() => setFiltersOpen((current) => !current)}
+          aria-expanded={filtersOpen}
+        >
+          <span>筛选实验</span>
+          <ChevronDown className={filtersOpen ? "is-open" : ""} size={19} />
+        </button>
+
+        <aside className={filtersOpen ? "experiment-filters is-open" : "experiment-filters"} aria-label="实验筛选">
+          <div className="experiment-filter-heading">
+            <strong>筛选</strong>
+            {(selectedTopics.length > 0 || selectedStages.length > 0 || searchText) && (
+              <button type="button" onClick={clearFilters}>清除</button>
+            )}
+          </div>
+
+          <div className="experiment-filter-section">
+            <h2>科目</h2>
+            <div className="experiment-filter-options">
+              {phetSubjectGroups.map((group) => {
+                const isExpanded = expandedSubjects.has(group.id);
+                const groupValues = [group.id, ...group.topics.map((topic) => topic.id)];
+                const isChecked = groupValues.some((value) => selectedTopics.includes(value));
+                return (
+                  <div className="experiment-subject-group" key={group.id}>
+                    <div className="experiment-subject-row">
+                      <label>
+                        <input type="checkbox" checked={isChecked} onChange={() => toggleSubject(group)} />
+                        <span>{group.label}</span>
+                        <small>{topicCounts[group.id] || 0}</small>
+                      </label>
+                      {group.topics.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => toggleSubjectExpanded(group.id)}
+                          aria-label={`${isExpanded ? "收起" : "展开"}${group.label}分类`}
+                          aria-expanded={isExpanded}
+                        >
+                          <ChevronDown className={isExpanded ? "is-open" : ""} size={17} />
+                        </button>
+                      )}
+                    </div>
+                    {group.topics.length > 0 && isExpanded && (
+                      <div className="experiment-topic-list">
+                        {group.topics.map((topic) => (
+                          <label key={topic.id}>
+                            <input
+                              type="checkbox"
+                              checked={selectedTopics.includes(topic.id)}
+                              onChange={() => toggleListValue(topic.id, setSelectedTopics)}
+                            />
+                            <span>{topic.label}</span>
+                            <small>{topicCounts[topic.id] || 0}</small>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="experiment-filter-section">
+            <h2>年级</h2>
+            <div className="experiment-stage-options">
+              {phetSchoolStages.map((stage) => (
+                <label key={stage.id}>
+                  <input
+                    type="checkbox"
+                    checked={selectedStages.includes(stage.id)}
+                    onChange={() => toggleListValue(stage.id, setSelectedStages)}
+                  />
+                  <span>{stage.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </aside>
+
+        <div className="experiment-directory-main">
+          <label className="experiment-search">
+            <Search size={19} />
+            <input
+              type="search"
+              value={searchText}
+              onChange={(event) => setSearchText(event.target.value)}
+              placeholder="搜索实验名称或内容"
+            />
+          </label>
+
+          <div className="experiment-results-heading">
+            <div>
+              <strong>实验目录</strong>
+              <span>找到 {filteredSimulations.length} 个实验</span>
+            </div>
+          </div>
+
+          <div className="experiment-results">
+            {filteredSimulations.length > 0 ? (
+              filteredSimulations.map((simulation) => (
+                <button
+                  type="button"
+                  className={simulation.id === activeSimulationId ? "experiment-result is-active" : "experiment-result"}
+                  key={simulation.id}
+                  onClick={() => setActiveSimulationId(simulation.id)}
+                  disabled={!simulation.available}
+                >
+                  <span className="experiment-result-icon" aria-hidden="true"><FlaskConical size={21} /></span>
+                  <span className="experiment-result-copy">
+                    <strong>{simulation.title}</strong>
+                    <span>{simulation.description}</span>
+                    <small>
+                      {phetSchoolStages
+                        .filter((stage) => simulation.stages.includes(stage.id))
+                        .map((stage) => stage.label)
+                        .join(" · ")}
+                    </small>
+                  </span>
+                  <span className="experiment-availability">{simulation.available ? "已开放" : "待上线"}</span>
+                </button>
+              ))
+            ) : (
+              <div className="experiment-empty">
+                <Search size={24} />
+                <strong>没有找到符合条件的实验</strong>
+                <span>可以减少筛选条件，或清除筛选后重新查看。</span>
+              </div>
+            )}
+          </div>
         </div>
       </section>
 
-      <div ref={stageRef} className="experiment-stage">
-        <iframe
-          src={simulationUrl}
-          title="PhET 波的入门互动模拟"
-          allow="fullscreen"
-          allowFullScreen
-          loading="eager"
-        />
-      </div>
+      {activeSimulation && (
+        <>
+          <section className="experiment-toolbar" aria-label="实验信息和操作">
+            <div>
+              <strong>{activeSimulation.title}</strong>
+              <span>{activeSimulation.description}</span>
+            </div>
+            <div className="experiment-actions">
+              <button type="button" className="primary-action" onClick={isFullscreen ? closeFullscreen : openFullscreen}>
+                <Maximize2 size={17} />
+                {isFullscreen ? "退出全屏" : "全屏实验"}
+              </button>
+            </div>
+          </section>
 
-      <footer className="experiment-attribution">
+          <div ref={stageRef} className="experiment-stage">
+            <iframe
+              src={simulationUrl}
+              title={`PhET ${activeSimulation.title}互动模拟`}
+              allow="fullscreen"
+              allowFullScreen
+              loading="eager"
+            />
+          </div>
+        </>
+      )}
+
+      <footer className="experiment-attribution" aria-label="免费开放与授权信息">
         <Info size={18} />
         <p>
-          “波的入门”由 PhET Interactive Simulations、University of Colorado Boulder 提供。依据授权及 CC BY-NC 4.0
-          条款免费开放。树子AI未修改模拟内容，并保留 PhET 标识与原作者信息。
+          本实验室完全免费开放，无需注册、不收费、不扣积分。模拟由 PhET Interactive Simulations、University of Colorado
+          Boulder 提供，依据 CC BY-NC 4.0 许可使用。查看当前实验的
+          {" "}
+          <a href={activeSimulation?.originalUrl || "https://phet.colorado.edu/zh_CN/simulations"} target="_blank" rel="noreferrer">
+            原始项目
+          </a>
+          。
         </p>
       </footer>
     </section>
