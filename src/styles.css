@@ -27,6 +27,192 @@
   text-rendering: optimizeLegibility;
 }
 
+.nav-group {
+  display: grid;
+  gap: 4px;
+}
+
+.nav-group-toggle {
+  grid-template-columns: 22px minmax(0, 1fr) 18px;
+}
+
+.nav-group-toggle.is-current {
+  background: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
+}
+
+.nav-group-chevron {
+  justify-self: end;
+  transition: transform 180ms ease;
+}
+
+.nav-group-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+.nav-sublist {
+  display: grid;
+  gap: 4px;
+  margin-left: 21px;
+  padding: 2px 0 4px 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.nav-item.nav-child {
+  min-height: 42px;
+  padding-inline: 10px;
+  font-size: 14px;
+}
+
+.experiment-lab-page {
+  gap: 18px;
+}
+
+.experiment-lab-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 8px 2px 4px;
+}
+
+.experiment-lab-header h1 {
+  margin: 5px 0 10px;
+  color: #111820;
+  font-size: clamp(28px, 3vw, 38px);
+  line-height: 1.15;
+}
+
+.experiment-lab-header p {
+  max-width: 760px;
+  margin: 0;
+  color: #56625c;
+  line-height: 1.75;
+}
+
+.experiment-header-mark {
+  display: grid;
+  flex: 0 0 54px;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  border: 1px solid #cfdcd3;
+  border-radius: 8px;
+  background: #eef6f0;
+  color: #087449;
+}
+
+.experiment-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 2px;
+  border-top: 1px solid #d8ddd8;
+  border-bottom: 1px solid #d8ddd8;
+}
+
+.experiment-toolbar > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.experiment-toolbar strong {
+  color: #111820;
+  font-size: 18px;
+}
+
+.experiment-toolbar span {
+  color: #66736c;
+  font-size: 14px;
+}
+
+.experiment-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.experiment-actions a {
+  text-decoration: none;
+}
+
+.experiment-stage {
+  overflow: hidden;
+  height: clamp(560px, 72vh, 780px);
+  border: 1px solid #cfd6d1;
+  border-radius: 8px;
+  background: #111820;
+  box-shadow: 0 12px 32px rgba(17, 24, 32, 0.1);
+}
+
+.experiment-stage iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #ffffff;
+}
+
+.experiment-stage:fullscreen {
+  width: 100vw;
+  height: 100dvh;
+  border: 0;
+  border-radius: 0;
+}
+
+.experiment-attribution {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 2px;
+  color: #657169;
+}
+
+.experiment-attribution svg {
+  margin-top: 3px;
+  color: #087449;
+}
+
+.experiment-attribution p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+@media (max-width: 1180px) {
+  .experiment-stage {
+    height: clamp(520px, 68vh, 680px);
+  }
+}
+
+@media (max-width: 820px) {
+  .experiment-lab-header,
+  .experiment-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .experiment-header-mark {
+    display: none;
+  }
+
+  .experiment-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .experiment-actions > * {
+    justify-content: center;
+  }
+
+  .experiment-stage {
+    height: 62vh;
+    min-height: 480px;
+  }
+}
+
 * {
   box-sizing: border-box;
 }

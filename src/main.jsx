@@ -15,13 +15,16 @@ import {
   CreditCard,
   Crown,
   Download,
+  ExternalLink,
   FileDown,
   FileImage,
   FileMusic,
   FileText,
   FileVideo,
+  FlaskConical,
   FolderOpen,
   FolderPlus,
+  GraduationCap,
   HardDrive,
   Home,
   Image as ImageIcon,
@@ -45,6 +48,7 @@ import {
   UploadCloud,
   UserRound,
   WandSparkles,
+  Maximize2,
   X,
 } from "lucide-react";
 import {
@@ -76,6 +80,7 @@ const subPages = [
   { id: "mistakes", label: "错题专项", icon: Library },
   { id: "noAnswer", label: "没有答案", icon: Brain },
   { id: "notes", label: "知识笔记", icon: ImageIcon },
+  { id: "experiments", label: "互动实验", icon: FlaskConical },
   { id: "calendar", label: "学习日历", icon: CalendarDays },
   { id: "library", label: "学习资料库", icon: FolderOpen },
   { id: "forum", label: "学习社区", icon: UserRound },
@@ -84,6 +89,7 @@ const subPages = [
 ];
 
 const visibleSubPages = subPages.filter((page) => page.id !== "expert" || featureFlags.showExpertDiagnosis);
+const selfLearningPageIds = ["questionnaire", "statement", "profile", "strategy", "plan"];
 
 const aiJobFeatureLabels = {
   transcribe: "语音转写",
@@ -2091,6 +2097,7 @@ function normalizeKnowledgePointPairs(points = []) {
 function App() {
   const [activePage, setActivePage] = useState("home");
   const [tabletMenuOpen, setTabletMenuOpen] = useState(false);
+  const [selfLearningOpen, setSelfLearningOpen] = useState(false);
   const [member, setMember] = useState({
     isLoggedIn: false,
     isPaid: false,
@@ -2286,10 +2293,17 @@ function App() {
   const tokenPackages = billingConfig.tokenPackages.length ? billingConfig.tokenPackages : defaultTokenPackages;
   const activeAiJobs = aiJobs.filter((job) => ["queued", "processing"].includes(job.status));
   const activeNavLabel = visibleSubPages.find((page) => page.id === activePage)?.label || "树子AI";
+  const selfLearningPages = visibleSubPages.filter((page) => selfLearningPageIds.includes(page.id));
+  const standalonePages = visibleSubPages.filter((page) => page.id !== "home" && !selfLearningPageIds.includes(page.id));
+  const selfLearningActive = selfLearningPageIds.includes(activePage);
 
   useEffect(() => {
     setTabletMenuOpen(false);
   }, [activePage]);
+
+  useEffect(() => {
+    if (selfLearningActive) setSelfLearningOpen(true);
+  }, [selfLearningActive]);
 
   function showAiError(error, fallback = "AI服务暂时不可用，请稍后再试。") {
     setAiNotice({ page: activePage, message: error?.message || fallback });
@@ -4791,7 +4805,36 @@ function App() {
         </div>
 
         <nav className="nav-list" aria-label="树子AI功能导航">
-          {visibleSubPages.map(({ id, label, icon: Icon }) => (
+          <button className={activePage === "home" ? "nav-item is-active" : "nav-item"} onClick={() => setActivePage("home")}>
+            <Home size={18} />
+            <span>首页</span>
+          </button>
+
+          <div className="nav-group">
+            <button
+              type="button"
+              className={selfLearningActive ? "nav-item nav-group-toggle is-current" : "nav-item nav-group-toggle"}
+              onClick={() => setSelfLearningOpen((open) => !open)}
+              aria-expanded={selfLearningOpen}
+              aria-controls="self-learning-nav"
+            >
+              <GraduationCap size={18} />
+              <span>自主学习</span>
+              <ChevronDown className={selfLearningOpen ? "nav-group-chevron is-open" : "nav-group-chevron"} size={17} />
+            </button>
+            {selfLearningOpen && (
+              <div id="self-learning-nav" className="nav-sublist">
+                {selfLearningPages.map(({ id, label, icon: Icon }) => (
+                  <button key={id} className={activePage === id ? "nav-item nav-child is-active" : "nav-item nav-child"} onClick={() => setActivePage(id)}>
+                    <Icon size={17} />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {standalonePages.map(({ id, label, icon: Icon }) => (
             <button key={id} className={activePage === id ? "nav-item is-active" : "nav-item"} onClick={() => setActivePage(id)}>
               <Icon size={18} />
               <span>{label}</span>
@@ -5056,6 +5099,8 @@ function App() {
           />
         )}
 
+        {activePage === "experiments" && <PhETLabPage />}
+
         {activePage === "calendar" && (
           <LearningCalendarPage
             events={calendarEvents}
@@ -5270,6 +5315,13 @@ function HomePage() {
       ai: "首次生成走知识图模板；已有图片后会按学生修改意见迭代当前图。",
     },
     {
+      title: "互动实验",
+      summary: "通过免费的 PhET 科学模拟观察现象、调整变量和验证判断。",
+      purpose: "让抽象的物理和科学概念变成可以亲手操作、反复尝试的学习过程。",
+      operation: "进入 PhET实验室后直接开始实验，也可以切换全屏。无需登录，不扣积分。",
+      ai: "互动实验独立运行，不调用AI，也不写入学情画像或学习档案。",
+    },
+    {
       title: "学习日历",
       summary: "记录学习安排、提醒和重要学习事件。",
       purpose: "把计划、任务、复习和资料时间点放进日历，方便长期跟踪。",
@@ -5398,6 +5450,86 @@ function HomePage() {
           ))}
         </div>
       </section>
+    </section>
+  );
+}
+
+function PhETLabPage() {
+  const stageRef = useRef(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const simulationUrl = "/simulations/phet/waves-intro.html?locale=zh_CN";
+
+  useEffect(() => {
+    function handleFullscreenChange() {
+      setIsFullscreen(document.fullscreenElement === stageRef.current);
+    }
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  async function openFullscreen() {
+    try {
+      if (stageRef.current?.requestFullscreen) {
+        await stageRef.current.requestFullscreen();
+        return;
+      }
+    } catch {
+      // Some embedded or managed browsers block fullscreen; keep the experiment usable.
+    }
+    window.open(simulationUrl, "_blank", "noopener,noreferrer");
+  }
+
+  async function closeFullscreen() {
+    if (document.fullscreenElement) await document.exitFullscreen();
+  }
+
+  return (
+    <section className="stack experiment-lab-page">
+      <header className="experiment-lab-header">
+        <div>
+          <span className="eyebrow">互动实验</span>
+          <h1>PhET实验室</h1>
+          <p>通过可操作的科学模拟观察现象、调整变量并验证自己的判断。所有实验免费开放，无需登录，不扣积分。</p>
+        </div>
+        <div className="experiment-header-mark" aria-hidden="true">
+          <FlaskConical size={30} />
+        </div>
+      </header>
+
+      <section className="experiment-toolbar" aria-label="实验信息和操作">
+        <div>
+          <strong>波的入门</strong>
+          <span>水波、声波与光波 · 频率、振幅和波速</span>
+        </div>
+        <div className="experiment-actions">
+          <a className="ghost-action" href="https://phet.colorado.edu/zh_CN/simulations/waves-intro" target="_blank" rel="noreferrer">
+            <ExternalLink size={17} />
+            原始项目
+          </a>
+          <button type="button" className="primary-action" onClick={isFullscreen ? closeFullscreen : openFullscreen}>
+            <Maximize2 size={17} />
+            {isFullscreen ? "退出全屏" : "全屏实验"}
+          </button>
+        </div>
+      </section>
+
+      <div ref={stageRef} className="experiment-stage">
+        <iframe
+          src={simulationUrl}
+          title="PhET 波的入门互动模拟"
+          allow="fullscreen"
+          allowFullScreen
+          loading="eager"
+        />
+      </div>
+
+      <footer className="experiment-attribution">
+        <Info size={18} />
+        <p>
+          “波的入门”由 PhET Interactive Simulations、University of Colorado Boulder 提供。依据授权及 CC BY-NC 4.0
+          条款免费开放。树子AI未修改模拟内容，并保留 PhET 标识与原作者信息。
+        </p>
+      </footer>
     </section>
   );
 }
