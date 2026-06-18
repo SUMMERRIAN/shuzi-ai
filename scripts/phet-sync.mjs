@@ -14,7 +14,7 @@ function readArg(name, fallback = "") {
   return index >= 0 && process.argv[index + 1] ? process.argv[index + 1] : fallback;
 }
 
-const batch = readArg("--batch", "phase1");
+const batch = readArg("--batch", "all");
 const destinationValue = readArg("--dest", path.join(projectRoot, "public", "simulations", "phet"));
 const linkDistValue = readArg("--link-dist");
 if (
@@ -29,7 +29,9 @@ const checkOnly = process.argv.includes("--check");
 const force = process.argv.includes("--force");
 const statePath = path.join(destination, "phet-sync-state.json");
 
-const simulations = phetSimulations.filter((simulation) => simulation.batch === batch && simulation.sourceUrl);
+const simulations = phetSimulations.filter(
+  (simulation) => (batch === "all" || simulation.batch === batch) && simulation.sourceUrl,
+);
 
 if (simulations.length === 0) {
   throw new Error(`没有找到批次 ${batch} 的 PhET 模拟。`);

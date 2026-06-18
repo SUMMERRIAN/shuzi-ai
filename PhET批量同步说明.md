@@ -12,6 +12,17 @@
 
 “波的干涉”同时归入物理和地球科学筛选，但目录和服务器都只保留一份。
 
+## 第二批
+
+- 批次名称：`phase2`
+- 数量：30个目录项目
+- 范围：优先补充小学、初中、高中的力学、电学、热学、光学、数学、化学和生物实验
+- 语言：简体中文HTML5
+- 实测占用：70.95MiB
+
+第二批完成后，目录总数为60个，两批合计约160.95MiB。同步脚本默认使用 `all`，
+会同时维护第一批和第二批。
+
 ## 服务器存储
 
 推荐持久目录：
@@ -49,7 +60,14 @@ cd /var/www/shuzi-ai && git pull origin main && npm install && npm run build && 
 
 ```bash
 cd /var/www/shuzi-ai
-node scripts/phet-sync.mjs --batch phase1 --check
+node scripts/phet-sync.mjs --batch phase2 --check
+```
+
+检查全部批次：
+
+```bash
+cd /var/www/shuzi-ai
+node scripts/phet-sync.mjs --batch all --check
 ```
 
 ## 更新规则

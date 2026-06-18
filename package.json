@@ -7,8 +7,8 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "phet:sync": "node scripts/phet-sync.mjs --batch phase1",
-    "phet:deploy": "node scripts/phet-sync.mjs --batch phase1 --dest /var/www/shuzi-ai-data/phet --link-dist /var/www/shuzi-ai/dist/simulations/phet",
+    "phet:sync": "node scripts/phet-sync.mjs --batch all",
+    "phet:deploy": "node scripts/phet-sync.mjs --batch all --dest /var/www/shuzi-ai-data/phet --link-dist /var/www/shuzi-ai/dist/simulations/phet",
     "server": "node server/index.js",
     "start": "node server/index.js"
   },
