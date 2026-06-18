@@ -15,8 +15,15 @@ function readArg(name, fallback = "") {
 }
 
 const batch = readArg("--batch", "phase1");
-const destination = path.resolve(readArg("--dest", path.join(projectRoot, "public", "simulations", "phet")));
+const destinationValue = readArg("--dest", path.join(projectRoot, "public", "simulations", "phet"));
 const linkDistValue = readArg("--link-dist");
+if (
+  process.platform === "win32" &&
+  ([destinationValue, linkDistValue].some((value) => value.startsWith("/var/")))
+) {
+  throw new Error("服务器部署路径只能在Linux服务器上使用，请在服务器执行 npm run phet:deploy。");
+}
+const destination = path.resolve(destinationValue);
 const linkDist = linkDistValue ? path.resolve(linkDistValue) : "";
 const checkOnly = process.argv.includes("--check");
 const force = process.argv.includes("--force");
@@ -88,8 +95,11 @@ function installDistLink() {
   }
 
   fs.mkdirSync(path.dirname(linkDist), { recursive: true });
-  if (fs.existsSync(linkDist) || fs.lstatSync(path.dirname(linkDist)).isSymbolicLink()) {
+  try {
+    fs.lstatSync(linkDist);
     fs.rmSync(linkDist, { recursive: true, force: true });
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
   }
   fs.symlinkSync(destination, linkDist, process.platform === "win32" ? "junction" : "dir");
   console.log(`[link] ${linkDist} -> ${destination}`);

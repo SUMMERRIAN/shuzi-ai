@@ -422,6 +422,42 @@
   background: #ffffff;
 }
 
+.experiment-load-state {
+  display: grid;
+  min-height: clamp(420px, 62vh, 680px);
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  padding: 32px;
+  border: 1px solid #cfd6d1;
+  border-radius: 8px;
+  background: #fbfbf7;
+  color: #607068;
+  text-align: center;
+}
+
+.experiment-load-state svg {
+  color: #008653;
+}
+
+.experiment-load-state strong {
+  color: #111820;
+  font-size: 19px;
+}
+
+.experiment-load-state span {
+  max-width: 560px;
+  line-height: 1.7;
+}
+
+.experiment-load-state .ghost-action {
+  margin-top: 8px;
+}
+
+.experiment-load-state.is-error {
+  background: #fffaf7;
+}
+
 .experiment-stage:fullscreen {
   width: 100vw;
   height: 100dvh;

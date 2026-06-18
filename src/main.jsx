@@ -5462,6 +5462,7 @@ function PhETLabPage() {
   const directoryPositionRef = useRef({ pageTop: 0, resultsTop: 0 });
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [pageMode, setPageMode] = useState("directory");
+  const [simulationLoadState, setSimulationLoadState] = useState("idle");
   const [searchText, setSearchText] = useState("");
   const [selectedTopics, setSelectedTopics] = useState([]);
   const [selectedStages, setSelectedStages] = useState([]);
@@ -5546,19 +5547,56 @@ function PhETLabPage() {
     }
   }
 
-  function openSimulation(simulationId) {
+  async function verifySimulationAsset(url) {
+    const assetUrl = new URL(url, window.location.origin);
+    assetUrl.search = "";
+    const response = await fetch(assetUrl, {
+      cache: "no-store",
+      headers: { Range: "bytes=0-65535" },
+    });
+    if (!response.ok || !response.body) return false;
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let beginning = "";
+    try {
+      while (beginning.length < 65536) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        beginning += decoder.decode(value, { stream: true });
+        if (beginning.includes("phet.chipper")) return true;
+      }
+      beginning += decoder.decode();
+      return beginning.includes("phet.chipper");
+    } finally {
+      await reader.cancel().catch(() => {});
+    }
+  }
+
+  async function openSimulation(simulationId) {
+    const simulation = phetSimulations.find((item) => item.id === simulationId);
+    if (!simulation) return;
     directoryPositionRef.current = {
       pageTop: window.scrollY,
       resultsTop: directoryResultsRef.current?.scrollTop || 0,
     };
     setActiveSimulationId(simulationId);
     setPageMode("experiment");
+    setSimulationLoadState("checking");
     window.setTimeout(() => window.scrollTo({ top: 0, behavior: "auto" }), 0);
+
+    try {
+      const isValidSimulation = await verifySimulationAsset(simulation.localUrl);
+      setSimulationLoadState(isValidSimulation ? "ready" : "error");
+    } catch {
+      setSimulationLoadState("error");
+    }
   }
 
   async function returnToDirectory() {
     await closeFullscreen();
     setPageMode("directory");
+    setSimulationLoadState("idle");
     window.setTimeout(() => {
       if (directoryResultsRef.current) {
         directoryResultsRef.current.scrollTop = directoryPositionRef.current.resultsTop;
@@ -5760,25 +5798,43 @@ function PhETLabPage() {
             </div>
           </section>
 
-          <div ref={stageRef} className="experiment-stage">
-            <div className="experiment-fullscreen-controls">
-              <button type="button" onClick={returnToDirectory}>
-                <ChevronLeft size={17} />
-                返回实验目录
-              </button>
-              <button type="button" onClick={closeFullscreen}>
-                <Minimize2 size={17} />
-                退出全屏
-              </button>
+          {simulationLoadState === "ready" ? (
+            <div ref={stageRef} className="experiment-stage">
+              <div className="experiment-fullscreen-controls">
+                <button type="button" onClick={returnToDirectory}>
+                  <ChevronLeft size={17} />
+                  返回实验目录
+                </button>
+                <button type="button" onClick={closeFullscreen}>
+                  <Minimize2 size={17} />
+                  退出全屏
+                </button>
+              </div>
+              <iframe
+                src={simulationUrl}
+                title={`PhET ${activeSimulation.title}互动模拟`}
+                allow="fullscreen"
+                allowFullScreen
+                loading="eager"
+              />
             </div>
-            <iframe
-              src={simulationUrl}
-              title={`PhET ${activeSimulation.title}互动模拟`}
-              allow="fullscreen"
-              allowFullScreen
-              loading="eager"
-            />
-          </div>
+          ) : (
+            <div className={`experiment-load-state ${simulationLoadState === "error" ? "is-error" : ""}`}>
+              <FlaskConical size={30} />
+              <strong>{simulationLoadState === "error" ? "实验文件尚未完成云端同步" : "正在加载互动实验"}</strong>
+              <span>
+                {simulationLoadState === "error"
+                  ? "当前实验文件不存在或返回内容异常，请完成 PhET 文件同步后再试。"
+                  : "正在确认实验文件，请稍候。"}
+              </span>
+              {simulationLoadState === "error" && (
+                <button type="button" className="ghost-action" onClick={returnToDirectory}>
+                  <ChevronLeft size={17} />
+                  返回实验目录
+                </button>
+              )}
+            </div>
+          )}
         </>
       )}
 

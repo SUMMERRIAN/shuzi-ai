@@ -33,10 +33,16 @@
 ```bash
 cd /var/www/shuzi-ai
 mkdir -p /var/www/shuzi-ai-data/phet
-node scripts/phet-sync.mjs \
-  --batch phase1 \
-  --dest /var/www/shuzi-ai-data/phet \
-  --link-dist /var/www/shuzi-ai/dist/simulations/phet
+npm run phet:deploy
+```
+
+每次执行 `npm run build` 后都要再次执行 `npm run phet:deploy`。Vite 会重建 `dist`，
+同步命令会恢复静态链接；已有且未更新的实验不会重复下载。
+
+完整服务器更新命令：
+
+```bash
+cd /var/www/shuzi-ai && git pull origin main && npm install && npm run build && mkdir -p /var/www/shuzi-ai-data/phet && npm run phet:deploy && systemctl restart shuzi-ai-api && systemctl reload nginx && systemctl status shuzi-ai-api --no-pager
 ```
 
 ## 检查体积但不保存
