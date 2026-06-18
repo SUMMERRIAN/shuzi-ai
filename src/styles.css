@@ -277,6 +277,9 @@
 .experiment-results {
   display: grid;
   gap: 8px;
+  max-height: 470px;
+  overflow-y: auto;
+  padding-right: 3px;
 }
 
 .experiment-result {
@@ -539,6 +542,10 @@
 
   .experiment-directory-main {
     padding: 16px;
+  }
+
+  .experiment-results {
+    max-height: 430px;
   }
 
   .experiment-result {

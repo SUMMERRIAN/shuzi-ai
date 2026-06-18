@@ -5472,7 +5472,10 @@ function PhETLabPage() {
   const topicCounts = useMemo(() => {
     const counts = {};
     phetSimulations.forEach((simulation) => {
-      counts[simulation.subject] = (counts[simulation.subject] || 0) + 1;
+      const subjects = simulation.subjects || [simulation.subject];
+      subjects.forEach((subject) => {
+        counts[subject] = (counts[subject] || 0) + 1;
+      });
       simulation.topics.forEach((topic) => {
         counts[topic] = (counts[topic] || 0) + 1;
       });
@@ -5489,7 +5492,7 @@ function PhETLabPage() {
         simulation.description.toLocaleLowerCase("zh-CN").includes(keyword);
       const matchesTopic =
         selectedTopics.length === 0 ||
-        selectedTopics.includes(simulation.subject) ||
+        (simulation.subjects || [simulation.subject]).some((subject) => selectedTopics.includes(subject)) ||
         simulation.topics.some((topic) => selectedTopics.includes(topic));
       const matchesStage =
         selectedStages.length === 0 || simulation.stages.some((stage) => selectedStages.includes(stage));

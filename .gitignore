@@ -78,6 +78,9 @@ _membership_plan_source.docx
 ScreenShot_*.png
 LOGO.png
 design-qa.md
+public/simulations/phet/*.html
+!public/simulations/phet/waves-intro.html
+public/simulations/phet/phet-sync-state.json
 
 # Local source materials and private teaching references
 夏雨学习法学习资料/
