@@ -1,4 +1,5 @@
 import { phetPhase3Simulations } from "./phetPhase3Catalog.js";
+import { phetPhase4Simulations } from "./phetPhase4Catalog.js";
 
 export const phetSubjectGroups = [
   {
@@ -831,4 +832,5 @@ export const phetSimulations = [
     available: true,
   },
   ...phetPhase3Simulations,
+  ...phetPhase4Simulations,
 ];
