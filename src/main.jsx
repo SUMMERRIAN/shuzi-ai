@@ -36,6 +36,7 @@ import {
   LogOut,
   Menu,
   Mic,
+  Minimize2,
   MinusCircle,
   Plus,
   Save,
@@ -5457,7 +5458,10 @@ function HomePage() {
 
 function PhETLabPage() {
   const stageRef = useRef(null);
+  const directoryResultsRef = useRef(null);
+  const directoryPositionRef = useRef({ pageTop: 0, resultsTop: 0 });
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [pageMode, setPageMode] = useState("directory");
   const [searchText, setSearchText] = useState("");
   const [selectedTopics, setSelectedTopics] = useState([]);
   const [selectedStages, setSelectedStages] = useState([]);
@@ -5465,7 +5469,7 @@ function PhETLabPage() {
   const [expandedSubjects, setExpandedSubjects] = useState(() =>
     new Set(window.matchMedia("(max-width: 1180px)").matches ? ["physics"] : phetSubjectGroups.map((group) => group.id)),
   );
-  const [activeSimulationId, setActiveSimulationId] = useState(phetSimulations.find((simulation) => simulation.available)?.id || "");
+  const [activeSimulationId, setActiveSimulationId] = useState("");
   const activeSimulation = phetSimulations.find((simulation) => simulation.id === activeSimulationId) || phetSimulations[0];
   const simulationUrl = activeSimulation?.localUrl || "";
 
@@ -5507,26 +5511,60 @@ function PhETLabPage() {
 
   useEffect(() => {
     function handleFullscreenChange() {
-      setIsFullscreen(document.fullscreenElement === stageRef.current);
+      const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement;
+      setIsFullscreen(fullscreenElement === stageRef.current);
     }
     document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
+    };
   }, []);
 
   async function openFullscreen() {
+    const requestFullscreen = stageRef.current?.requestFullscreen || stageRef.current?.webkitRequestFullscreen;
     try {
-      if (stageRef.current?.requestFullscreen) {
-        await stageRef.current.requestFullscreen();
+      if (requestFullscreen) {
+        await requestFullscreen.call(stageRef.current);
         return;
       }
     } catch {
-      // Some embedded or managed browsers block fullscreen; keep the experiment usable.
+      // Some embedded or managed browsers block fullscreen; keep the experiment on this page.
     }
-    window.open(simulationUrl, "_blank", "noopener,noreferrer");
   }
 
   async function closeFullscreen() {
-    if (document.fullscreenElement) await document.exitFullscreen();
+    const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement;
+    const exitFullscreen = document.exitFullscreen || document.webkitExitFullscreen;
+    if (fullscreenElement && exitFullscreen) {
+      try {
+        await exitFullscreen.call(document);
+      } catch {
+        // Keep the experiment usable if the browser refuses to exit programmatically.
+      }
+    }
+  }
+
+  function openSimulation(simulationId) {
+    directoryPositionRef.current = {
+      pageTop: window.scrollY,
+      resultsTop: directoryResultsRef.current?.scrollTop || 0,
+    };
+    setActiveSimulationId(simulationId);
+    setPageMode("experiment");
+    window.setTimeout(() => window.scrollTo({ top: 0, behavior: "auto" }), 0);
+  }
+
+  async function returnToDirectory() {
+    await closeFullscreen();
+    setPageMode("directory");
+    window.setTimeout(() => {
+      if (directoryResultsRef.current) {
+        directoryResultsRef.current.scrollTop = directoryPositionRef.current.resultsTop;
+      }
+      window.scrollTo({ top: directoryPositionRef.current.pageTop, behavior: "auto" });
+    }, 0);
   }
 
   function toggleListValue(value, setter) {
@@ -5561,13 +5599,14 @@ function PhETLabPage() {
       <header className="experiment-lab-header">
         <div>
           <span className="eyebrow">互动实验</span>
-          <h1>PhET实验室</h1>
+          <h1>{pageMode === "experiment" ? activeSimulation.title : "PhET实验室"}</h1>
         </div>
         <div className="experiment-header-mark" aria-hidden="true">
           <FlaskConical size={30} />
         </div>
       </header>
 
+      {pageMode === "directory" ? (
       <section className="experiment-directory" aria-label="PhET实验目录">
         <button
           type="button"
@@ -5669,14 +5708,14 @@ function PhETLabPage() {
             </div>
           </div>
 
-          <div className="experiment-results">
+          <div ref={directoryResultsRef} className="experiment-results">
             {filteredSimulations.length > 0 ? (
               filteredSimulations.map((simulation) => (
                 <button
                   type="button"
-                  className={simulation.id === activeSimulationId ? "experiment-result is-active" : "experiment-result"}
+                  className="experiment-result"
                   key={simulation.id}
-                  onClick={() => setActiveSimulationId(simulation.id)}
+                  onClick={() => openSimulation(simulation.id)}
                   disabled={!simulation.available}
                 >
                   <span className="experiment-result-icon" aria-hidden="true"><FlaskConical size={21} /></span>
@@ -5703,15 +5742,17 @@ function PhETLabPage() {
           </div>
         </div>
       </section>
-
-      {activeSimulation && (
+      ) : (
         <>
-          <section className="experiment-toolbar" aria-label="实验信息和操作">
+          <section className="experiment-toolbar experiment-detail-toolbar" aria-label="实验信息和操作">
             <div>
-              <strong>{activeSimulation.title}</strong>
               <span>{activeSimulation.description}</span>
             </div>
             <div className="experiment-actions">
+              <button type="button" className="ghost-action" onClick={returnToDirectory}>
+                <ChevronLeft size={17} />
+                返回实验目录
+              </button>
               <button type="button" className="primary-action" onClick={isFullscreen ? closeFullscreen : openFullscreen}>
                 <Maximize2 size={17} />
                 {isFullscreen ? "退出全屏" : "全屏实验"}
@@ -5720,6 +5761,16 @@ function PhETLabPage() {
           </section>
 
           <div ref={stageRef} className="experiment-stage">
+            <div className="experiment-fullscreen-controls">
+              <button type="button" onClick={returnToDirectory}>
+                <ChevronLeft size={17} />
+                返回实验目录
+              </button>
+              <button type="button" onClick={closeFullscreen}>
+                <Minimize2 size={17} />
+                退出全屏
+              </button>
+            </div>
             <iframe
               src={simulationUrl}
               title={`PhET ${activeSimulation.title}互动模拟`}
@@ -5735,12 +5786,7 @@ function PhETLabPage() {
         <Info size={18} />
         <p>
           本实验室完全免费开放，无需注册、不收费、不扣积分。模拟由 PhET Interactive Simulations、University of Colorado
-          Boulder 提供，依据 CC BY-NC 4.0 许可使用。查看当前实验的
-          {" "}
-          <a href={activeSimulation?.originalUrl || "https://phet.colorado.edu/zh_CN/simulations"} target="_blank" rel="noreferrer">
-            原始项目
-          </a>
-          。
+          Boulder 提供，依据 CC BY-NC 4.0 许可使用。
         </p>
       </footer>
     </section>

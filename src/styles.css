@@ -384,6 +384,10 @@
   gap: 4px;
 }
 
+.experiment-detail-toolbar > div:first-child {
+  max-width: 760px;
+}
+
 .experiment-toolbar strong {
   color: #111820;
   font-size: 18px;
@@ -401,6 +405,7 @@
 }
 
 .experiment-stage {
+  position: relative;
   overflow: hidden;
   height: clamp(560px, 72vh, 780px);
   border: 1px solid #cfd6d1;
@@ -424,6 +429,47 @@
   border-radius: 0;
 }
 
+.experiment-stage:-webkit-full-screen {
+  width: 100vw;
+  height: 100dvh;
+  border: 0;
+  border-radius: 0;
+}
+
+.experiment-fullscreen-controls {
+  display: none;
+}
+
+.experiment-stage:fullscreen .experiment-fullscreen-controls,
+.experiment-stage:-webkit-full-screen .experiment-fullscreen-controls {
+  position: absolute;
+  z-index: 5;
+  top: max(14px, env(safe-area-inset-top));
+  right: max(14px, env(safe-area-inset-right));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.experiment-stage:fullscreen .experiment-fullscreen-controls button,
+.experiment-stage:-webkit-full-screen .experiment-fullscreen-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: 8px;
+  background: rgba(17, 24, 32, 0.9);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+}
+
 .experiment-attribution {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr);
@@ -442,11 +488,6 @@
   margin: 0;
   font-size: 13px;
   line-height: 1.7;
-}
-
-.experiment-attribution a {
-  color: #087449;
-  font-weight: 650;
 }
 
 @media (max-width: 1180px) {
@@ -523,6 +564,19 @@
   .experiment-stage {
     height: 62vh;
     min-height: 480px;
+  }
+
+  .experiment-stage:fullscreen .experiment-fullscreen-controls,
+  .experiment-stage:-webkit-full-screen .experiment-fullscreen-controls {
+    right: 10px;
+    left: 10px;
+    justify-content: flex-end;
+  }
+
+  .experiment-stage:fullscreen .experiment-fullscreen-controls button,
+  .experiment-stage:-webkit-full-screen .experiment-fullscreen-controls button {
+    min-height: 44px;
+    padding-inline: 12px;
   }
 
   .experiment-filters.is-open {
