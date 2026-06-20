@@ -256,6 +256,9 @@ export async function ensureSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    ALTER TABLE uploaded_files
+      ADD COLUMN IF NOT EXISTS free_ask_conversation_id UUID REFERENCES free_ask_conversations(id) ON DELETE CASCADE;
+
     CREATE TABLE IF NOT EXISTS ai_generation_jobs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -317,6 +320,7 @@ export async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_ai_generation_jobs_user_feature ON ai_generation_jobs(user_id, feature, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_free_ask_conversations_user_last ON free_ask_conversations(user_id, is_archived, last_message_at DESC);
     CREATE INDEX IF NOT EXISTS idx_free_ask_messages_conversation_created ON free_ask_messages(conversation_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_uploaded_files_free_ask_conversation ON uploaded_files(free_ask_conversation_id);
   `);
   await query(`ALTER TABLE ai_generation_jobs ADD COLUMN IF NOT EXISTS provider TEXT`);
   await query(`ALTER TABLE ai_generation_jobs ADD COLUMN IF NOT EXISTS mode TEXT`);

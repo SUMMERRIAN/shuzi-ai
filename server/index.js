@@ -1677,7 +1677,7 @@ async function assertTokenBalance(userId, amount) {
   }
 }
 
-async function saveUploadedFiles(client, user, student, purpose, files) {
+async function saveUploadedFiles(client, user, student, purpose, files, options = {}) {
   const saved = [];
   const incomingBytes = files.reduce((sum, file) => sum + Number(file.size || 0), 0);
   if (incomingBytes > 0) {
@@ -1689,8 +1689,9 @@ async function saveUploadedFiles(client, user, student, purpose, files) {
       [user.id, freeStorageMb]
     );
     const storage = (await client.query("SELECT * FROM storage_quotas WHERE user_id = $1 FOR UPDATE", [user.id])).rows[0];
+    const freeAskDatabaseBytes = await getFreeAskDatabaseBytes(user.id, (text, params) => client.query(text, params));
     const totalBytes = (Number(storage?.base_mb || freeStorageMb) + Number(storage?.expansion_mb || 0)) * 1024 * 1024;
-    const nextUsedBytes = Number(storage?.used_bytes || 0) + incomingBytes;
+    const nextUsedBytes = Number(storage?.used_bytes || 0) + freeAskDatabaseBytes + incomingBytes;
     if (nextUsedBytes > totalBytes) {
       for (const file of files) {
         if (file?.path) fs.promises.unlink(file.path).catch(() => {});
@@ -1701,10 +1702,22 @@ async function saveUploadedFiles(client, user, student, purpose, files) {
   for (const file of files) {
     const stored = toStoredFile(file);
     const result = await client.query(
-      `INSERT INTO uploaded_files (student_id, user_id, purpose, original_name, stored_name, path, mime_type, size_bytes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO uploaded_files (
+         student_id, user_id, purpose, original_name, stored_name, path, mime_type, size_bytes, free_ask_conversation_id
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [student.id, user.id, purpose, stored.originalName, stored.filename, stored.path, stored.mimeType, stored.size]
+      [
+        student.id,
+        user.id,
+        purpose,
+        stored.originalName,
+        stored.filename,
+        stored.path,
+        stored.mimeType,
+        stored.size,
+        options.freeAskConversationId || null,
+      ]
     );
     saved.push(result.rows[0]);
   }
@@ -1933,7 +1946,7 @@ async function buildFreeAskMaterialContext(files = []) {
 }
 
 const freeAskSystemPrompt =
-  "你是树子AI的自由对话助手。用户可能是学生，也可能是家长。你必须先判断用户本轮希望你对文字、图片或文件做什么，再选择回答方式。普通图片、截图和文档默认按内容理解、信息提取或总结来回答；只有用户明确要求讲题、解题、分析作业/试卷/错题时，才按学习题目讲解。保持中文表达，结构清楚，分段自然，便于学生和家长阅读。不要臆造看不清或没有提供的信息；材料不足时请说明需要补充什么。";
+  "你是树子AI的自由对话助手。用户可能是学生，也可能是家长。你必须先判断用户本轮希望你对文字、图片或文件做什么，再选择回答方式。普通图片、截图和文档默认按内容理解、信息提取或总结来回答；只有用户明确要求讲题、解题、分析作业/试卷/错题时，才按学习题目讲解。保持中文表达，结构清楚，分段自然，便于学生和家长阅读。较长回答应使用简短小标题、短段落和必要的列表，避免连续密集的大段文字，也不要堆叠过多层级。不要臆造看不清或没有提供的信息；材料不足时请说明需要补充什么。";
 
 const freeAskMemoryLimits = {
   recentMessages: Number(process.env.FREE_ASK_RECENT_MESSAGES || 12),
@@ -1962,10 +1975,86 @@ function toPublicFreeAskConversation(row) {
     title: row.title || "新的对话",
     memorySummary: row.memory_summary || "",
     messageCount: Number(row.message_count || 0),
+    sizeBytes: Number(row.size_bytes || 0),
+    isArchived: Boolean(row.is_archived),
     lastMessageAt: row.last_message_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+async function getFreeAskDatabaseBytes(userId, execute = query) {
+  const result = await execute(
+    `SELECT
+       COALESCE((SELECT SUM(pg_column_size(c)) FROM free_ask_conversations c WHERE c.user_id = $1), 0)
+       + COALESCE((SELECT SUM(pg_column_size(m)) FROM free_ask_messages m WHERE m.user_id = $1), 0)
+       AS database_bytes`,
+    [userId]
+  );
+  return Number(result.rows[0]?.database_bytes || 0);
+}
+
+async function getFreeAskStorageSummary(userId) {
+  const [databaseBytes, fileResult, account] = await Promise.all([
+    getFreeAskDatabaseBytes(userId),
+    query(
+      `SELECT COALESCE(SUM(size_bytes), 0) AS file_bytes
+       FROM uploaded_files
+       WHERE user_id = $1 AND purpose = 'free_ask'`,
+      [userId]
+    ),
+    buildAccountSnapshot(userId),
+  ]);
+  const fileBytes = Number(fileResult.rows[0]?.file_bytes || 0);
+  const freeAskBytes = databaseBytes + fileBytes;
+  const totalBytes = Number(account.storage?.totalMb || freeStorageMb) * 1024 * 1024;
+  const usedBytes = Number(account.storage?.usedBytes || 0);
+  const percent = Math.min(100, Math.round((usedBytes / Math.max(totalBytes, 1)) * 100));
+  const warningLevel =
+    percent >= 95
+      ? "critical"
+      : percent >= 85
+        ? "high"
+        : percent >= 70 || freeAskBytes >= 1024 * 1024 * 1024
+          ? "notice"
+          : "normal";
+  return {
+    databaseBytes,
+    fileBytes,
+    freeAskBytes,
+    usedBytes,
+    totalBytes,
+    totalMb: Number(account.storage?.totalMb || freeStorageMb),
+    percent,
+    warningLevel,
+  };
+}
+
+async function listFreeAskConversations(userId, archived = false) {
+  const rows = (
+    await query(
+      `SELECT c.*,
+         (
+           pg_column_size(c)::bigint
+           + COALESCE((
+             SELECT SUM(pg_column_size(m))
+             FROM free_ask_messages m
+             WHERE m.conversation_id = c.id
+           ), 0)
+           + COALESCE((
+             SELECT SUM(f.size_bytes)
+             FROM uploaded_files f
+             WHERE f.free_ask_conversation_id = c.id
+           ), 0)
+         ) AS size_bytes
+       FROM free_ask_conversations c
+       WHERE c.user_id = $1 AND c.is_archived = $2
+       ORDER BY c.last_message_at DESC
+       LIMIT 100`,
+      [userId, archived]
+    )
+  ).rows;
+  return rows.map(toPublicFreeAskConversation);
 }
 
 function toPublicFreeAskMessage(row) {
@@ -2333,6 +2422,7 @@ async function buildAccountSnapshot(userId) {
   ).rows[0];
   const wallet = (await query("SELECT * FROM learning_token_wallets WHERE user_id = $1", [userId])).rows[0];
   const storage = (await query("SELECT * FROM storage_quotas WHERE user_id = $1", [userId])).rows[0];
+  const freeAskDatabaseBytes = await getFreeAskDatabaseBytes(userId);
   const isPaid =
     membership?.status === "active" &&
     (!membership.expires_at || new Date(membership.expires_at).getTime() > Date.now());
@@ -2368,7 +2458,7 @@ async function buildAccountSnapshot(userId) {
     storage: {
       baseMb: effectiveBaseMb,
       expansionMb,
-      usedBytes: Number(storage?.used_bytes || 0),
+      usedBytes: Number(storage?.used_bytes || 0) + freeAskDatabaseBytes,
       totalMb: effectiveBaseMb + expansionMb,
     },
   };
@@ -5020,17 +5110,12 @@ app.post("/api/ai/knowledge-note/revise", requireAuth, async (req, res, next) =>
 app.get("/api/ai/free-ask/conversations", requireAuth, async (req, res, next) => {
   try {
     await assertPaidMember(req.user.id);
-    const rows = (
-      await query(
-        `SELECT *
-         FROM free_ask_conversations
-         WHERE user_id = $1 AND is_archived = false
-         ORDER BY last_message_at DESC
-         LIMIT 60`,
-        [req.user.id]
-      )
-    ).rows;
-    res.json({ conversations: rows.map(toPublicFreeAskConversation) });
+    const archived = String(req.query.archived || "").toLowerCase() === "true";
+    const [conversations, storage] = await Promise.all([
+      listFreeAskConversations(req.user.id, archived),
+      getFreeAskStorageSummary(req.user.id),
+    ]);
+    res.json({ conversations, storage });
   } catch (error) {
     next(error);
   }
@@ -5068,6 +5153,21 @@ app.patch("/api/ai/free-ask/conversations/:conversationId", requireAuth, async (
   try {
     await assertPaidMember(req.user.id);
     const { title, archived } = req.body || {};
+    if (archived === true) {
+      const activeJob = (
+        await query(
+          `SELECT id
+           FROM ai_generation_jobs
+           WHERE user_id = $1
+             AND feature = 'free-ask'
+             AND status IN ('queued', 'processing')
+             AND input->>'conversationId' = $2
+           LIMIT 1`,
+          [req.user.id, req.params.conversationId]
+        )
+      ).rows[0];
+      if (activeJob) return res.status(409).json({ error: "CONVERSATION_BUSY", message: "这段对话仍在生成回答，请等待完成后再归档。" });
+    }
     const row = (
       await query(
         `UPDATE free_ask_conversations
@@ -5081,6 +5181,82 @@ app.patch("/api/ai/free-ask/conversations/:conversationId", requireAuth, async (
     ).rows[0];
     if (!row) return res.status(404).json({ error: "CONVERSATION_NOT_FOUND" });
     res.json({ conversation: toPublicFreeAskConversation(row) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/ai/free-ask/conversations/:conversationId", requireAuth, async (req, res, next) => {
+  try {
+    await assertPaidMember(req.user.id);
+    const filesToRemove = [];
+    const deleted = await withTransaction(async (client) => {
+      const conversation = (
+        await client.query(
+          "SELECT id FROM free_ask_conversations WHERE id = $1 AND user_id = $2 FOR UPDATE",
+          [req.params.conversationId, req.user.id]
+        )
+      ).rows[0];
+      if (!conversation) return null;
+      const activeJob = (
+        await client.query(
+          `SELECT id
+           FROM ai_generation_jobs
+           WHERE user_id = $1
+             AND feature = 'free-ask'
+             AND status IN ('queued', 'processing')
+             AND input->>'conversationId' = $2
+           LIMIT 1`,
+          [req.user.id, conversation.id]
+        )
+      ).rows[0];
+      if (activeJob) {
+        throw createHttpError(409, "CONVERSATION_BUSY", "这段对话仍在生成回答，请等待完成后再归档或删除。");
+      }
+
+      const fileRows = (
+        await client.query(
+          `SELECT id, path, size_bytes
+           FROM uploaded_files
+           WHERE user_id = $1 AND free_ask_conversation_id = $2`,
+          [req.user.id, conversation.id]
+        )
+      ).rows;
+      filesToRemove.push(...fileRows);
+      const removedFileBytes = fileRows.reduce((sum, file) => sum + Number(file.size_bytes || 0), 0);
+
+      await client.query(
+        `DELETE FROM student_archive_events
+         WHERE user_id = $1
+           AND event_type = 'free_ask'
+           AND payload->>'conversationId' = $2`,
+        [req.user.id, conversation.id]
+      );
+      await client.query(
+        "DELETE FROM uploaded_files WHERE user_id = $1 AND free_ask_conversation_id = $2",
+        [req.user.id, conversation.id]
+      );
+      if (removedFileBytes > 0) {
+        await client.query(
+          `UPDATE storage_quotas
+           SET used_bytes = GREATEST(0, used_bytes - $2), updated_at = now()
+           WHERE user_id = $1`,
+          [req.user.id, removedFileBytes]
+        );
+      }
+      await client.query(
+        "DELETE FROM free_ask_conversations WHERE id = $1 AND user_id = $2",
+        [conversation.id, req.user.id]
+      );
+      return { id: conversation.id, removedFileBytes };
+    });
+    if (!deleted) return res.status(404).json({ error: "CONVERSATION_NOT_FOUND" });
+
+    await Promise.all(
+      filesToRemove.map((file) => (file.path ? fs.promises.unlink(file.path).catch(() => {}) : Promise.resolve()))
+    );
+    const storage = await getFreeAskStorageSummary(req.user.id);
+    res.json({ deletedConversationId: deleted.id, removedFileBytes: deleted.removedFileBytes, storage });
   } catch (error) {
     next(error);
   }
@@ -5281,16 +5457,31 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
           const eventPayload = { question, answer, provider: responseProvider, mode: responseMode, model, imageProvider: imageBase64 ? normalizedImageProvider : null, imageModel: outputImageModel, hasImage: Boolean(imageBase64) };
           if (files.length) {
             await withTransaction(async (client) => {
-              const fileRows = await saveUploadedFiles(client, req.user, student, "free_ask", files);
+              const fileRows = await saveUploadedFiles(client, req.user, student, "free_ask", files, {
+                freeAskConversationId: conversation.id,
+              });
+              const linkedAttachments = attachmentMeta.map((attachment, index) => ({
+                ...attachment,
+                storedFileId: fileRows[index]?.id || null,
+              }));
+              await client.query("UPDATE free_ask_messages SET attachments = $2 WHERE id = $1", [
+                userMessage.id,
+                JSON.stringify(linkedAttachments),
+              ]);
               await client.query(
                 "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'free_ask', $3, $4)",
-                [student.id, req.user.id, "AI free ask", JSON.stringify({ ...eventPayload, fileIds: fileRows.map((item) => item.id) })]
+                [
+                  student.id,
+                  req.user.id,
+                  "AI free ask",
+                  JSON.stringify({ ...eventPayload, conversationId: conversation.id, fileIds: fileRows.map((item) => item.id) }),
+                ]
               );
             });
           } else {
             await query(
               "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'free_ask', $3, $4)",
-              [student.id, req.user.id, "AI free ask", JSON.stringify(eventPayload)]
+              [student.id, req.user.id, "AI free ask", JSON.stringify({ ...eventPayload, conversationId: conversation.id })]
             );
           }
           await recordAiUsageBilling(req.user.id, {
@@ -5389,16 +5580,31 @@ app.post("/api/ai/free-ask", requireAuth, upload.array("files", 8), async (req, 
     const eventPayload = { question, answer, provider: aiProvider, mode: aiMode, model, imageModel: imageBase64 ? imageModel : null, hasImage: Boolean(imageBase64) };
     if (files.length) {
       await withTransaction(async (client) => {
-        const fileRows = await saveUploadedFiles(client, req.user, student, "free_ask", files);
+        const fileRows = await saveUploadedFiles(client, req.user, student, "free_ask", files, {
+          freeAskConversationId: conversation.id,
+        });
+        const linkedAttachments = attachmentMeta.map((attachment, index) => ({
+          ...attachment,
+          storedFileId: fileRows[index]?.id || null,
+        }));
+        await client.query("UPDATE free_ask_messages SET attachments = $2 WHERE id = $1", [
+          userMessage.id,
+          JSON.stringify(linkedAttachments),
+        ]);
         await client.query(
           "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'free_ask', $3, $4)",
-          [student.id, req.user.id, "AI free ask", JSON.stringify({ ...eventPayload, fileIds: fileRows.map((item) => item.id) })]
+          [
+            student.id,
+            req.user.id,
+            "AI free ask",
+            JSON.stringify({ ...eventPayload, conversationId: conversation.id, fileIds: fileRows.map((item) => item.id) }),
+          ]
         );
       });
     } else {
       await query(
         "INSERT INTO student_archive_events (student_id, user_id, event_type, title, payload) VALUES ($1, $2, 'free_ask', $3, $4)",
-        [student.id, req.user.id, "AI free ask", JSON.stringify(eventPayload)]
+        [student.id, req.user.id, "AI free ask", JSON.stringify({ ...eventPayload, conversationId: conversation.id })]
       );
     }
     await recordAiUsageBilling(req.user.id, {

@@ -1,6 +1,8 @@
 import React, { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  Archive,
+  ArchiveRestore,
   BarChart3,
   BookOpen,
   Brain,
@@ -12,6 +14,7 @@ import {
   ChevronUp,
   ClipboardList,
   Clock3,
+  Copy,
   CreditCard,
   Crown,
   Download,
@@ -38,6 +41,8 @@ import {
   Mic,
   Minimize2,
   MinusCircle,
+  MoreHorizontal,
+  Pencil,
   Plus,
   Save,
   Search,
@@ -2263,6 +2268,8 @@ function App() {
   const [freeAskModelChoice, setFreeAskModelChoice] = useState("auto");
   const [freeAskMessages, setFreeAskMessages] = useState([]);
   const [freeAskConversations, setFreeAskConversations] = useState([]);
+  const [freeAskArchivedConversations, setFreeAskArchivedConversations] = useState([]);
+  const [freeAskStorage, setFreeAskStorage] = useState(null);
   const [activeFreeAskConversationId, setActiveFreeAskConversationId] = useState("");
   const [freeAskSidebarCollapsed, setFreeAskSidebarCollapsed] = useState(false);
   const [calendarEvents, setCalendarEvents] = useState([]);
@@ -3311,6 +3318,11 @@ function App() {
     setAuthToken("");
     setAccountNotice("");
     resetLearningWorkspaceDefaults();
+    setFreeAskMessages([]);
+    setFreeAskConversations([]);
+    setFreeAskArchivedConversations([]);
+    setFreeAskStorage(null);
+    setActiveFreeAskConversationId("");
     setMember({ isLoggedIn: false, isPaid: false, identifier: "", provider: "用户名", plan: "", ltBalance: 0, storageTotalMb: 50 });
   }
 
@@ -4643,14 +4655,94 @@ function App() {
 
   async function loadFreeAskConversations({ selectLatest = false } = {}) {
     try {
-      const data = await apiRequest("/ai/free-ask/conversations");
+      const [data, archivedData] = await Promise.all([
+        apiRequest("/ai/free-ask/conversations"),
+        apiRequest("/ai/free-ask/conversations?archived=true"),
+      ]);
       const conversations = data.conversations || [];
+      const nextStorage = data.storage || archivedData.storage || null;
       setFreeAskConversations(conversations);
+      setFreeAskArchivedConversations(archivedData.conversations || []);
+      setFreeAskStorage(nextStorage);
+      if (nextStorage) setMember((prev) => ({ ...prev, storageUsedBytes: nextStorage.usedBytes }));
       if (selectLatest && conversations.length && !activeFreeAskConversationId) {
         await loadFreeAskConversation(conversations[0].id);
       }
     } catch (error) {
       if (member.isPaid) showAiError(error, "AI自由问历史记录暂时没有加载成功。");
+    }
+  }
+
+  async function selectFreeAskFallback(excludedId = "") {
+    const fallback = freeAskConversations.find((item) => item.id !== excludedId);
+    if (fallback) {
+      await loadFreeAskConversation(fallback.id);
+      return;
+    }
+    setActiveFreeAskConversationId("");
+    setFreeAskMessages([]);
+    setFreeAskInput("");
+    setFreeAskFiles([]);
+  }
+
+  async function renameFreeAskConversation(conversation, title) {
+    const nextTitle = String(title || "").trim();
+    if (!conversation?.id || !nextTitle || nextTitle === conversation.title) return;
+    try {
+      const data = await apiRequest(`/ai/free-ask/conversations/${conversation.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ title: nextTitle }),
+      });
+      const updateList = (items) => items.map((item) => (item.id === conversation.id ? { ...item, ...data.conversation, sizeBytes: item.sizeBytes } : item));
+      setFreeAskConversations(updateList);
+      setFreeAskArchivedConversations(updateList);
+    } catch (error) {
+      showAiError(error, "对话名称没有修改成功，请稍后再试。");
+    }
+  }
+
+  async function archiveFreeAskConversation(conversation) {
+    if (!conversation?.id) return;
+    try {
+      await apiRequest(`/ai/free-ask/conversations/${conversation.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ archived: true }),
+      });
+      setFreeAskConversations((prev) => prev.filter((item) => item.id !== conversation.id));
+      setFreeAskArchivedConversations((prev) => [{ ...conversation, isArchived: true }, ...prev.filter((item) => item.id !== conversation.id)]);
+      if (activeFreeAskConversationId === conversation.id) await selectFreeAskFallback(conversation.id);
+    } catch (error) {
+      showAiError(error, "对话没有归档成功，请稍后再试。");
+    }
+  }
+
+  async function restoreFreeAskConversation(conversation) {
+    if (!conversation?.id) return;
+    try {
+      const data = await apiRequest(`/ai/free-ask/conversations/${conversation.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ archived: false }),
+      });
+      setFreeAskArchivedConversations((prev) => prev.filter((item) => item.id !== conversation.id));
+      upsertFreeAskConversation({ ...conversation, ...data.conversation, sizeBytes: conversation.sizeBytes });
+    } catch (error) {
+      showAiError(error, "对话没有恢复成功，请稍后再试。");
+    }
+  }
+
+  async function deleteFreeAskConversation(conversation) {
+    if (!conversation?.id) return;
+    const confirmed = window.confirm(`确认永久删除“${conversation.title || "新的对话"}”吗？\n\n删除后无法恢复，对话文字和与该对话关联的附件都会从云端移除。`);
+    if (!confirmed) return;
+    try {
+      const data = await apiRequest(`/ai/free-ask/conversations/${conversation.id}`, { method: "DELETE" });
+      setFreeAskConversations((prev) => prev.filter((item) => item.id !== conversation.id));
+      setFreeAskArchivedConversations((prev) => prev.filter((item) => item.id !== conversation.id));
+      setFreeAskStorage(data.storage || null);
+      if (data.storage) setMember((prev) => ({ ...prev, storageUsedBytes: data.storage.usedBytes }));
+      if (activeFreeAskConversationId === conversation.id) await selectFreeAskFallback(conversation.id);
+    } catch (error) {
+      showAiError(error, "对话没有删除成功，请稍后再试。");
     }
   }
 
@@ -4760,6 +4852,7 @@ function App() {
             : message
         )
       );
+      await loadFreeAskConversations();
     } catch (error) {
       showAiError(error, "AI自由问暂时不可用，请稍后再试。");
       setFreeAskMessages((prev) =>
@@ -5210,9 +5303,15 @@ function App() {
             modelChoice={freeAskModelChoice}
             setModelChoice={setFreeAskModelChoice}
             conversations={freeAskConversations}
+            archivedConversations={freeAskArchivedConversations}
+            storage={freeAskStorage}
             activeConversationId={activeFreeAskConversationId}
             loadConversation={loadFreeAskConversation}
             createConversation={createFreeAskConversation}
+            renameConversation={renameFreeAskConversation}
+            archiveConversation={archiveFreeAskConversation}
+            restoreConversation={restoreFreeAskConversation}
+            deleteConversation={deleteFreeAskConversation}
             sidebarCollapsed={freeAskSidebarCollapsed}
             setSidebarCollapsed={setFreeAskSidebarCollapsed}
           />
@@ -10397,10 +10496,37 @@ function normalizeFreeAskDisplayText(value) {
     .replace(/\\text\{([^{}]+)\}/g, "$1")
     .replace(/\\[a-zA-Z]+/g, "")
     .replace(/\{([^{}]+)\}/g, "$1")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/__([^_]+)__/g, "$1")
     .replace(/[ \t]+\n/g, "\n")
     .trim();
+}
+
+function renderFreeAskInlineText(text, keyPrefix = "inline") {
+  const value = String(text || "");
+  const pattern = /(\*\*[^*\n]+\*\*|`[^`\n]+`|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\))/g;
+  const nodes = [];
+  let cursor = 0;
+  let match;
+  let index = 0;
+  while ((match = pattern.exec(value))) {
+    if (match.index > cursor) nodes.push(value.slice(cursor, match.index));
+    const token = match[0];
+    if (token.startsWith("**")) {
+      nodes.push(<strong key={`${keyPrefix}-strong-${index}`}>{token.slice(2, -2)}</strong>);
+    } else if (token.startsWith("`")) {
+      nodes.push(<code key={`${keyPrefix}-code-${index}`}>{token.slice(1, -1)}</code>);
+    } else {
+      const link = token.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/);
+      nodes.push(
+        <a key={`${keyPrefix}-link-${index}`} href={link[2]} target="_blank" rel="noreferrer">
+          {link[1]}
+        </a>
+      );
+    }
+    cursor = match.index + token.length;
+    index += 1;
+  }
+  if (cursor < value.length) nodes.push(value.slice(cursor));
+  return nodes.length ? nodes : value;
 }
 
 function FreeAskText({ content = "" }) {
@@ -10408,6 +10534,9 @@ function FreeAskText({ content = "" }) {
   const blocks = [];
   let paragraph = [];
   let list = [];
+  let listType = "unordered";
+  let code = [];
+  let inCode = false;
 
   const flushParagraph = () => {
     if (!paragraph.length) return;
@@ -10416,43 +10545,88 @@ function FreeAskText({ content = "" }) {
   };
   const flushList = () => {
     if (!list.length) return;
-    blocks.push({ type: "list", items: list });
+    blocks.push({ type: "list", listType, items: list });
     list = [];
   };
+  const flushCode = () => {
+    if (!code.length) return;
+    blocks.push({ type: "code", text: code.join("\n") });
+    code = [];
+  };
 
-  lines.forEach((rawLine) => {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const rawLine = lines[lineIndex];
     const line = rawLine.trim();
+    if (line.startsWith("```")) {
+      flushParagraph();
+      flushList();
+      if (inCode) flushCode();
+      inCode = !inCode;
+      continue;
+    }
+    if (inCode) {
+      code.push(rawLine);
+      continue;
+    }
     if (!line) {
       flushParagraph();
       flushList();
-      return;
+      continue;
+    }
+    if (
+      line.includes("|")
+      && lines[lineIndex + 1]?.trim().match(/^\|?\s*:?-{3,}/)
+    ) {
+      flushParagraph();
+      flushList();
+      const tableLines = [line];
+      lineIndex += 2;
+      while (lineIndex < lines.length && lines[lineIndex].includes("|") && lines[lineIndex].trim()) {
+        tableLines.push(lines[lineIndex].trim());
+        lineIndex += 1;
+      }
+      lineIndex -= 1;
+      const rows = tableLines.map((tableLine) => tableLine.replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim()));
+      blocks.push({ type: "table", headers: rows[0] || [], rows: rows.slice(1) });
+      continue;
+    }
+    if (line.startsWith(">")) {
+      flushParagraph();
+      flushList();
+      blocks.push({ type: "quote", text: line.replace(/^>\s?/, "") });
+      continue;
     }
     const heading = line.match(/^(#{1,4})\s+(.+)$/);
     if (heading) {
       flushParagraph();
       flushList();
       blocks.push({ type: "heading", level: Math.min(heading[1].length, 3), text: heading[2].trim() });
-      return;
+      continue;
     }
     const numberedHeading = line.match(/^([\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341]+[\u3001.\uff0e]|\(?\d+\)?[\u3001.\uff0e])\s*(.{2,})$/);
-    if (numberedHeading && numberedHeading[2].length <= 34) {
+    const nextLineContinuesNumberedList = /^\d+[.?)]\s+/.test(lines[lineIndex + 1]?.trim() || "");
+    if (numberedHeading && numberedHeading[2].length <= 34 && !nextLineContinuesNumberedList) {
       flushParagraph();
       flushList();
       blocks.push({ type: "heading", level: 3, text: line });
-      return;
+      continue;
     }
     const ordered = line.match(/^\d+[.?)]\s+(.+)$/);
     const unordered = line.match(/^[-*\u2022]\s+(.+)$/);
     if (ordered || unordered) {
       flushParagraph();
+      const nextListType = ordered ? "ordered" : "unordered";
+      if (list.length && listType !== nextListType) flushList();
+      listType = nextListType;
       list.push((ordered?.[1] || unordered?.[1] || "").trim());
-      return;
+      continue;
     }
     flushList();
     paragraph.push(line);
-  });
+  }
   flushParagraph();
   flushList();
+  flushCode();
 
   if (!blocks.length) return null;
   return (
@@ -10460,18 +10634,35 @@ function FreeAskText({ content = "" }) {
       {blocks.map((block, index) => {
         if (block.type === "heading") {
           const Tag = block.level <= 1 ? "h3" : block.level === 2 ? "h4" : "h5";
-          return <Tag key={index}>{block.text}</Tag>;
+          return <Tag key={index}>{renderFreeAskInlineText(block.text, `heading-${index}`)}</Tag>;
         }
         if (block.type === "list") {
+          const ListTag = block.listType === "ordered" ? "ol" : "ul";
           return (
-            <ul key={index}>
+            <ListTag key={index}>
               {block.items.map((item, itemIndex) => (
-                <li key={itemIndex}>{item}</li>
+                <li key={itemIndex}>{renderFreeAskInlineText(item, `list-${index}-${itemIndex}`)}</li>
               ))}
-            </ul>
+            </ListTag>
           );
         }
-        return <p key={index}>{block.text}</p>;
+        if (block.type === "quote") return <blockquote key={index}>{renderFreeAskInlineText(block.text, `quote-${index}`)}</blockquote>;
+        if (block.type === "code") return <pre key={index}><code>{block.text}</code></pre>;
+        if (block.type === "table") {
+          return (
+            <div className="free-table-wrap" key={index}>
+              <table>
+                <thead><tr>{block.headers.map((cell, cellIndex) => <th key={cellIndex}>{renderFreeAskInlineText(cell, `th-${index}-${cellIndex}`)}</th>)}</tr></thead>
+                <tbody>
+                  {block.rows.map((row, rowIndex) => (
+                    <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{renderFreeAskInlineText(cell, `td-${index}-${rowIndex}-${cellIndex}`)}</td>)}</tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        }
+        return <p key={index}>{renderFreeAskInlineText(block.text, `paragraph-${index}`)}</p>;
       })}
     </div>
   );
@@ -10489,9 +10680,15 @@ function FreeAskPage({
   modelChoice,
   setModelChoice,
   conversations = [],
+  archivedConversations = [],
+  storage = null,
   activeConversationId = "",
   loadConversation,
   createConversation,
+  renameConversation,
+  archiveConversation,
+  restoreConversation,
+  deleteConversation,
   sidebarCollapsed,
   setSidebarCollapsed,
 }) {
@@ -10521,10 +10718,65 @@ function FreeAskPage({
     return date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
   };
   const canSend = status !== "loading" && (input.trim() || files.length > 0);
-  const pageClassName = sidebarCollapsed ? "free-ask-page is-conversation-collapsed" : "free-ask-page";
+  const pageClassName = `${sidebarCollapsed ? "free-ask-page is-conversation-collapsed" : "free-ask-page"}${messages.length ? " has-messages" : ""}`;
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [conversationSort, setConversationSort] = useState("recent");
+  const [conversationMenu, setConversationMenu] = useState(null);
+  const [renamingConversation, setRenamingConversation] = useState(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [copiedMessageId, setCopiedMessageId] = useState("");
   const modelMenuRef = useRef(null);
+  const conversationMenuRef = useRef(null);
+  const threadRef = useRef(null);
+  const stayNearBottomRef = useRef(true);
   const selectedModel = freeAskModelOptions.find((option) => option.value === modelChoice) || freeAskModelOptions[0];
+  const visibleConversations = [...(showArchived ? archivedConversations : conversations)].sort((a, b) => {
+    if (conversationSort === "size") return Number(b.sizeBytes || 0) - Number(a.sizeBytes || 0);
+    return new Date(b.lastMessageAt || b.updatedAt || 0) - new Date(a.lastMessageAt || a.updatedAt || 0);
+  });
+  const lastMessage = messages[messages.length - 1];
+  const lastMessageSignature = `${activeConversationId}:${lastMessage?.id || ""}:${lastMessage?.content?.length || 0}`;
+
+  const openConversationMenu = (event, conversation) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = event.currentTarget?.getBoundingClientRect?.();
+    const requestedX = event.clientX || rect?.right || 0;
+    const requestedY = event.clientY || rect?.bottom || 0;
+    setConversationMenu({
+      conversation,
+      x: Math.max(8, Math.min(requestedX, window.innerWidth - 190)),
+      y: Math.max(8, Math.min(requestedY, window.innerHeight - 190)),
+    });
+  };
+
+  const runConversationAction = (action) => {
+    const conversation = conversationMenu?.conversation;
+    setConversationMenu(null);
+    if (!conversation) return;
+    if (status === "loading" && conversation.id === activeConversationId && ["archive", "delete"].includes(action)) return;
+    if (action === "rename") {
+      setRenamingConversation(conversation);
+      setRenameDraft(conversation.title || "新的对话");
+    } else if (action === "archive") {
+      archiveConversation?.(conversation);
+    } else if (action === "restore") {
+      restoreConversation?.(conversation);
+    } else if (action === "delete") {
+      deleteConversation?.(conversation);
+    }
+  };
+
+  const copyMessage = async (message) => {
+    try {
+      await navigator.clipboard.writeText(message.content || "");
+      setCopiedMessageId(message.id);
+      window.setTimeout(() => setCopiedMessageId((current) => (current === message.id ? "" : current)), 1800);
+    } catch {
+      setCopiedMessageId("");
+    }
+  };
 
   useEffect(() => {
     if (!modelMenuOpen) return undefined;
@@ -10544,47 +10796,192 @@ function FreeAskPage({
     };
   }, [modelMenuOpen]);
 
+  useEffect(() => {
+    if (!conversationMenu) return undefined;
+    const closeMenu = (event) => {
+      if (conversationMenuRef.current && conversationMenuRef.current.contains(event.target)) return;
+      setConversationMenu(null);
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setConversationMenu(null);
+    };
+    document.addEventListener("pointerdown", closeMenu);
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeMenu);
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+    };
+  }, [conversationMenu]);
+
+  useEffect(() => {
+    stayNearBottomRef.current = true;
+    window.requestAnimationFrame(() => {
+      if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight;
+    });
+  }, [activeConversationId]);
+
+  useEffect(() => {
+    if (!stayNearBottomRef.current) return;
+    window.requestAnimationFrame(() => {
+      if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight;
+    });
+  }, [lastMessageSignature]);
+
   return (
     <section className={pageClassName}>
       <aside className={sidebarCollapsed ? "free-conversation-sidebar is-collapsed" : "free-conversation-sidebar"} aria-label={text.history}>
         <div className="free-conversation-header">
-          {!sidebarCollapsed && <strong>{text.history}</strong>}
+          {!sidebarCollapsed && <strong>{showArchived ? "已归档对话" : text.history}</strong>}
           <button type="button" className="free-collapse-button" onClick={() => setSidebarCollapsed?.((prev) => !prev)} aria-label={sidebarCollapsed ? text.expand : text.collapse}>
             {sidebarCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
           </button>
         </div>
-        <button type="button" className="free-new-conversation" onClick={createConversation} title={text.newChat}>
+        <button type="button" className="free-new-conversation" onClick={() => { setShowArchived(false); createConversation?.(); }} title={text.newChat}>
           <Plus size={17} />
           {!sidebarCollapsed && <span>{text.newChat}</span>}
         </button>
         {!sidebarCollapsed && (
-          <div className="free-conversation-list">
-            {conversations.length ? (
-              conversations.map((conversation) => (
-                <button
-                  type="button"
-                  key={conversation.id}
-                  className={conversation.id === activeConversationId ? "free-conversation-item is-active" : "free-conversation-item"}
-                  onClick={() => loadConversation?.(conversation.id)}
-                >
-                  <span>{conversation.title || "\u65b0\u7684\u5bf9\u8bdd"}</span>
-                  <em>{formatConversationTime(conversation.lastMessageAt || conversation.updatedAt)}</em>
-                </button>
-              ))
-            ) : (
-              <p className="free-conversation-empty">{text.emptyHistory}</p>
+          <>
+            <div className="free-conversation-view-switch" aria-label="对话列表类型">
+              <button type="button" className={!showArchived ? "is-active" : ""} onClick={() => setShowArchived(false)}>
+                对话
+                <span>{conversations.length}</span>
+              </button>
+              <button type="button" className={showArchived ? "is-active" : ""} onClick={() => setShowArchived(true)}>
+                归档
+                <span>{archivedConversations.length}</span>
+              </button>
+            </div>
+            <label className="free-conversation-sort">
+              <span>排序</span>
+              <select value={conversationSort} onChange={(event) => setConversationSort(event.target.value)}>
+                <option value="recent">最近使用</option>
+                <option value="size">占用最大</option>
+              </select>
+            </label>
+            <div className="free-conversation-list">
+              {visibleConversations.length ? (
+                visibleConversations.map((conversation) => (
+                  <div className="free-conversation-row" key={conversation.id} onContextMenu={(event) => openConversationMenu(event, conversation)}>
+                    {renamingConversation?.id === conversation.id ? (
+                      <form
+                        className="free-conversation-rename"
+                        onSubmit={async (event) => {
+                          event.preventDefault();
+                          if (!renameDraft.trim()) return;
+                          await renameConversation?.(conversation, renameDraft);
+                          setRenamingConversation(null);
+                        }}
+                      >
+                        <input value={renameDraft} onChange={(event) => setRenameDraft(event.target.value)} autoFocus maxLength={40} aria-label="新的对话名称" />
+                        <button type="submit" aria-label="保存对话名称"><CheckCircle2 size={15} /></button>
+                        <button type="button" onClick={() => setRenamingConversation(null)} aria-label="取消重命名"><X size={15} /></button>
+                      </form>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className={conversation.id === activeConversationId ? "free-conversation-item is-active" : "free-conversation-item"}
+                          onClick={() => {
+                            if (!showArchived) loadConversation?.(conversation.id);
+                          }}
+                          title={showArchived ? "请先恢复这段对话，再继续查看和提问" : conversation.title}
+                        >
+                          <span>{conversation.title || "\u65b0\u7684\u5bf9\u8bdd"}</span>
+                          <span className="free-conversation-meta">
+                            <em>{formatConversationTime(conversation.lastMessageAt || conversation.updatedAt)}</em>
+                            {conversation.sizeBytes > 0 && <em>{formatFileSize(conversation.sizeBytes)}</em>}
+                          </span>
+                        </button>
+                        <button type="button" className="free-conversation-more" onClick={(event) => openConversationMenu(event, conversation)} aria-label={`管理对话：${conversation.title || "新的对话"}`}>
+                          <MoreHorizontal size={17} />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <p className="free-conversation-empty">{showArchived ? "暂时没有归档对话。" : text.emptyHistory}</p>
+              )}
+            </div>
+            {storage && (
+              <div className={`free-storage-summary is-${storage.warningLevel || "normal"}`}>
+                <div>
+                  <HardDrive size={15} />
+                  <strong>AI自由问 {formatFileSize(storage.freeAskBytes || 0)}</strong>
+                </div>
+                <span>账户已用 {formatFileSize(storage.usedBytes || 0)} / {formatFileSize(storage.totalBytes || 0)}</span>
+                <div className="free-storage-bar" aria-label={`存储已使用${storage.percent || 0}%`}>
+                  <span style={{ width: `${Math.min(100, storage.percent || 0)}%` }} />
+                </div>
+                {storage.warningLevel !== "normal" && (
+                  <p>{storage.warningLevel === "critical" ? "空间即将用满，请删除不再需要的旧对话或附件。" : "存储使用较多，可以整理较早或占用较大的对话。"}</p>
+                )}
+              </div>
             )}
-          </div>
+          </>
         )}
       </aside>
 
+      {conversationMenu && (
+        <div
+          className="free-conversation-menu"
+          ref={conversationMenuRef}
+          role="menu"
+          style={{ left: conversationMenu.x, top: conversationMenu.y }}
+        >
+          <button type="button" role="menuitem" onClick={() => runConversationAction("rename")}>
+            <Pencil size={16} />
+            重命名
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={status === "loading" && conversationMenu.conversation.id === activeConversationId}
+            onClick={() => runConversationAction(conversationMenu.conversation.isArchived ? "restore" : "archive")}
+          >
+            {conversationMenu.conversation.isArchived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
+            {conversationMenu.conversation.isArchived ? "恢复对话" : "归档对话"}
+          </button>
+          <button
+            type="button"
+            className="is-danger"
+            role="menuitem"
+            disabled={status === "loading" && conversationMenu.conversation.id === activeConversationId}
+            onClick={() => runConversationAction("delete")}
+          >
+            <Trash2 size={16} />
+            永久删除
+          </button>
+        </div>
+      )}
+
       <div className="free-ask-center">
         <h2>{text.title}</h2>
-        <div className="free-ask-thread">
+        <div
+          className="free-ask-thread"
+          ref={threadRef}
+          onScroll={(event) => {
+            const element = event.currentTarget;
+            stayNearBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 120;
+          }}
+        >
           {messages.length ? (
             messages.map((message) => (
               <article key={message.id} className={message.role === "user" ? "free-message is-user" : "free-message"}>
-                <strong>{message.role === "user" ? text.user : text.assistant}</strong>
+                <div className="free-message-head">
+                  <strong>{message.role === "user" ? text.user : text.assistant}</strong>
+                  {message.role !== "user" && message.content && (
+                    <button type="button" onClick={() => copyMessage(message)} aria-label="复制这条回答">
+                      {copiedMessageId === message.id ? <CheckCircle2 size={15} /> : <Copy size={15} />}
+                      <span>{copiedMessageId === message.id ? "已复制" : "复制"}</span>
+                    </button>
+                  )}
+                </div>
                 <FreeAskText content={message.content} />
                 {message.attachments?.length > 0 && (
                   <div className="free-message-attachments">
