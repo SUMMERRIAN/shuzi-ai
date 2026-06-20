@@ -71,6 +71,7 @@ coverage/
 
 # Codex and local review artifacts
 .codex-temp/
+/使用说明/
 _doc_review_second/
 _doc_review_second_source.docx
 _membership_plan_doc/

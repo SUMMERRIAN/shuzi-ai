@@ -66,6 +66,7 @@ import { apiRequest, getAuthToken, mapAccountToMember, setAuthToken } from "./ap
 import { expertArticles } from "./expertArticles.js";
 import { storagePlans } from "./membershipConfig.js";
 import { phetSchoolStages, phetSimulations, phetSubjectGroups } from "./phetCatalog.js";
+import { usageGuideSections } from "./usageGuideContent.js";
 import "./styles.css";
 
 const featureFlags = {
@@ -2294,7 +2295,14 @@ function App() {
   const memberPlans = billingConfig.memberPlans.length ? billingConfig.memberPlans : defaultMemberPlans;
   const tokenPackages = billingConfig.tokenPackages.length ? billingConfig.tokenPackages : defaultTokenPackages;
   const activeAiJobs = aiJobs.filter((job) => ["queued", "processing"].includes(job.status));
-  const activeNavLabel = visibleSubPages.find((page) => page.id === activePage)?.label || "树子AI";
+  const activeNavLabel =
+    activePage === "usageGuide"
+      ? "使用说明"
+      : activePage === "memberCenter"
+        ? "会员中心"
+        : activePage === "admin"
+          ? "管理员中心"
+          : visibleSubPages.find((page) => page.id === activePage)?.label || "树子AI";
   const selfLearningPages = visibleSubPages.filter((page) => selfLearningPageIds.includes(page.id));
   const standalonePages = visibleSubPages.filter((page) => page.id !== "home" && !selfLearningPageIds.includes(page.id));
   const selfLearningActive = selfLearningPageIds.includes(activePage);
@@ -4867,6 +4875,14 @@ function App() {
             </button>
           )}
         </div>
+        <button
+          type="button"
+          className={activePage === "usageGuide" ? "usage-guide-sidebar-button is-active" : "usage-guide-sidebar-button"}
+          onClick={() => setActivePage("usageGuide")}
+        >
+          <BookOpen size={17} />
+          使用说明
+        </button>
         <button type="button" className="admin-sidebar-button" onClick={() => setActivePage("admin")}>
           <LockKeyhole size={16} />
           管理员中心
@@ -5214,6 +5230,8 @@ function App() {
           />
         )}
 
+        {activePage === "usageGuide" && <UsageGuidePage />}
+
         {activePage === "admin" && (
           <AdminPanelPage
             state={adminPanel}
@@ -5248,6 +5266,96 @@ function App() {
       )}
     </div>
     </>
+  );
+}
+
+function UsageGuidePage() {
+  const [preview, setPreview] = useState(null);
+
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key === "Escape") setPreview(null);
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  return (
+    <section className="stack usage-guide-page">
+      <header className="usage-guide-header">
+        <div>
+          <span className="eyebrow">使用说明</span>
+          <h1>按照学习流程使用树子AI</h1>
+          <p>先了解学情，再形成任务和计划；错题、知识笔记、实验与自由问用于持续练习和补充理解。</p>
+        </div>
+        <div className="usage-guide-header-icon" aria-hidden="true">
+          <BookOpen size={30} />
+        </div>
+      </header>
+
+      <section className="usage-guide-priority" aria-label="使用重点">
+        <strong>建议使用顺序</strong>
+        <div>
+          {["填写资料", "形成画像", "制定任务", "安排计划", "持续练习"].map((label, index) => (
+            <span key={label}>
+              <b>{index + 1}</b>
+              {label}
+            </span>
+          ))}
+        </div>
+        <p>图片中的红色文字是原始操作重点；每张图下方还整理了最需要注意的步骤。</p>
+      </section>
+
+      <nav className="usage-guide-nav" aria-label="使用说明章节">
+        {usageGuideSections.map((section) => (
+          <a key={section.id} href={`#guide-${section.id}`}>{section.label}</a>
+        ))}
+      </nav>
+
+      {usageGuideSections.map((section) => (
+        <section className="usage-guide-section" id={`guide-${section.id}`} key={section.id}>
+          <div className="usage-guide-section-heading">
+            <span>{section.label}</span>
+            <p>{section.intro}</p>
+          </div>
+          <div className="usage-guide-list">
+            {section.items.map((item) => (
+              <article className="usage-guide-card" key={item.title}>
+                <div className="usage-guide-card-copy">
+                  <h2>{item.title}</h2>
+                  <p>{item.summary}</p>
+                  <div className="usage-guide-emphasis">
+                    <strong>重点</strong>
+                    <span>{item.emphasis}</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="usage-guide-image-button"
+                  onClick={() => setPreview(item)}
+                  aria-label={`放大查看${item.title}`}
+                >
+                  <img src={item.image} alt={`${item.title}操作示意图`} loading="lazy" />
+                  <span><Maximize2 size={16} /> 点击放大查看</span>
+                </button>
+              </article>
+            ))}
+          </div>
+        </section>
+      ))}
+
+      {preview && (
+        <div className="usage-guide-preview" role="dialog" aria-modal="true" aria-label={preview.title} onClick={() => setPreview(null)}>
+          <div className="usage-guide-preview-panel" onClick={(event) => event.stopPropagation()}>
+            <div>
+              <strong>{preview.title}</strong>
+              <button type="button" onClick={() => setPreview(null)} aria-label="关闭图片预览"><X size={20} /></button>
+            </div>
+            <img src={preview.image} alt={`${preview.title}放大图`} />
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
